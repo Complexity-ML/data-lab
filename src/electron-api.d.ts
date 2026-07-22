@@ -1,5 +1,5 @@
 import type { SchemaField } from './domain/pipeline'
-import type { AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
+import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -51,6 +51,7 @@ declare global {
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>
       testAiConnection(): Promise<AiStatus & { availableModels: string[] }>
+      refreshAiModelCatalog(provider: import('./domain/ai').ApiProvider): Promise<AiStatus>
       runAiProposal(payload: unknown): Promise<AiProposalResponse>
       cancelAiProposal(): Promise<{ cancelled: boolean }>
       getChatGPTStatus(): Promise<ChatGPTSessionStatus>
@@ -61,6 +62,8 @@ declare global {
       cancelChatGPTProposal(): Promise<{ cancelled: boolean }>
       loadWorkspace(): Promise<{ projectTitle?: string; nodes?: import('./domain/pipeline').PipelineNode[]; edges?: import('@xyflow/react').Edge[]; versions?: import('./domain/versioning').PipelineVersion[] } | null>
       saveWorkspace(payload: { projectTitle: string; nodes: import('./domain/pipeline').PipelineNode[]; edges: import('@xyflow/react').Edge[]; versions: import('./domain/versioning').PipelineVersion[] }): Promise<{ saved: true }>
+      getActiveAiSource(): Promise<{ source: ActiveAiSource }>
+      setActiveAiSource(source: ActiveAiSource): Promise<{ source: ActiveAiSource }>
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>
       onWindowStateChanged(callback: (state: { fullscreen: boolean }) => void): () => void

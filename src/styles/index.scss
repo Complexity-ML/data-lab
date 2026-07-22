@@ -141,8 +141,10 @@ button { color: inherit; }
 .chatgpt-account-status strong { color: var(--text); font-size: 10px; }
 .chatgpt-account-status small { color: var(--muted); font-size: 8px; }
 .model-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.active-source-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .model-grid button { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; cursor: pointer; }
 .model-grid button:hover, .model-grid button.is-active { color: var(--accent); border-color: #818cf8; box-shadow: 0 0 0 3px rgb(99 102 241 / 9%); }
+.model-grid button:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
 .model-grid strong { color: var(--text); font-size: 11px; }
 .model-grid small { font-size: 8px; }
 .model-grid code { overflow: hidden; color: var(--faint); font-size: 7px; text-overflow: ellipsis; }

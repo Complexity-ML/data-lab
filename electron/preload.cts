@@ -11,6 +11,7 @@ const windowStateChangedChannel = 'data-lab:window-state-changed'
 const aiStatusChannel = 'data-lab:ai-status'
 const aiSaveChannel = 'data-lab:ai-save'
 const aiTestChannel = 'data-lab:ai-test'
+const aiCatalogRefreshChannel = 'data-lab:ai-catalog-refresh'
 const aiProposalChannel = 'data-lab:ai-proposal'
 const aiCancelChannel = 'data-lab:ai-cancel'
 const humanReviewOpenedChannel = 'data-lab:human-review-opened'
@@ -22,6 +23,8 @@ const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
 const chatGPTCancelChannel = 'data-lab:chatgpt-cancel'
 const workspaceLoadChannel = 'data-lab:workspace-load'
 const workspaceSaveChannel = 'data-lab:workspace-save'
+const activeAiSourceChannel = 'data-lab:active-ai-source'
+const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 
 contextBridge.exposeInMainWorld('dataLab', {
   runtime: 'electron',
@@ -35,6 +38,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),
   saveAiSettings: (payload: unknown) => ipcRenderer.invoke(aiSaveChannel, payload),
   testAiConnection: () => ipcRenderer.invoke(aiTestChannel),
+  refreshAiModelCatalog: (provider: 'openai' | 'anthropic' | 'moonshot') => ipcRenderer.invoke(aiCatalogRefreshChannel, { provider }),
   runAiProposal: (payload: unknown) => ipcRenderer.invoke(aiProposalChannel, payload),
   cancelAiProposal: () => ipcRenderer.invoke(aiCancelChannel),
   getChatGPTStatus: () => ipcRenderer.invoke(chatGPTStatusChannel),
@@ -45,6 +49,8 @@ contextBridge.exposeInMainWorld('dataLab', {
   cancelChatGPTProposal: () => ipcRenderer.invoke(chatGPTCancelChannel),
   loadWorkspace: () => ipcRenderer.invoke(workspaceLoadChannel),
   saveWorkspace: (payload: unknown) => ipcRenderer.invoke(workspaceSaveChannel, payload),
+  getActiveAiSource: () => ipcRenderer.invoke(activeAiSourceChannel),
+  setActiveAiSource: (source: 'chatgpt' | 'openai' | 'anthropic' | 'moonshot') => ipcRenderer.invoke(activeAiSourceSaveChannel, { source }),
   onHumanReviewOpened: (callback: (payload: { versionId?: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { versionId?: string } = {}) => callback(payload)
     ipcRenderer.on(humanReviewOpenedChannel, listener)

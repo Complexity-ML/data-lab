@@ -1,30 +1,20 @@
-import { addEdge, Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, useEdgesState, useNodesState, type Connection, type EdgeTypes, type NodeTypes } from '@xyflow/react'
-import { Boxes, PanelLeftOpen, PanelRightOpen, Pencil, Settings, Sparkles, Trash2 } from 'lucide-react'
+import { addEdge, useEdgesState, useNodesState, type Connection } from '@xyflow/react'
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { PipelineCard } from './components/PipelineCard'
+import { AppFooter } from './components/AppFooter'
+import { AppHeader } from './components/AppHeader'
 import { ReviewPanel } from './components/ReviewPanel'
-import { ActionButton } from './components/shared/ActionButton'
-import { AgentPrompt } from './components/shared/AgentPrompt'
-import { ElasticEdge } from './components/shared/ElasticEdge'
 import { SettingsModal } from './components/shared/SettingsModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
-import { compactGraph, materializeAiProposal, type AiSettings, type AiStatus, type ChatGPTSessionStatus } from './domain/ai'
+import { materializeAiProposal } from './domain/ai'
+import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
 import { layoutPipeline } from './domain/layout'
 import { applyProposal, cardLabels, initialEdges, initialNodes, loadPipelinePreset, newCard, type AgentProposal, type CardKind, type PipelineNode, type PipelinePresetId } from './domain/pipeline'
 import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from './domain/versioning'
 import { validatePipeline } from './validation'
+import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
-
-const nodeTypes: NodeTypes = { pipeline: PipelineCard }
-const edgeTypes: EdgeTypes = { elastic: ElasticEdge }
-const miniMapColors: Record<CardKind, string> = {
-  source: '#bfdbfe', analysis: '#c7d2fe', split: '#ddd6fe', decision: '#e9d5ff',
-  transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
-}
-const defaultAiStatus: AiStatus = { connected: false, credentialSource: 'none', selectedProvider: 'openai', providers: { openai: { connected: false, credentialSource: 'none', model: 'gpt-5.6-terra' }, anthropic: { connected: false, credentialSource: 'none', model: 'claude-opus-4-8' }, moonshot: { connected: false, credentialSource: 'none', model: 'kimi-k3' } }, encryptionAvailable: false, settings: { provider: 'openai', model: 'gpt-5.6-terra', reasoningEffort: 'medium', verbosity: 'low', serviceTier: 'auto' } }
-const defaultChatGPTStatus: ChatGPTSessionStatus = { available: true, connected: false }
-
+import { PipelineCanvasView } from './views/PipelineCanvasView'
 export default function App() {
   const platformClass = window.dataLab?.platform ? `platform-${window.dataLab.platform}` : 'platform-web'
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineNode>(initialNodes)
@@ -38,8 +28,6 @@ export default function App() {
   const [mcpTransport, setMcpTransport] = useState<'demo' | 'http' | 'stdio'>('demo')
   const [mcpMessage, setMcpMessage] = useState('Local demo context')
   const [agentRunning, setAgentRunning] = useState(false)
-  const [aiStatus, setAiStatus] = useState<AiStatus>(defaultAiStatus)
-  const [chatGPTStatus, setChatGPTStatus] = useState<ChatGPTSessionStatus>(defaultChatGPTStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [libraryOpen, setLibraryOpen] = useState(true)
@@ -48,6 +36,7 @@ export default function App() {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
+  const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const flowInstance = useRef<{ screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -75,8 +64,6 @@ export default function App() {
 
   useEffect(() => {
     if (!window.dataLab) return
-    void window.dataLab.getAiStatus().then(setAiStatus).catch(() => undefined)
-    void window.dataLab.getChatGPTStatus().then(setChatGPTStatus).catch(() => undefined)
     void window.dataLab.loadWorkspace().then((saved) => {
       if (!saved || !Array.isArray(saved.nodes) || !Array.isArray(saved.edges) || saved.nodes.length === 0) return
       setNodes(saved.nodes)
@@ -155,13 +142,12 @@ export default function App() {
       setActivity('AI provider unavailable in web preview · launch the Electron application')
       return
     }
-    const [currentAiStatus, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => defaultAiStatus), window.dataLab.getChatGPTStatus().catch(() => defaultChatGPTStatus)])
-    setAiStatus(currentAiStatus)
-    setChatGPTStatus(currentChatGPT)
-    if (!currentAiStatus.connected && !currentChatGPT.connected) {
+    const [currentAiStatus, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => disconnectedAiStatus), window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)])
+    const activeConnected = activeAiSource === 'chatgpt' ? currentChatGPT.connected : currentAiStatus.providers[activeAiSource].connected
+    if (!activeConnected) {
       setSettingsSection('ai')
       setSettingsOpen(true)
-      setActivity('AI provider not connected · configure OpenAI in Settings → AI connection')
+      setActivity(`${active.label} is the active agent source but is not connected · open Settings → AI connection`)
       return
     }
 
@@ -184,27 +170,10 @@ export default function App() {
         datahubEvidence = ['No DataHub URN is bound to a Data Source card. Treat evidence as incomplete.']
       }
 
-      const activeModel = currentChatGPT.connected ? currentChatGPT.selectedModel ?? 'ChatGPT' : currentAiStatus.settings.model
+      const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : currentAiStatus.providers[activeAiSource].model
       setActivity(`${activeModel} is analyzing the graph and previous versions…`)
-      const requestPayload = {
-        mode: 'pipeline-rewrite',
-        objective: agentRequest,
-        agentDecisionPolicy: 'Agent Decision may add, edit and reconnect cards. Add a Human Review card only when confidence is insufficient or impact is sensitive.',
-        graph: compactGraph(nodes, edges),
-        validationFindings: issues.map(({ id, severity, title, detail, nodeId }) => ({ id, severity, title, detail, nodeId })),
-        datahubEvidence,
-        recentVersions: versions.slice(-5).map((version) => ({
-          label: version.label,
-          origin: version.origin,
-          createdAt: version.createdAt,
-          blockingIssues: version.blockingIssues,
-          status: version.status ?? 'committed',
-          description: version.description,
-          graph: compactGraph(version.nodes, version.edges),
-        })),
-        guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'Use Human Review for uncertainty or sensitive/schema/downstream changes'],
-      }
-      const response = currentChatGPT.connected ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
+      const requestPayload = buildPipelineAgentRequest({ datahubEvidence, edges, issues, nodes, objective: agentRequest, versions })
+      const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       setProposal(nextProposal)
@@ -225,29 +194,21 @@ export default function App() {
       setActivity('AI provider unavailable in web preview · launch the Electron application')
       return
     }
-    const [status, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => defaultAiStatus), window.dataLab.getChatGPTStatus().catch(() => defaultChatGPTStatus)])
-    setAiStatus(status)
-    setChatGPTStatus(currentChatGPT)
-    if (!status.connected && !currentChatGPT.connected) {
+    const [status, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => disconnectedAiStatus), window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)])
+    const activeConnected = activeAiSource === 'chatgpt' ? currentChatGPT.connected : status.providers[activeAiSource].connected
+    if (!activeConnected) {
       setSettingsSection('ai')
       setSettingsOpen(true)
-      setActivity('AI provider not connected · no static card action was generated')
+      setActivity(`${active.label} is not connected · no card action was generated`)
       return
     }
     setAgentRunning(true)
     const runId = ++agentRunId.current
-    const activeModel = currentChatGPT.connected ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.settings.model
+    const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.providers[activeAiSource].model
     setActivity(`${activeModel} is reviewing ${selected.data.label} with version context…`)
     try {
-      const requestPayload = {
-        mode: 'card-rework',
-        focusNodeId: selected.id,
-        objective: 'Improve the selected card and reconnect the schema only when evidence supports it. Add Human Review if uncertain.',
-        graph: compactGraph(nodes, edges),
-        validationFindings: issues,
-        recentVersions: versions.slice(-5).map((version) => ({ label: version.label, origin: version.origin, status: version.status ?? 'committed', description: version.description, blockingIssues: version.blockingIssues, graph: compactGraph(version.nodes, version.edges) })),
-      }
-      const response = currentChatGPT.connected ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
+      const requestPayload = buildCardReworkRequest({ edges, focusNodeId: selected.id, issues, nodes, versions })
+      const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       setProposal(nextProposal)
@@ -355,39 +316,6 @@ export default function App() {
     setSettingsOpen(false)
   }
 
-  const saveAiConnection = async (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => {
-    if (!window.dataLab) throw new Error('AI settings require the Electron application')
-    const status = await window.dataLab.saveAiSettings(settings)
-    setAiStatus(status)
-    setActivity(status.connected ? `${status.settings.model} connection settings saved` : 'AI settings saved · API key still required')
-    return status
-  }
-
-  const testAiConnection = async () => {
-    if (!window.dataLab) throw new Error('AI connection requires the Electron application')
-    const status = await window.dataLab.testAiConnection()
-    setAiStatus(status)
-    setActivity(`OpenAI connected · ${status.settings.model} ready`)
-  }
-
-  const connectChatGPT = async () => {
-    if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
-    const status = await window.dataLab.connectChatGPT()
-    setChatGPTStatus(status)
-    setActivity(status.connected ? `ChatGPT connected · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
-  }
-
-  const disconnectChatGPT = async () => {
-    if (!window.dataLab) return
-    setChatGPTStatus(await window.dataLab.disconnectChatGPT())
-    setActivity('ChatGPT account disconnected from DATA LAB')
-  }
-
-  const configureChatGPT = async (configuration: { model: string; effort: string }) => {
-    if (!window.dataLab) return
-    setChatGPTStatus(await window.dataLab.configureChatGPT(configuration))
-  }
-
   const syncDataHub = async () => {
     if (!window.dataLab) {
       setActivity('Web demo mode · launch Electron with DATAHUB_GMS_URL to connect DataHub')
@@ -411,16 +339,10 @@ export default function App() {
   }
 
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
-    <header className="topbar">
-      <div className="brand"><span className="brand-mark"><Boxes size={18} /></span><div><strong>DATA LAB</strong><small>Context-aware pipeline studio</small></div></div>
-      <div className="project-title"><span>{projectTitle}</span><small>{nodes.length ? 'Unsaved draft' : 'Empty canvas'}</small></div>
-      <div className="topbar-actions">
-        <ActionButton disabled={agentRunning || nodes.length === 0} icon={<Sparkles size={15} />} onClick={() => void auditWithAgent()} title={nodes.length === 0 ? 'Add a Data Source card before running the agent flow' : 'Run the agent flow'} variant="primary">{agentRunning ? 'Agent working…' : 'Run agent flow'}</ActionButton>
-        <button aria-label="Open settings" className="settings-trigger" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} title="Settings" type="button"><Settings size={17} /></button>
-      </div>
-    </header>
+    <AppHeader agentRunning={agentRunning} cardCount={nodes.length} onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} onRun={() => void auditWithAgent()} projectTitle={projectTitle} />
 
     {settingsOpen && <SettingsModal
+      activeAiSource={activeAiSource}
       aiStatus={aiStatus}
       chatGPTStatus={chatGPTStatus}
       connectionMode={connectionMode}
@@ -435,7 +357,9 @@ export default function App() {
       onConnectChatGPT={connectChatGPT}
       onDisconnectChatGPT={disconnectChatGPT}
       onLoadPreset={loadPreset}
+      onRefreshAiModelCatalog={refreshAiModelCatalog}
       onSaveAiSettings={saveAiConnection}
+      onSelectActiveAiSource={selectActiveAgentSource}
       onSyncDataHub={syncDataHub}
       onTestAiConnection={testAiConnection}
       onThemeChange={setTheme}
@@ -450,65 +374,32 @@ export default function App() {
     <section className={`workspace${libraryOpen ? '' : ' library-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}`}>
       <div aria-hidden={!libraryOpen} className={`library-panel-shell ${libraryOpen ? '' : 'is-closed'}`}><CardLibraryView onAddCard={addCard} onClose={() => setLibraryOpen(false)} /></div>
 
-      <section className="canvas-panel">
-        {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={() => setLibraryOpen(true)} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
-        {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={() => setInspectorOpen(true)} title="Open inspector" type="button"><PanelRightOpen size={16} /><span>Inspector</span></button>}
-        <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } }))}
-          edgeTypes={edgeTypes}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
-          onDrop={dropLibraryCard}
-          onInit={(instance) => { flowInstance.current = instance }}
-          onNodeClick={(_, node) => setSelectedId(node.id)}
-          onNodeContextMenu={(event, node) => {
-            event.preventDefault()
-            setSelectedId(node.id)
-            setContextMenu({ nodeId: node.id, label: node.data.label, x: event.clientX, y: event.clientY })
-          }}
-          onPaneClick={() => setContextMenu(undefined)}
-          fitView
-          fitViewOptions={{ padding: 0.18 }}
-          minZoom={0.35}
-          maxZoom={1.45}
-          nodeDragThreshold={1}
-          snapToGrid={false}
-          defaultEdgeOptions={{ type: 'elastic' }}
-          deleteKeyCode={['Backspace', 'Delete']}
-        >
-          <Background color={theme === 'dark' ? '#2a3950' : '#e5eaf0'} gap={24} size={1} variant={BackgroundVariant.Lines} />
-          <MiniMap className="minimap" maskColor={theme === 'dark' ? 'rgba(15,23,42,.72)' : 'rgba(248,250,252,.72)'} nodeColor={(node) => miniMapColors[(node.data as PipelineNode['data']).kind]} pannable zoomable />
-          <Controls className="flow-controls" showInteractive={false} />
-        </ReactFlow>
-        {contextMenu && <div className="card-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <div><small>CARD</small><strong>{contextMenu.label}</strong></div>
-          <button className="context-edit" onClick={() => { setSelectedId(contextMenu.nodeId); setContextMenu(undefined); setActivity(`${contextMenu.label} opened in the inspector`) }} role="menuitem" type="button"><Pencil size={14} /><span><strong>Edit card</strong><small>Open metadata and rules</small></span></button>
-          <button className="context-delete" onClick={() => deleteCard(contextMenu.nodeId)} role="menuitem" type="button"><Trash2 size={14} /><span><strong>Delete card</strong><small>Also removes attached edges</small></span></button>
-        </div>}
-      </section>
+      <PipelineCanvasView
+        contextMenu={contextMenu}
+        edges={edges}
+        inspectorOpen={inspectorOpen}
+        libraryOpen={libraryOpen}
+        nodes={nodes}
+        onConnect={onConnect}
+        onDeleteCard={deleteCard}
+        onDrop={dropLibraryCard}
+        onEdgesChange={onEdgesChange}
+        onEditCard={(nodeId, label) => { setSelectedId(nodeId); setContextMenu(undefined); setActivity(`${label} opened in the inspector`) }}
+        onFlowInit={(instance) => { flowInstance.current = instance }}
+        onNodeContextMenu={(event, node) => { event.preventDefault(); setSelectedId(node.id); setContextMenu({ nodeId: node.id, label: node.data.label, x: event.clientX, y: event.clientY }) }}
+        onNodesChange={onNodesChange}
+        onOpenInspector={() => setInspectorOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
+        onPaneClick={() => setContextMenu(undefined)}
+        onSelectNode={setSelectedId}
+        theme={theme}
+      />
 
       <aside aria-hidden={!inspectorOpen} className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`}>
         {proposal ? <ReviewPanel proposal={proposal} onApply={approveProposal} onClose={() => setInspectorOpen(false)} onDiscard={rejectProposal} /> : <CardInspectorView errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onClose={() => setInspectorOpen(false)} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} />}
       </aside>
     </section>
 
-    <footer className="statusbar">
-      <span className="status-activity">{activity}</span>
-      <AgentPrompt
-        activity={activity}
-        busy={agentRunning}
-        connected={aiStatus.connected || chatGPTStatus.connected}
-        context={{ cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport}` : 'MCP not connected', model: chatGPTStatus.connected ? chatGPTStatus.selectedModel ?? 'ChatGPT' : aiStatus.settings.model }}
-        onOpenSettings={() => { setSettingsSection('ai'); setSettingsOpen(true) }}
-        onStop={stopAgent}
-        onSubmit={(prompt) => void auditWithAgent(prompt)}
-      />
-      <span className="status-review">Human review <strong>notified</strong> when Agent Decision requests it</span>
-    </footer>
+    <AppFooter activity={activity} agentRunning={agentRunning} connected={active.connected} context={{ cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport}` : 'MCP not connected', model: `${active.label} · ${active.model}` }} onOpenAiSettings={() => { setSettingsSection('ai'); setSettingsOpen(true) }} onStop={stopAgent} onSubmit={(prompt) => void auditWithAgent(prompt)} />
   </main>
 }
