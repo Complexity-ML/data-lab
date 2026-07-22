@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock3, GitBranch, RotateCcw, XCircle } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { resolveVersionSelection } from '../../domain/versioning'
 import { ActionButton } from './ActionButton'
 
 export interface VersionSummary {
@@ -12,11 +13,11 @@ export interface VersionSummary {
   description?: string
 }
 
-export function VersionBrowser({ onRestore, versions }: { onRestore(versionId: string): void; versions: VersionSummary[] }) {
-  const preferred = useMemo(() => [...versions].reverse().find((version) => version.status === 'pending-review') ?? versions.at(-1), [versions])
-  const [selectedId, setSelectedId] = useState(preferred?.id)
-  useEffect(() => { if (preferred) setSelectedId(preferred.id) }, [preferred?.id])
-  const selected = versions.find((version) => version.id === selectedId) ?? preferred
+export function VersionBrowser({ onRestore, selectedVersionId, versions }: { onRestore(versionId: string): void; selectedVersionId?: string; versions: VersionSummary[] }) {
+  const preferredId = resolveVersionSelection(versions, selectedVersionId)
+  const [selectedId, setSelectedId] = useState(preferredId)
+  useEffect(() => { if (preferredId) setSelectedId(preferredId) }, [preferredId])
+  const selected = versions.find((version) => version.id === selectedId) ?? versions.find((version) => version.id === preferredId)
 
   if (!selected) return <div className="version-browser-empty"><GitBranch size={24} /><strong>No version yet</strong><p>Save a checkpoint or ask the agent to propose an improvement.</p></div>
   const status = selected.status ?? 'committed'

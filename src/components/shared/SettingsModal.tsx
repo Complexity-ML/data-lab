@@ -1,5 +1,5 @@
 import { AlertTriangle, Bot, CheckCircle2, Database, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, Save, Settings, Sun, UserRound, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
 import { ActionButton } from './ActionButton'
@@ -30,27 +30,44 @@ interface SettingsModalProps {
   onThemeChange: (theme: 'light' | 'dark') => void
   onRestoreVersion: (versionId: string) => void
   onSaveVersion: () => void
+  selectedVersionId?: string
   theme: 'light' | 'dark'
   versions: VersionSummary[]
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, theme, versions } = props
+  const { aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
-  const [apiKey, setApiKey] = useState('')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiFeedback, setAiFeedback] = useState('')
+  const apiKeyRef = useRef<HTMLInputElement>(null)
+  const modelIdRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => setAiSettings(aiStatus.settings), [aiStatus])
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
+
+  const draftAiSettings = (): AiSettings => ({
+    ...aiSettings,
+    model: modelIdRef.current?.value.trim() || aiSettings.model,
+  })
+
+  const clearSavedKey = () => {
+    if (apiKeyRef.current) apiKeyRef.current.value = ''
+  }
+
+  const applySavedSettings = (status: AiStatus) => {
+    setAiSettings(status.settings)
+    if (modelIdRef.current) modelIdRef.current.value = status.settings.model
+  }
 
   const saveAi = async () => {
     setAiBusy(true)
     setAiFeedback('')
     try {
-      await onSaveAiSettings({ ...aiSettings, apiKey: apiKey || undefined })
-      setApiKey('')
+      const apiKey = apiKeyRef.current?.value.trim()
+      const status = await onSaveAiSettings({ ...draftAiSettings(), apiKey: apiKey || undefined })
+      applySavedSettings(status)
+      clearSavedKey()
       setAiFeedback('Connection settings saved securely.')
     } catch (error) {
       setAiFeedback(error instanceof Error ? error.message : 'Unable to save the AI connection.')
@@ -61,9 +78,13 @@ export function SettingsModal(props: SettingsModalProps) {
     setAiBusy(true)
     setAiFeedback('')
     try {
-      if (apiKey) await onSaveAiSettings({ ...aiSettings, apiKey })
-      else await onSaveAiSettings(aiSettings)
-      setApiKey('')
+      const draft = draftAiSettings()
+      const apiKey = apiKeyRef.current?.value.trim()
+      const saved = apiKey
+        ? await onSaveAiSettings({ ...draft, apiKey })
+        : await onSaveAiSettings(draft)
+      applySavedSettings(saved)
+      clearSavedKey()
       await onTestAiConnection()
       setAiFeedback('OpenAI connection verified.')
     } catch (error) {
@@ -121,8 +142,8 @@ export function SettingsModal(props: SettingsModalProps) {
           <section className="settings-section ai-connection-panel">
             <div className="settings-section-title"><span>API providers</span><small>{aiStatus.providers[aiSettings.provider].connected ? `Connected · ${aiStatus.providers[aiSettings.provider].credentialSource}` : 'Not connected'}</small></div>
             <div className="model-grid provider-grid" role="radiogroup" aria-label="API provider">{([['openai', 'OpenAI', 'Responses API'], ['anthropic', 'Claude', 'Anthropic Messages'], ['moonshot', 'Kimi', 'Moonshot API']] as const).map(([provider, label, detail]) => <button aria-checked={aiSettings.provider === provider} className={aiSettings.provider === provider ? 'is-active' : ''} key={provider} onClick={() => chooseProvider(provider)} role="radio" type="button"><strong>{label}</strong><small>{detail}</small><code>{aiStatus.providers[provider].connected ? 'connected' : 'API key'}</code></button>)}</div>
-            <label className="settings-field"><span><KeyRound size={14} /> {aiSettings.provider === 'anthropic' ? 'Anthropic' : aiSettings.provider === 'moonshot' ? 'Moonshot' : 'OpenAI'} API key</span><input autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder={aiStatus.providers[aiSettings.provider].connected ? 'Saved securely · enter only to replace' : 'Paste key locally…'} type="password" value={apiKey} /><small>The key stays encrypted in Electron secure storage and is never exposed back to React.</small></label>
-            <label className="settings-field"><span>Model ID</span><input onChange={(event) => setAiSettings((current) => ({ ...current, model: event.target.value }))} placeholder="Model returned by this provider" type="text" value={aiSettings.model} /><small>“Test connection” validates the key and provider model catalog.</small></label>
+            <label className="settings-field"><span><KeyRound size={14} /> {aiSettings.provider === 'anthropic' ? 'Anthropic' : aiSettings.provider === 'moonshot' ? 'Moonshot' : 'OpenAI'} API key</span><input autoComplete="off" defaultValue="" key={`api-key-${aiSettings.provider}`} placeholder={aiStatus.providers[aiSettings.provider].connected ? 'Saved securely · enter only to replace' : 'Paste key locally…'} ref={apiKeyRef} type="password" /><small>The key stays encrypted in Electron secure storage and is never exposed back to React.</small></label>
+            <label className="settings-field"><span>Model ID</span><input defaultValue={aiSettings.model} key={`model-${aiSettings.provider}`} placeholder="Model returned by this provider" ref={modelIdRef} type="text" /><small>“Test connection” validates the key and provider model catalog.</small></label>
             <div className="ai-option-grid">
               <label className="settings-field"><span>Reasoning quality</span><select onChange={(event) => setAiSettings((current) => ({ ...current, reasoningEffort: event.target.value as AiSettings['reasoningEffort'] }))} value={aiSettings.reasoningEffort}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
               <label className="settings-field"><span>Answer detail</span><select onChange={(event) => setAiSettings((current) => ({ ...current, verbosity: event.target.value as AiSettings['verbosity'] }))} value={aiSettings.verbosity}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
@@ -154,7 +175,7 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'versions' && <article className="settings-page">
           <div className="settings-page-heading settings-heading-with-action"><div><small>VERSIONS</small><h3>Pipeline checkpoints</h3><p>Recent versions are supplied to the connected model so it proposes incremental changes.</p></div><ActionButton icon={<Save size={15} />} onClick={onSaveVersion} variant="primary">Save checkpoint</ActionButton></div>
-          <VersionBrowser onRestore={onRestoreVersion} versions={versions} />
+          <VersionBrowser onRestore={onRestoreVersion} selectedVersionId={selectedVersionId} versions={versions} />
         </article>}
       </div>
     </div>

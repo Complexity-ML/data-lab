@@ -47,7 +47,7 @@ declare global {
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
-      notifyHumanReview(payload: { cardLabel: string; reason: string }): Promise<{ shown: boolean }>
+      notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string }): Promise<{ shown: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>
       testAiConnection(): Promise<AiStatus & { availableModels: string[] }>
@@ -61,7 +61,7 @@ declare global {
       cancelChatGPTProposal(): Promise<{ cancelled: boolean }>
       loadWorkspace(): Promise<{ projectTitle?: string; nodes?: import('./domain/pipeline').PipelineNode[]; edges?: import('@xyflow/react').Edge[]; versions?: import('./domain/versioning').PipelineVersion[] } | null>
       saveWorkspace(payload: { projectTitle: string; nodes: import('./domain/pipeline').PipelineNode[]; edges: import('@xyflow/react').Edge[]; versions: import('./domain/versioning').PipelineVersion[] }): Promise<{ saved: true }>
-      onHumanReviewOpened(callback: () => void): () => void
+      onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>
       onWindowStateChanged(callback: (state: { fullscreen: boolean }) => void): () => void
     }
