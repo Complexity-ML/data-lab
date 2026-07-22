@@ -196,7 +196,7 @@ button { color: inherit; }
 .split-quarantine { top: 72% !important; background: #f59e0b !important; }
 .split-label { position: absolute; right: 8px; color: var(--muted); font-size: 6.5px; }
 .approved-label { top: 33%; }
-.quarantine-label { top: 66%; }
+.quarantine-label { top: calc(72% + 9px); }
 
 .inspector-form { display: flex; flex-direction: column; gap: 13px; margin-top: 18px; }
 .inspector-form label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
