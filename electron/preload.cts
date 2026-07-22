@@ -37,6 +37,10 @@ const workspaceCommitChannel = 'data-lab:workspace-commit'
 const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
+const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
+const diagnosticsExportChannel = 'data-lab:diagnostics-export'
+const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
+const applicationRestartChannel = 'data-lab:application-restart'
 
 contextBridge.exposeInMainWorld('dataLab', {
   runtime: 'electron',
@@ -75,6 +79,10 @@ contextBridge.exposeInMainWorld('dataLab', {
   resolveWorkspaceRecovery: (action: 'recover' | 'discard') => ipcRenderer.invoke(workspaceRecoveryChannel, { action }),
   getActiveAiSource: () => ipcRenderer.invoke(activeAiSourceChannel),
   setActiveAiSource: (source: 'chatgpt' | 'openai' | 'anthropic' | 'moonshot') => ipcRenderer.invoke(activeAiSourceSaveChannel, { source }),
+  recordDiagnostic: (event: unknown) => ipcRenderer.invoke(diagnosticsRecordChannel, event),
+  exportDiagnostics: () => ipcRenderer.invoke(diagnosticsExportChannel),
+  openDiagnosticLogs: () => ipcRenderer.invoke(diagnosticsOpenChannel),
+  restartApplication: () => ipcRenderer.invoke(applicationRestartChannel),
   onHumanReviewOpened: (callback: (payload: { versionId?: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { versionId?: string } = {}) => callback(payload)
     ipcRenderer.on(humanReviewOpenedChannel, listener)

@@ -140,7 +140,7 @@ describe('visual pipeline workspace regressions', () => {
     render(<App />)
 
     await user.click(screen.getByRole('button', { name: 'Open settings' }))
-    await user.click(screen.getByRole('button', { name: 'AI connectionModel and quality' }))
+    await user.click(await screen.findByRole('button', { name: 'AI connectionModel and quality' }))
     const connectButton = screen.getByRole('button', { name: 'Continue with ChatGPT' }) as HTMLButtonElement
     expect(connectButton.disabled).toBe(false)
     await user.click(connectButton)
@@ -199,7 +199,7 @@ describe('visual pipeline workspace regressions', () => {
     await screen.findByText('Real work')
 
     await user.click(screen.getByRole('button', { name: 'Open settings' }))
-    await user.click(screen.getByRole('button', { name: 'ExamplesStart empty or explore' }))
+    await user.click(await screen.findByRole('button', { name: 'ExamplesStart empty or explore' }))
     await user.click(screen.getByRole('button', { name: 'Customer activationLoad the ecommerce governance example for exploration.' }))
 
     expect(await screen.findByText('Customer activation')).toBeTruthy()

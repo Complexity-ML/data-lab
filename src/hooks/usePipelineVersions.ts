@@ -4,6 +4,7 @@ import { layoutPipeline } from '../domain/layout'
 import { applyProposal, loadPipelinePreset, type AgentProposal, type PipelineNode, type PipelinePresetId } from '../domain/pipeline'
 import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from '../domain/versioning'
 import { validatePipeline } from '../validation'
+import { recordDiagnostic } from '../domain/diagnostics'
 
 type PipelineVersionsOptions = {
   edges: Edge[]
@@ -52,6 +53,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     setProposal(undefined)
     setPendingVersionId(undefined)
     setActivity('Change approved · atomic checks passed · revision committed')
+    recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'success', detail: { versionId: version.id, blockingIssues: 0 } })
     return true
   }
 
@@ -60,6 +62,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     setPendingVersionId(undefined)
     setProposal(undefined)
     setActivity('Agent proposal rejected · revision marked rejected · active branch unchanged')
+    recordDiagnostic({ category: 'revision', action: 'proposal.reject', status: 'info', detail: { versionId: pendingVersionId } })
   }
 
   const approvePendingVersion = (versionId: string) => {
@@ -95,6 +98,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     const version = createPipelineVersion(nodes, edges, `Manual checkpoint ${versions.length + 1}`, 'manual', currentIssues)
     setVersions((current) => appendPipelineVersion(current, version))
     setActivity(`Version saved · ${version.label}`)
+    recordDiagnostic({ category: 'revision', action: 'checkpoint.save', status: 'success', detail: { versionId: version.id, label: version.label } })
   }
 
   const restoreVersion = (versionId: string) => {

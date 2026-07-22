@@ -1,9 +1,10 @@
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes } from '@xyflow/react'
 import { PanelLeftOpen, PanelRightOpen, Pencil, Trash2 } from 'lucide-react'
-import type { DragEvent, MouseEvent } from 'react'
+import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
 import { ElasticEdge } from '../components/shared/ElasticEdge'
 import type { CardKind, PipelineNode } from '../domain/pipeline'
+import { graphPerformanceTargets } from '../domain/performance'
 
 const nodeTypes: NodeTypes = { pipeline: PipelineCard }
 const edgeTypes: EdgeTypes = { elastic: ElasticEdge }
@@ -23,7 +24,7 @@ interface PipelineCanvasViewProps {
   onDrop(event: DragEvent<HTMLDivElement>): void
   onEdgesChange(changes: EdgeChange<Edge>[]): void
   onEditCard(nodeId: string, label: string): void
-  onFlowInit(instance: { screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } }): void
+  onFlowInit(instance: { fitView(options?: { duration?: number; padding?: number }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } }): void
   onNodeContextMenu(event: MouseEvent<Element>, node: PipelineNode): void
   onNodesChange(changes: NodeChange<PipelineNode>[]): void
   onOpenInspector(): void
@@ -35,13 +36,15 @@ interface PipelineCanvasViewProps {
 
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
   const { contextMenu, edges, inspectorOpen, libraryOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenInspector, onOpenLibrary, onPaneClick, onSelectNode, theme } = props
-  return <section className="canvas-panel">
+  const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
+  const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
+  return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
     {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
     {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><PanelRightOpen size={16} /><span>Inspector</span></button>}
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
     <ReactFlow
       nodes={nodes}
-      edges={edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } }))}
+      edges={renderedEdges}
       edgeTypes={edgeTypes}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
@@ -58,12 +61,13 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       minZoom={0.35}
       maxZoom={1.45}
       nodeDragThreshold={1}
+      onlyRenderVisibleElements
       snapToGrid={false}
       defaultEdgeOptions={{ type: 'elastic' }}
       deleteKeyCode={['Backspace', 'Delete']}
     >
       <Background color={theme === 'dark' ? '#2a3950' : '#e5eaf0'} gap={24} size={1} variant={BackgroundVariant.Lines} />
-      <MiniMap className="minimap" maskColor={theme === 'dark' ? 'rgba(15,23,42,.72)' : 'rgba(248,250,252,.72)'} nodeColor={(node) => miniMapColors[(node.data as PipelineNode['data']).kind]} pannable zoomable />
+      {renderMiniMap && <MiniMap className="minimap" maskColor={theme === 'dark' ? 'rgba(15,23,42,.72)' : 'rgba(248,250,252,.72)'} nodeColor={(node) => miniMapColors[(node.data as PipelineNode['data']).kind]} pannable zoomable />}
       <Controls className="flow-controls" showInteractive={false} />
     </ReactFlow>
     {contextMenu && <div className="card-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }}>

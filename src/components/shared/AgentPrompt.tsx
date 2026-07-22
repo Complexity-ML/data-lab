@@ -1,17 +1,19 @@
-import { Database, GitCompareArrows, History, ListChecks, Send, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
+import { Bot, Database, GitCompareArrows, History, ListChecks, Send, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
+import { useLanguage } from '../../i18n'
 
 interface AgentPromptProps {
   activity: string
   busy: boolean
   connected: boolean
-  context: { cards: number; edges: number; versions: number; mcp: string; model: string }
+  context: { ai?: string; cards: number; edges: number; versions: number; mcp: string; model: string }
   onOpenSettings(): void
   onStop(): void
   onSubmit(prompt: string): void
 }
 
 export function AgentPrompt({ activity, busy, connected, context, onOpenSettings, onStop, onSubmit }: AgentPromptProps) {
+  const { t } = useLanguage()
   const [value, setValue] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [connectionNotice, setConnectionNotice] = useState('')
@@ -30,7 +32,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
     const request = value.trim()
     if (!request || busy) return
     if (!connected) {
-      setConnectionNotice('Connect an AI source before sending. Your prompt is preserved.')
+      setConnectionNotice(t('connectSource'))
       return
     }
     setConnectionNotice('')
@@ -45,6 +47,8 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
       <div className="agent-context-flow">
         <span><Database size={14} /><strong>DataHub MCP</strong><small>{context.mcp}</small></span>
         <i>→</i>
+        <span><Bot size={14} /><strong>AI provider</strong><small>{context.ai ?? context.model}</small></span>
+        <i>→</i>
         <span><History size={14} /><strong>Version memory</strong><small>{context.versions} checkpoint{context.versions === 1 ? '' : 's'}</small></span>
         <i>→</i>
         <span><GitCompareArrows size={14} /><strong>Graph proposal</strong><small>{context.cards} cards · {context.edges} edges</small></span>
@@ -57,23 +61,24 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
       <textarea
         aria-label="What should the DATA LAB agent do?"
         disabled={busy}
+        id="data-lab-agent-prompt"
         onChange={(event) => { setValue(event.target.value); if (connectionNotice) setConnectionNotice('') }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
           event.preventDefault()
           submit()
         }}
-        placeholder={connected ? 'Ask the agent to analyze, rebuild or improve this data pipeline…' : 'Connect OpenAI in Settings to activate the agent…'}
+        placeholder={connected ? t('promptPlaceholder') : t('promptDisconnected')}
         ref={textareaRef}
         rows={1}
         value={value}
       />
-      <div className="data-agent-prompt-context"><span><Sparkles size={11} />DATA LAB agent</span><small aria-live="polite">{connectionNotice || (connected ? `${context.model} · Review only · ${context.mcp}` : 'No simulated action · connection required')}</small>{!connected && <button className="data-agent-connect" onClick={onOpenSettings} type="button">Connect</button>}</div>
+      <div className="data-agent-prompt-context"><span><Sparkles size={11} />{t('agentLabel')}</span><small aria-live="polite">{connectionNotice || (connected ? `${context.model} · Review only · ${context.mcp}` : t('noAction'))}</small>{!connected && <button className="data-agent-connect" onClick={onOpenSettings} type="button">{t('connect')}</button>}</div>
       <div className="data-agent-actions">
         {busy
           ? <button aria-label="Emergency stop agent" className="data-agent-send is-stop" onClick={onStop} title="Stop the current agent run immediately" type="button"><Square size={13} /></button>
-          : <button aria-label="Send request to DATA LAB agent" className="data-agent-send" disabled={!value.trim()} title={connected ? 'Propose graph changes' : 'Open Settings to connect'} type="submit"><Send size={15} /></button>}
-        <button aria-expanded={detailsOpen} aria-label="Show agentic details" className="data-agent-detail-button" onClick={() => setDetailsOpen((current) => !current)} title="Agentic details" type="button"><ListChecks size={14} /><b>{busy ? '…' : context.versions}</b></button>
+          : <button aria-label={t('send')} className="data-agent-send" disabled={!value.trim()} title={connected ? 'Propose graph changes' : t('openSettings')} type="submit"><Send size={15} /></button>}
+        <button aria-expanded={detailsOpen} aria-label={t('details')} className="data-agent-detail-button" onClick={() => setDetailsOpen((current) => !current)} title={t('details')} type="button"><ListChecks size={14} /><b>{busy ? '…' : context.versions}</b></button>
       </div>
     </form>
   </div>

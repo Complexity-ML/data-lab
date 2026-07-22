@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, CheckCircle2, Database, FolderKanban, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, CheckCircle2, Database, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
@@ -8,8 +8,9 @@ import { ActionButton } from './ActionButton'
 import { Modal } from './Modal'
 import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 import { WorkspaceManager } from './WorkspaceManager'
+import { useLanguage } from '../../i18n'
 
-export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'presets' | 'pipeline' | 'versions'
+export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
   activeAiSource: ActiveAiSource
@@ -40,9 +41,11 @@ interface SettingsModalProps {
   onEmergencyStop: () => void
   onDuplicateWorkspace: (workspaceId: string) => Promise<void>
   onExportPipeline: () => void
+  onExportDiagnostics: () => Promise<void>
   onImportPipeline: (file: File) => Promise<void>
   onLoadPreset: (preset: PipelinePresetId) => void
   onOpenWorkspace: (workspaceId: string) => Promise<void>
+  onOpenDiagnosticLogs: () => Promise<void>
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onRejectPendingReview: (versionId: string) => void
   onRemindHumanReview: (version: VersionSummary) => void
@@ -67,7 +70,8 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { activeAiSource, activeWorkspaceId, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDuplicateWorkspace, onEmergencyStop, onExportPipeline, onImportPipeline, onLoadPreset, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { language, setLanguage } = useLanguage()
+  const { activeAiSource, activeWorkspaceId, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onLoadPreset, onOpenDiagnosticLogs, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -193,7 +197,7 @@ export function SettingsModal(props: SettingsModalProps) {
     setAiFeedback('Opening the secure ChatGPT sign-in…')
     try {
       await onConnectChatGPT()
-      setAiFeedback('ChatGPT account connected. Choose it as the active agent source below.')
+      setAiFeedback('ChatGPT account connected and selected for the next agent request.')
     } catch (error) {
       notifyError(error, 'Unable to connect the ChatGPT account')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to connect the ChatGPT account.')
@@ -248,6 +252,7 @@ export function SettingsModal(props: SettingsModalProps) {
         {menu('workspaces', 'Workspaces', 'Save, switch and recover', <FolderKanban size={17} />)}
         {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
         {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
+        {menu('diagnostics', 'Diagnostics', 'Local, private and bounded', <Activity size={17} />)}
         {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
         {menu('pipeline', 'Pipeline', 'Layout and validation', <Network size={17} />)}
         {menu('versions', 'Versions', 'Safe graph checkpoints', <History size={17} />)}
@@ -264,11 +269,27 @@ export function SettingsModal(props: SettingsModalProps) {
               <button aria-pressed={theme === 'dark'} className={theme === 'dark' ? 'is-active' : ''} onClick={() => onThemeChange('dark')} type="button"><Moon size={20} /><span><strong>Dark</strong><small>Distinct colored cards on slate</small></span></button>
             </div>
           </section>
+          <section className="settings-section settings-appearance">
+            <div className="settings-section-title"><span><Languages size={15} /> Interface language</span><small>English by default · saved locally</small></div>
+            <div aria-label="Interface language" className="theme-switch language-switch" role="group">
+              <button aria-pressed={language === 'en'} className={language === 'en' ? 'is-active' : ''} onClick={() => setLanguage('en')} type="button"><span><strong>English</strong><small>Default interface and agent replies</small></span></button>
+              <button aria-pressed={language === 'fr'} className={language === 'fr' ? 'is-active' : ''} onClick={() => setLanguage('fr')} type="button"><span><strong>Français</strong><small>Interface et réponses de l’agent</small></span></button>
+            </div>
+          </section>
         </article>}
 
         {activeSection === 'workspaces' && <article className="settings-page">
           <div className="settings-page-heading"><small>WORKSPACES</small><h3>Local projects and recovery</h3><p>Each graph, version history and pending agent review stays isolated in its own SQLite workspace.</p></div>
           <WorkspaceManager activeWorkspaceId={activeWorkspaceId} onArchive={onArchiveWorkspace} onCreate={onCreateWorkspace} onDuplicate={onDuplicateWorkspace} onOpen={onOpenWorkspace} onRename={onRenameWorkspace} onSave={onSaveWorkspace} projectTitle={projectTitle} saveState={workspaceSaveState} workspaces={workspaces} />
+        </article>}
+
+        {activeSection === 'diagnostics' && <article className="settings-page">
+          <div className="settings-page-heading"><small>DIAGNOSTICS</small><h3>Private local activity log</h3><p>Inspect failures without sending catalog content or credentials to a telemetry service.</p></div>
+          <section className="settings-section diagnostics-settings">
+            <div className="settings-section-title"><span>Local diagnostics</span><small>7 days · 500 events maximum</small></div>
+            <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>External telemetry disabled</strong><small>Tokens, authorization headers and sensitive prompts are redacted before storage and export.</small></div></div>
+            <div className="diagnostics-actions"><ActionButton icon={<FolderOpen size={15} />} onClick={() => void onOpenDiagnosticLogs()}>Open local logs</ActionButton><ActionButton icon={<FileDown size={15} />} onClick={() => void onExportDiagnostics()} variant="primary">Export sanitized bundle</ActionButton></div>
+          </section>
         </article>}
 
         {activeSection === 'ai' && <article className="settings-page">
