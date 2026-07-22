@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Notification, shell, type BrowserWindowCon
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
-import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, saveDataHubMcpSettings, searchDataHubAssets } from './datahub-mcp.js'
+import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
@@ -18,6 +18,7 @@ const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
 const mcpSearchChannel = 'data-lab:datahub-mcp-search'
 const mcpInspectChannel = 'data-lab:datahub-mcp-inspect'
 const mcpInvalidateChannel = 'data-lab:datahub-mcp-invalidate'
+const mcpWritebackChannel = 'data-lab:datahub-mcp-writeback'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
 const windowStateChangedChannel = 'data-lab:window-state-changed'
@@ -150,6 +151,7 @@ app.whenReady().then(() => {
     return inspectDataHubAsset(payload.urn, payload.force === true)
   })
   ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
+  ipcMain.handle(mcpWritebackChannel, (_event, payload: unknown) => writeDataHubDecision(payload))
   ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }) => notifyHumanReview(payload))
   ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
   ipcMain.handle(aiStatusChannel, () => getAiStatus())

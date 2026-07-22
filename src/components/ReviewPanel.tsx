@@ -1,15 +1,22 @@
 import { Check, DatabaseZap, GitCompareArrows, PanelRightClose, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { AgentProposal } from '../domain/pipeline'
 import { ActionButton } from './shared/ActionButton'
 
 interface ReviewPanelProps {
   proposal: AgentProposal
-  onApply(): void
+  relatedAssets: string[]
+  revisionId?: string
+  writebackAvailable: boolean
+  onApply(writebackRequested: boolean): void
   onDiscard(): void
   onClose(): void
 }
 
-export function ReviewPanel({ proposal, onApply, onClose, onDiscard }: ReviewPanelProps) {
+export function ReviewPanel({ proposal, relatedAssets, revisionId, writebackAvailable, onApply, onClose, onDiscard }: ReviewPanelProps) {
+  const [writebackRequested, setWritebackRequested] = useState(false)
+  useEffect(() => setWritebackRequested(false), [proposal.title, revisionId])
+
   return <section className="review-panel">
     <div className="review-heading">
       <span><Sparkles size={16} /></span>
@@ -40,13 +47,35 @@ export function ReviewPanel({ proposal, onApply, onClose, onDiscard }: ReviewPan
     </section>
 
     <section className="writeback-note">
-      <h3>After approval</h3>
+      <h3>Local commit</h3>
       <p>{proposal.writeback}</p>
+    </section>
+
+    <section className="review-section datahub-writeback-review">
+      <h3><DatabaseZap size={15} /> Optional DataHub write-back</h3>
+      {writebackAvailable && revisionId ? <>
+        <label className="writeback-approval-toggle">
+          <input checked={writebackRequested} onChange={(event) => setWritebackRequested(event.target.checked)} type="checkbox" />
+          <span><strong>Also publish this approved Decision to DataHub</strong><small>This is an external mutation and is never selected automatically.</small></span>
+        </label>
+        {writebackRequested && <div className="writeback-mutation-preview" role="region" aria-label="DataHub mutation preview">
+          <strong>Exact mutation preview</strong>
+          <dl>
+            <div><dt>Tool</dt><dd><code>save_document</code></dd></div>
+            <div><dt>Type</dt><dd><code>Decision</code></dd></div>
+            <div><dt>Title</dt><dd>DATA LAB · {proposal.title}</dd></div>
+            <div><dt>Revision</dt><dd><code>{revisionId}</code></dd></div>
+            <div><dt>Author</dt><dd>DATA LAB operator</dd></div>
+            <div><dt>Rationale</dt><dd>{proposal.rationale}</dd></div>
+            <div><dt>Related assets</dt><dd>{relatedAssets.length ? relatedAssets.join(', ') : 'None bound'}</dd></div>
+          </dl>
+        </div>}
+      </> : <p className="writeback-unavailable">Disabled by default. Connect DataHub and explicitly enable governed write-back in Settings to make this option available.</p>}
     </section>
 
     <footer className="review-actions">
       <ActionButton icon={<X size={15} />} onClick={onDiscard} variant="secondary">Reject</ActionButton>
-      <ActionButton icon={<Check size={15} />} onClick={onApply} variant="primary">Approve change</ActionButton>
+      <ActionButton icon={<Check size={15} />} onClick={() => onApply(writebackRequested)} variant="primary">Approve change</ActionButton>
     </footer>
   </section>
 }

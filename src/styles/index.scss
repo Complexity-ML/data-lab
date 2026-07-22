@@ -164,6 +164,11 @@ button { color: inherit; }
 .ai-connection-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 3px; }
 .settings-feedback, .settings-note { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
 .settings-feedback { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.datahub-writeback-toggle { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.datahub-writeback-toggle > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.datahub-writeback-toggle strong { font-size: 9px; }
+.datahub-writeback-toggle small { color: var(--muted); font-size: 7px; line-height: 1.45; }
+.datahub-writeback-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
 .settings-note { margin-top: 12px; padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
 .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .preset-grid button { display: flex; min-height: 130px; flex-direction: column; align-items: flex-start; gap: 8px; padding: 17px; color: var(--text); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: left; cursor: pointer; }
@@ -398,6 +403,19 @@ button { color: inherit; }
 .diff-remove { color: #991b1b; background: #fff1f2; }
 .writeback-note { margin-top: 15px; padding: 10px; border: 1px solid #bae6fd; border-radius: 9px; background: #f0f9ff; }
 .writeback-note p { margin: 0; color: #475569; font-size: 8px; line-height: 1.5; }
+.datahub-writeback-review { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.writeback-approval-toggle { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.writeback-approval-toggle input { flex: 0 0 auto; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--accent); }
+.writeback-approval-toggle span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.writeback-approval-toggle strong { font-size: 8.5px; line-height: 1.35; }
+.writeback-approval-toggle small,
+.writeback-unavailable { margin: 0; color: var(--muted); font-size: 7.5px; line-height: 1.5; }
+.writeback-mutation-preview { margin-top: 10px; padding: 9px; border: 1px solid #c4b5fd; border-radius: 8px; background: #faf8ff; }
+.writeback-mutation-preview > strong { color: #6d28d9; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.writeback-mutation-preview dl { margin: 7px 0 0; }
+.writeback-mutation-preview dl > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; padding: 4px 0; border-top: 1px solid var(--line); }
+.writeback-mutation-preview dt { color: var(--faint); font-size: 7px; font-weight: 750; text-transform: uppercase; }
+.writeback-mutation-preview dd { overflow-wrap: anywhere; margin: 0; color: var(--text); font-size: 7.5px; line-height: 1.45; }
 .review-actions { display: flex; gap: 7px; margin-top: 17px; padding-top: 13px; border-top: 1px solid var(--line); }
 .review-actions .button { flex: 1; }
 .card-agent-workspace { display: flex; flex-direction: column; gap: 9px; padding: 10px; border: 1px solid #ddd6fe; border-radius: 10px; background: #faf8ff; }
@@ -503,6 +521,8 @@ button { color: inherit; }
 :root[data-theme='dark'] .card-agent-workspace { border-color: var(--line); background: #18243a; }
 :root[data-theme='dark'] .datahub-context li { color: var(--muted); border-color: var(--line); background: var(--surface); }
 :root[data-theme='dark'] .writeback-note { border-color: #155e75; background: #12303b; }
+:root[data-theme='dark'] .writeback-mutation-preview { border-color: #5b21b6; background: #241c3b; }
+:root[data-theme='dark'] .writeback-mutation-preview > strong { color: #c4b5fd; }
 :root[data-theme='dark'] .writeback-note p,
 :root[data-theme='dark'] .review-rationale p { color: var(--muted); }
 :root[data-theme='dark'] .diff-add { color: #bbf7d0; background: #163527; }
