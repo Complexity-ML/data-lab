@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { getDataHubMcpConfigurationStatus, resolveEvidenceTtlMs, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -35,6 +35,18 @@ afterEach(() => {
 })
 
 describe('DataHub MCP connection settings', () => {
+  it('rejects oversized or non-serializable MCP responses before parsing or caching them', () => {
+    expect(() => assertBoundedMcpPayload({ content: 'x'.repeat(1_001) }, 'test response', 1_000)).toThrow('safety limit')
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(() => assertBoundedMcpPayload(circular)).toThrow('not valid serializable data')
+  })
+
+  it('normalizes the exact write-back payload before any confirmation or MCP mutation', () => {
+    expect(parseDataHubDecisionRequest({ revisionId: ' revision-1 ', title: ' Decision ', rationale: ' Because ', author: ' Operator ', relatedAssets: ['urn:li:dataset:test', 'https://malicious.test'] })).toEqual({
+      revisionId: 'revision-1', title: 'Decision', rationale: 'Because', author: 'Operator', relatedAssets: ['urn:li:dataset:test'],
+    })
+  })
   it('falls back only to the bounded read-only allowlist when tool discovery is slow', async () => {
     const names = await resolveReadableToolNames(async () => { throw new Error('tool discovery timed out') })
     expect([...names].sort()).toEqual(['get_entities', 'get_lineage', 'list_schema_fields', 'search'])
