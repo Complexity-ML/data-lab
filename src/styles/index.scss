@@ -497,7 +497,7 @@ button { color: inherit; }
 .all-clear { display: flex; align-items: flex-start; gap: 8px; padding: 10px; color: #16a34a; border: 1px solid #bbf7d0; border-radius: 9px; background: #f0fdf4; }
 
 .review-panel { min-height: 100%; }
-.proposal-review-modal { overflow: hidden; width: min(1120px, 68vw); max-width: calc(100vw - 48px); height: min(840px, calc(100vh - 48px)); border-radius: 20px; }
+.proposal-review-modal { overflow: hidden; width: min(1120px, 68vw); min-width: min(720px, calc(100vw - 48px)); max-width: calc(100vw - 48px); height: min(840px, calc(100vh - 48px)); min-height: min(520px, calc(100vh - 48px)); border-radius: 20px; }
 .proposal-review-modal .review-panel { display: flex; min-height: 0; height: 100%; flex-direction: column; overflow-y: auto; padding: 24px 26px 0; }
 .review-heading { display: flex; align-items: flex-start; gap: 10px; }
 .review-heading > span { display: grid; place-items: center; width: 31px; height: 31px; color: #6d28d9; border-radius: 9px; background: var(--split); }

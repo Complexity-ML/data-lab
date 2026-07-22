@@ -55,7 +55,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
         <i>→</i>
         <span><ShieldCheck size={14} /><strong>Human Review</strong><small>Atomic approval</small></span>
       </div>
-      <p className={busy ? 'is-running' : ''}>{busy && <Sparkles aria-hidden="true" size={12} />}{activity}</p>
+      <p className={busy ? 'is-running' : ''}>{busy && <LoaderCircle aria-hidden="true" className="agent-context-wheel" size={13} />}{activity}</p>
     </section>}
     <form className="data-agent-prompt" onSubmit={(event) => { event.preventDefault(); submit() }}>
       <textarea
