@@ -37,7 +37,7 @@ export default function App() {
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
-  const { approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
+  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const flowInstance = useRef<{ screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -311,13 +311,17 @@ export default function App() {
       initialSection={settingsSection}
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
+      onApprovePendingReview={approvePendingVersion}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
       onConfigureChatGPT={configureChatGPT}
       onConnectChatGPT={connectChatGPT}
       onDisconnectChatGPT={disconnectChatGPT}
+      onEmergencyStop={stopAgent}
       onLoadPreset={(presetId) => { loadPreset(presetId); setSettingsOpen(false) }}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
+      onRejectPendingReview={rejectPendingVersionById}
+      onRemindHumanReview={(version) => { if (window.dataLab) void window.dataLab.notifyHumanReview({ cardLabel: version.label, reason: version.description ?? 'Human Review is still pending.', versionId: version.id, remind: true }) }}
       onSaveAiSettings={saveAiConnection}
       onSaveDataHubSettings={saveDataHubSettings}
       onSelectActiveAiSource={selectActiveAgentSource}
@@ -327,6 +331,7 @@ export default function App() {
       onValidate={() => setActivity(`${errors.length} blocking issue${errors.length === 1 ? '' : 's'} · ${issues.length} total findings`)}
       onRestoreVersion={restoreVersion}
       onSaveVersion={saveManualVersion}
+      projectTitle={projectTitle}
       selectedVersionId={requestedVersionId}
       theme={theme}
       versions={versions.map(({ id, label, createdAt, origin, blockingIssues, status, description, evidence }) => ({ id, label, createdAt, origin, blockingIssues, status, description, evidence }))}

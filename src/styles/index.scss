@@ -97,6 +97,8 @@ button { color: inherit; }
 .version-browser { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 430px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .version-browser-sidebar { min-width: 0; border-right: 1px solid var(--line); background: var(--surface); }
 .version-browser-sidebar > header { display: flex; align-items: baseline; justify-content: space-between; padding: 14px; border-bottom: 1px solid var(--line); }
+.version-browser-sidebar > header.all-versions-heading { border-top: 1px solid var(--line); }
+.review-inbox-list { max-height: 180px; background: color-mix(in srgb, var(--split) 34%, var(--panel)); }
 .version-browser-sidebar > header strong { font-size: 10px; }
 .version-browser-sidebar > header small { color: var(--faint); font-size: 8px; }
 .version-browser-sidebar ol { max-height: 465px; overflow-y: auto; margin: 0; padding: 7px; list-style: none; }

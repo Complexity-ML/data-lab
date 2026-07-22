@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   inspectDataHubAsset: (urn: string, force = false) => ipcRenderer.invoke(mcpInspectChannel, { urn, force }),
   invalidateDataHubContext: (urn?: string) => ipcRenderer.invoke(mcpInvalidateChannel, { urn }),
   writeDataHubDecision: (payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }) => ipcRenderer.invoke(mcpWritebackChannel, payload),
-  notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
+  notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string; remind?: boolean }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),
   saveAiSettings: (payload: unknown) => ipcRenderer.invoke(aiSaveChannel, payload),
   testAiConnection: () => ipcRenderer.invoke(aiTestChannel),

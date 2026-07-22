@@ -7,6 +7,7 @@ import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, sa
 import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
+import { reserveHumanReviewNotification } from './human-review-notifications.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -66,11 +67,13 @@ function focusMainWindow() {
   mainWindow.focus()
 }
 
-function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }): { shown: boolean } {
+function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown; remind?: unknown }): { shown: boolean; deduplicated?: boolean } {
   const cardLabel = typeof payload?.cardLabel === 'string' ? payload.cardLabel.trim().slice(0, 120) : 'Agent flow'
   const reason = typeof payload?.reason === 'string' ? payload.reason.trim().slice(0, 280) : 'The agent needs a human decision.'
   const versionId = typeof payload?.versionId === 'string' ? payload.versionId.trim().slice(0, 180) : undefined
   if (!Notification.isSupported()) return { shown: false }
+  const reservation = reserveHumanReviewNotification(app.getPath('userData'), versionId, payload?.remind === true)
+  if (!reservation.allowed) return { shown: false, deduplicated: true }
 
   const notification = new Notification({
     title: 'DATA LAB · Human review required',
@@ -152,7 +155,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
   ipcMain.handle(mcpWritebackChannel, (_event, payload: unknown) => writeDataHubDecision(payload))
-  ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }) => notifyHumanReview(payload))
+  ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown; remind?: unknown }) => notifyHumanReview(payload))
   ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
   ipcMain.handle(aiStatusChannel, () => getAiStatus())
   ipcMain.handle(aiSaveChannel, (_event, payload: unknown) => {
