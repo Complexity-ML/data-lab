@@ -32,6 +32,7 @@ const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'con
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
 const kinds = new Set<ProposalCardKind>(['source', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
+const cardNames: Record<ProposalCardKind, string> = { source: 'Data Source', analysis: 'Data Analysis', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
@@ -124,7 +125,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
 
   for (const [index, action] of actions.entries()) {
     if (action.type === 'add_card') {
-      if (!action.node_id || !action.kind || !action.label || !action.description || !action.owner) throw new Error(`Proposal action ${index + 1} is an incomplete add_card`)
+      if (!action.node_id || !action.kind) throw new Error(`Proposal action ${index + 1} add_card requires a safe node_id and card kind`)
+      action.label ??= cardNames[action.kind]
+      action.description ??= `Agent-proposed ${cardNames[action.kind]} awaiting graph review.`
+      action.owner ??= 'DATA LAB Agent'
       requireNull(action, ['source', 'target', 'source_handle'], index)
       if (nodeIds.has(action.node_id) || aliases.has(action.node_id)) throw new Error(`Proposal contains duplicate node id ${action.node_id}`)
       aliases.add(action.node_id)

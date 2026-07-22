@@ -30,7 +30,7 @@ import { useLanguage } from './i18n'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 export default function App() {
-  const { language, t } = useLanguage()
+  const { language } = useLanguage()
   const platformClass = window.dataLab?.platform ? `platform-${window.dataLab.platform}` : 'platform-web'
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineNode>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
@@ -486,10 +486,6 @@ export default function App() {
         /> : <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />}
       </aside>
     </section>
-
-    {agentRunning && <div aria-live="polite" className="agent-progress-overlay" role="status">
-      <div><span aria-hidden="true" className="agent-progress-spinner" /><strong>{t('agentWorking')}</strong><small>{activity}</small></div>
-    </div>}
 
     <AppFooter activity={activity} agentRunning={agentRunning} connected={active.connected} context={{ ai: active.connected ? `${active.label} ready` : `${active.label} offline`, cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport} connected` : 'MCP offline', model: `${active.label} · ${active.model}` }} onOpenAiSettings={() => { setSettingsSection('ai'); setSettingsOpen(true) }} onStop={stopAgent} onSubmit={(prompt) => void auditWithAgent(prompt)} />
   </main>

@@ -1,4 +1,4 @@
-import { Bot, Database, GitCompareArrows, History, ListChecks, Send, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
+import { Bot, Database, GitCompareArrows, History, ListChecks, LoaderCircle, Send, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useLanguage } from '../../i18n'
 
@@ -47,7 +47,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
       <div className="agent-context-flow">
         <span><Database size={14} /><strong>DataHub MCP</strong><small>{context.mcp}</small></span>
         <i>→</i>
-        <span><Bot size={14} /><strong>AI provider</strong><small>{context.ai ?? context.model}</small></span>
+        <span className={busy ? 'is-running' : ''}>{busy ? <LoaderCircle aria-hidden="true" className="agent-context-wheel" size={16} /> : <Bot size={14} />}<strong>AI provider</strong><small>{busy ? activity : context.ai ?? context.model}</small></span>
         <i>→</i>
         <span><History size={14} /><strong>Version memory</strong><small>{context.versions} checkpoint{context.versions === 1 ? '' : 's'}</small></span>
         <i>→</i>

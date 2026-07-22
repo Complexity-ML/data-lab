@@ -33,6 +33,12 @@ describe('strict provider proposal contract', () => {
     expect(validateProposal(validProposal, payload)).toEqual(validProposal)
   })
 
+  it('repairs only non-structural add-card metadata when the provider returns null', () => {
+    const incompleteMetadata = { ...validProposal, actions: [{ ...validProposal.actions[0], label: null, description: null, owner: null }, validProposal.actions[1]] }
+    const result = validateProposal(incompleteMetadata, payload)
+    expect(result.actions[0]).toMatchObject({ node_id: 'mask-email', kind: 'transform', label: 'Transform', description: 'Agent-proposed Transform awaiting graph review.', owner: 'DATA LAB Agent' })
+  })
+
   it.each([
     ['malformed JSON', '{"title":'],
     ['unknown root field', JSON.stringify({ ...validProposal, surprise: true })],

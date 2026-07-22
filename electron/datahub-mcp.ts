@@ -296,9 +296,11 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
   if (searchResult.isError) throw new Error(summarizeResult(searchResult))
   const matches = parseSearchResults(readStructuredToolResult(searchResult))
   if (!matches.length) return []
-  const details = available.has('get_entities')
-    ? await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities')
-    : undefined
+  let details: Awaited<ReturnType<typeof client.callTool>> | undefined
+  if (available.has('get_entities')) {
+    try { details = await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities') }
+    catch { details = undefined }
+  }
   const entityPayload = details && !details.isError ? readStructuredToolResult(details) : undefined
   return matches.map((match) => parseAssetContext({ urn: match.urn, name: match.name, entityPayload }))
 }
