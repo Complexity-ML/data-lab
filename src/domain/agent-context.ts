@@ -44,7 +44,7 @@ export function buildPipelineAgentRequest(input: AgentContextInput & { datahubEv
     validationFindings: input.issues.map(({ id, severity, title, detail, nodeId }) => ({ id, severity, title, detail, nodeId })),
     datahubEvidence: input.datahubEvidence,
     recentVersions: versionContext(input.versions, input.nodes, input.edges),
-    guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'Use Human Review for uncertainty or sensitive/schema/downstream changes', `Write human-facing titles, summaries, rationales and reasons in ${input.responseLanguage ?? 'English'}`],
+    guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'When reading a dataset, add or update one Data Profile card as compact reusable memory; summarize schema, quality, freshness and anomalies, and never place raw rows in it', 'Reuse a fresh Data Profile instead of repeating dataset normalization or mental reconstruction', 'Use Human Review for uncertainty or sensitive/schema/downstream changes', `Write human-facing titles, summaries, rationales and reasons in ${input.responseLanguage ?? 'English'}`],
   }
 }
 

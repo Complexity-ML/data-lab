@@ -92,4 +92,10 @@ describe('atomic pipeline validation', () => {
       expect.objectContaining({ id: 'review-path-review', atomId: 'card-contracts' }),
     ]))
   })
+
+  it('treats a Data Profile as sidecar memory rather than an executable orphan', () => {
+    const profile = { ...newCard('profile', 9), id: 'profile-memory' }
+    const findings = validatePipeline([...initialNodes, profile], initialEdges)
+    expect(findings.some((finding) => finding.nodeId === profile.id && finding.atomId === 'card-contracts')).toBe(false)
+  })
 })

@@ -1,13 +1,35 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
 
-export type CardKind = 'source' | 'analysis' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'source' | 'profile' | 'analysis' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
   name: string
   type: 'string' | 'number' | 'boolean' | 'timestamp'
   tags?: string[]
+}
+
+export interface DataProfileField extends SchemaField {
+  nullRate?: number
+  distinctCount?: number
+}
+
+export interface DataProfileSnapshot {
+  sourceUrn: string
+  capturedAt: string
+  expiresAt: string
+  stale: boolean
+  platform: string
+  environment: string
+  quality: 'healthy' | 'failing' | 'unavailable'
+  fieldCount: number
+  profiledFields: DataProfileField[]
+  sensitiveFieldCount: number
+  upstreamCount: number
+  downstreamCount: number
+  anomalies: string[]
+  tokenEstimate: number
 }
 
 export interface PipelineNodeData extends Record<string, unknown> {
@@ -26,6 +48,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubFreshness?: { capturedAt: string; expiresAt: string; stale: boolean }
   datahubUpstream?: { urn: string; name: string; sensitive: boolean }[]
   datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
+  profile?: DataProfileSnapshot
   rule?: string
   agentAdded?: boolean
   pinned?: boolean
@@ -63,6 +86,7 @@ export interface AgentProposal {
 
 export const cardLabels: Record<CardKind, string> = {
   source: 'Data Source',
+  profile: 'Data Profile',
   analysis: 'Data Analysis',
   split: 'Split',
   decision: 'Agent Decision',

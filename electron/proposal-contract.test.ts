@@ -39,6 +39,12 @@ describe('strict provider proposal contract', () => {
     expect(result.actions[0]).toMatchObject({ node_id: 'mask-email', kind: 'transform', label: 'Transform', description: 'Agent-proposed Transform awaiting graph review.', owner: 'DATA LAB Agent' })
   })
 
+  it('accepts Data Profile as bounded agent memory', () => {
+    const profile = { ...validProposal.actions[0], node_id: 'customers-profile', kind: 'profile', label: 'Customers profile', description: 'Compact schema and quality memory.', rule: '40 fields · 1 sensitive · fresh' }
+    const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [profile] }, payload)
+    expect(result.actions[0]).toMatchObject({ node_id: 'customers-profile', kind: 'profile' })
+  })
+
   it.each([
     ['malformed JSON', '{"title":'],
     ['unknown root field', JSON.stringify({ ...validProposal, surprise: true })],

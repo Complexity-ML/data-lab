@@ -17,7 +17,7 @@ export interface GraphInteractionProfile {
   panZoomProjectionMs: number
 }
 
-const kinds: CardKind[] = ['source', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output']
+const kinds: CardKind[] = ['source', 'profile', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output']
 
 export function createLargeGraphFixture(nodeCount: number = graphPerformanceTargets.targetNodes): { nodes: PipelineNode[]; edges: Edge[] } {
   const boundedCount = Math.max(1, Math.min(nodeCount, 1_000))

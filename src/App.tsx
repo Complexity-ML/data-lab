@@ -10,6 +10,7 @@ import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
+import { addDataProfileToProposal, dataProfileEvidence, isDataProfileFresh } from './domain/data-profile'
 import { layoutPipeline } from './domain/layout'
 import { createPipelineExport, parsePipelineExport } from './domain/pipeline-io'
 import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
@@ -159,18 +160,29 @@ export default function App() {
     setNodes((current) => applyAtomicRunState(current, atomicRun))
     setActivity('Agent reading the current graph, atomic findings and version history…')
     const source = nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
+    const sourceProfile = source ? nodes.find((node) => node.data.kind === 'profile' && node.data.profile?.sourceUrn === source.data.datahubUrn) : undefined
     let datahubEvidence: string[] = []
     let evidenceEntries: DataHubEvidence[] = []
     let blankCandidate: DataHubAssetSummary | undefined
+    let profileCandidate: DataHubAssetSummary | undefined
     try {
       if (source?.data.datahubUrn) {
-        setActivity('Agent reading trusted schema and lineage through DataHub MCP…')
-        const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
-        if (agentRunId.current !== runId) return
-        const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
-        datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
-        evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
-        recordAudit(audit.transport, successfulReads, audit.reads.length)
+        if (sourceProfile?.data.profile && isDataProfileFresh(sourceProfile.data.profile)) {
+          setActivity(`Agent reusing ${sourceProfile.data.label} · compact reading memory is still fresh…`)
+          const remembered = dataProfileEvidence(sourceProfile.data.profile)
+          datahubEvidence = remembered.summaries
+          evidenceEntries = remembered.evidence
+        } else {
+          setActivity('Agent reading trusted schema and lineage through DataHub MCP to create a compact profile…')
+          const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
+          if (agentRunId.current !== runId) return
+          const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
+          datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
+          evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
+          recordAudit(audit.transport, successfulReads, audit.reads.length)
+          const inspection = await inspectDataHubAsset(source.data.datahubUrn).catch(() => undefined)
+          profileCandidate = inspection?.asset
+        }
       } else if (nodes.length === 0 && connectionMode === 'connected') {
         setActivity('Blank canvas · agent is discovering a starting dataset through DataHub MCP…')
         let candidates = await searchDataHubAssets(agentRequest).catch(() => [])
@@ -179,6 +191,7 @@ export default function App() {
         if (blankCandidate) {
           const inspection = await inspectDataHubAsset(blankCandidate.urn)
           blankCandidate = inspection.asset
+          profileCandidate = inspection.asset
           evidenceEntries = inspection.evidence.map((read) => ({ tool: read.name, urn: inspection.asset.urn, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
           datahubEvidence = [
             `Starting dataset candidate from DataHub: ${inspection.asset.name} (${inspection.asset.urn}). Add it as the Data Source card in the proposed graph.`,
@@ -219,6 +232,7 @@ export default function App() {
           datahubDownstream: blankCandidate.downstream,
         }
       }
+      if (profileCandidate) addDataProfileToProposal(nextProposal, nodes, profileCandidate, source ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source'))
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
       const preview = applyProposal(nodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)

@@ -1,11 +1,11 @@
 import type { Edge } from '@xyflow/react'
-import type { PipelineNode, PipelineNodeData, CardKind, SchemaField } from './pipeline'
+import type { PipelineNode, PipelineNodeData, CardKind, DataProfileSnapshot, SchemaField } from './pipeline'
 import type { PipelineVersion } from './versioning'
 import type { DataHubEvidence } from './datahub'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
-const kinds = new Set<CardKind>(['source', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function redactExportText(value: string) {
   return value
@@ -33,6 +33,26 @@ function cleanFields(value: unknown): SchemaField[] {
   })
 }
 
+function cleanProfile(value: unknown): DataProfileSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  if (typeof source.sourceUrn !== 'string' || !source.sourceUrn.startsWith('urn:li:') || typeof source.capturedAt !== 'string' || typeof source.expiresAt !== 'string') return undefined
+  const quality = ['healthy', 'failing', 'unavailable'].includes(String(source.quality)) ? source.quality as DataProfileSnapshot['quality'] : 'unavailable'
+  const profiledFields = cleanFields(source.profiledFields).slice(0, 32).map((field, index) => {
+    const raw = Array.isArray(source.profiledFields) ? source.profiledFields[index] as Record<string, unknown> : undefined
+    return { ...field, nullRate: typeof raw?.nullRate === 'number' && raw.nullRate >= 0 && raw.nullRate <= 1 ? raw.nullRate : undefined, distinctCount: Number.isInteger(raw?.distinctCount) && Number(raw?.distinctCount) >= 0 ? Number(raw?.distinctCount) : undefined }
+  })
+  return {
+    sourceUrn: source.sourceUrn.slice(0, 2_000), capturedAt: source.capturedAt, expiresAt: source.expiresAt, stale: source.stale === true,
+    platform: typeof source.platform === 'string' ? source.platform.slice(0, 160) : '', environment: typeof source.environment === 'string' ? source.environment.slice(0, 80) : '', quality,
+    fieldCount: Math.max(0, Math.min(100_000, Number.isInteger(source.fieldCount) ? Number(source.fieldCount) : profiledFields.length)), profiledFields,
+    sensitiveFieldCount: Math.max(0, Math.min(100_000, Number.isInteger(source.sensitiveFieldCount) ? Number(source.sensitiveFieldCount) : 0)),
+    upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.upstreamCount) ? Number(source.upstreamCount) : 0)), downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.downstreamCount) ? Number(source.downstreamCount) : 0)),
+    anomalies: Array.isArray(source.anomalies) ? source.anomalies.filter((item): item is string => typeof item === 'string').map((item) => redactExportText(item).slice(0, 240)).slice(0, 8) : [],
+    tokenEstimate: Math.max(1, Math.min(100_000, Number.isInteger(source.tokenEstimate) ? Number(source.tokenEstimate) : 1)),
+  }
+}
+
 function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
   const kind = kinds.has(data.kind as CardKind) ? data.kind as CardKind : 'analysis'
   const quality = ['healthy', 'failing', 'unavailable'].includes(String(data.datahubQuality)) ? data.datahubQuality as PipelineNodeData['datahubQuality'] : undefined
@@ -50,6 +70,7 @@ function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
     datahubDomain: typeof data.datahubDomain === 'string' ? data.datahubDomain.slice(0, 160) : undefined,
     datahubTags: Array.isArray(data.datahubTags) ? data.datahubTags.filter((tag): tag is string => typeof tag === 'string').slice(0, 100) : undefined,
     datahubQuality: quality,
+    profile: cleanProfile(data.profile),
     pinned: data.pinned === true,
   }
 }

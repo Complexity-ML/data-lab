@@ -1,0 +1,47 @@
+import { describe, expect, it } from 'vitest'
+import { addDataProfileToProposal, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh } from './data-profile'
+import { compactGraph } from './ai'
+import type { DataHubAssetSummary } from './datahub'
+import type { AgentProposal } from './pipeline'
+
+const asset: DataHubAssetSummary = {
+  urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers,PROD)',
+  name: 'customers', platform: 'snowflake', environment: 'PROD', description: 'Customers', owners: [], domain: 'Growth', tags: ['PII'], qualityStatus: 'failing', upstream: [], downstream: [{ urn: 'downstream', name: 'activation', sensitive: true }],
+  fields: Array.from({ length: 40 }, (_, index) => ({ name: `field_${index}`, type: 'string' as const, tags: index === 0 ? ['PII'] : undefined })),
+  freshness: { capturedAt: '2026-07-22T10:00:00.000Z', expiresAt: '2099-07-22T11:00:00.000Z', stale: false },
+}
+
+function proposal(): AgentProposal {
+  return { id: 'proposal', title: 'Profile', summary: 'Profile', rationale: 'Profile', addedNodes: [], updatedNodes: [], addedEdges: [], removedEdgeIds: [], datahubReads: [], writeback: 'Record profile.' }
+}
+
+describe('bounded data profile memory', () => {
+  it('stores compact metadata without raw rows and reports anomalies', () => {
+    const profile = createDataProfileSnapshot(asset)
+    expect(profile.profiledFields).toHaveLength(32)
+    expect(profile.fieldCount).toBe(40)
+    expect(profile.sensitiveFieldCount).toBe(1)
+    expect(profile.anomalies).toEqual(expect.arrayContaining(['No accountable owner is recorded.', 'DataHub quality checks are failing.']))
+    expect(JSON.stringify(profile)).not.toContain('rawRows')
+    expect(profile.tokenEstimate).toBeGreaterThan(0)
+    expect(isDataProfileFresh(profile)).toBe(true)
+  })
+
+  it('adds one sidecar profile card and reuses it as compact evidence', () => {
+    const next = proposal()
+    addDataProfileToProposal(next, [], asset)
+    addDataProfileToProposal(next, [], asset)
+    expect(next.addedNodes).toHaveLength(1)
+    expect(next.addedNodes[0]).toMatchObject({ data: { kind: 'profile', pinned: true, profile: { sourceUrn: asset.urn } } })
+    expect(dataProfileEvidence(next.addedNodes[0].data.profile!).evidence[0]).toMatchObject({ tool: 'data_profile_memory', cached: true })
+  })
+
+  it('replaces a duplicated source schema with a reference to fresh profile memory', () => {
+    const next = proposal()
+    addDataProfileToProposal(next, [], asset)
+    const source = { id: 'source', type: 'pipeline' as const, position: { x: 0, y: 0 }, data: { kind: 'source' as const, label: 'Customers', description: '', owner: 'Data', status: 'healthy' as const, schema: asset.fields, datahubUrn: asset.urn } }
+    const graph = compactGraph([source, next.addedNodes[0]], [])
+    expect(graph.nodes[0]).toMatchObject({ profileRef: next.addedNodes[0].id, schema: [] })
+    expect(graph.nodes[1].profile).toMatchObject({ fieldCount: 40, profiledFields: expect.any(Array) })
+  })
+})

@@ -17,6 +17,13 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
     output: 'DatasetContext',
     allowedTools: ['get_entities', 'list_schema_fields'],
   },
+  profile: {
+    role: 'Profile memory keeper',
+    mission: 'Persist a bounded, reusable summary of schema, quality, freshness and anomalies without storing raw rows.',
+    input: 'Trusted DataHub metadata and optional aggregate statistics',
+    output: 'CompactDataProfile',
+    allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
+  },
   analysis: {
     role: 'Context analyst',
     mission: 'Inspect metadata, classifications and downstream impact before deciding.',
@@ -75,9 +82,10 @@ function edgePriority(edge: Edge) {
 }
 
 export function planPrimaryAgentRoute(nodes: PipelineNode[], edges: Edge[]): PipelineNode[] {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const executableNodes = nodes.filter((node) => node.data.kind !== 'profile')
+  const byId = new Map(executableNodes.map((node) => [node.id, node]))
   const incoming = new Set(edges.map((edge) => edge.target))
-  const sources = nodes
+  const sources = executableNodes
     .filter((node) => node.data.kind === 'source' || !incoming.has(node.id))
     .sort((left, right) => left.position.x - right.position.x || left.position.y - right.position.y)
   const route: PipelineNode[] = []
