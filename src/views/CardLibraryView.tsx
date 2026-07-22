@@ -1,4 +1,4 @@
-import { BrainCircuit, ChartColumn, Database, Dices, GitBranch, PanelLeftClose, Plus, SearchCheck, Send, UserCheck, WandSparkles } from 'lucide-react'
+import { BrainCircuit, ChartColumn, ChartNetwork, Database, Dices, GitBranch, PanelLeftClose, Plus, SearchCheck, Send, UserCheck, WandSparkles } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { cardLabels, type CardKind } from '../domain/pipeline'
 
@@ -6,6 +6,7 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
   { kind: 'source', description: 'Table, API or event stream', icon: Database },
   { kind: 'profile', description: 'Compact reusable data reading', icon: ChartColumn },
   { kind: 'analysis', description: 'Read schema, quality and lineage', icon: BrainCircuit },
+  { kind: 'impact', description: 'Trace change impact to models', icon: ChartNetwork },
   { kind: 'split', description: 'Route rows into branches', icon: GitBranch },
   { kind: 'decision', description: 'Correction or human escalation', icon: Dices },
   { kind: 'transform', description: 'Clean, map or aggregate', icon: WandSparkles },

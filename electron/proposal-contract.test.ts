@@ -45,6 +45,13 @@ describe('strict provider proposal contract', () => {
     expect(result.actions[0]).toMatchObject({ node_id: 'customers-profile', kind: 'profile' })
   })
 
+  it('accepts multiple scoped Impact Analysis atoms', () => {
+    const featureImpact = { ...validProposal.actions[0], node_id: 'feature-impact', kind: 'impact', label: 'Feature impact', rule: 'scope(customer_age) → customer_features' }
+    const modelImpact = { ...validProposal.actions[0], node_id: 'model-impact', kind: 'impact', label: 'Model impact', rule: 'scope(customer_features) → churn_prediction_v3' }
+    const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [featureImpact, modelImpact] }, payload)
+    expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
+  })
+
   it.each([
     ['malformed JSON', '{"title":'],
     ['unknown root field', JSON.stringify({ ...validProposal, surprise: true })],

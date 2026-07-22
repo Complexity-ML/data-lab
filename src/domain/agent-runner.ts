@@ -31,6 +31,13 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
     output: 'AnalysisFindings',
     allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
   },
+  impact: {
+    role: 'Lineage impact analyst',
+    mission: 'Trace a dataset or schema change through DataHub lineage, rank affected datasets, features, pipelines, models and deployments, then recommend the smallest safe response.',
+    input: 'ChangeEvent + DatasetContext + DataHubLineage',
+    output: 'RankedImpactReport + RecommendedActions',
+    allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
+  },
   split: {
     role: 'Policy router',
     mission: 'Choose the governed branch from an explicit, inspectable rule.',

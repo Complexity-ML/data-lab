@@ -144,6 +144,8 @@ docs/              Architecture, submission copy and demo script
 config/            DataHub MCP configuration example
 ```
 
+Optional synthetic scenarios are loaded explicitly from **Settings → Examples**; the default workbench remains blank. Judge-readable expected validations and agent diffs for PII masking, ML lineage/schema impact, and broken ownership/quality are available in [`examples/presets/`](examples/presets/).
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).

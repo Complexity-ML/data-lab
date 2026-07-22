@@ -10,6 +10,7 @@ describe('atomic pipeline validation', () => {
       'edge-integrity',
       'acyclic-lineage',
       'card-contracts',
+      'schema-contract',
       'sensitive-data-path',
       'datahub-governance',
     ])
@@ -97,5 +98,13 @@ describe('atomic pipeline validation', () => {
     const profile = { ...newCard('profile', 9), id: 'profile-memory' }
     const findings = validatePipeline([...initialNodes, profile], initialEdges)
     expect(findings.some((finding) => finding.nodeId === profile.id && finding.atomId === 'card-contracts')).toBe(false)
+  })
+
+  it('detects a declared breaking schema type drift', () => {
+    const source = { ...newCard('source', 0), id: 'drift-source', data: { ...newCard('source', 0).data, schema: [{ name: 'customer_id', type: 'number' as const }] } }
+    const contract = { ...newCard('validation', 1), id: 'drift-contract', data: { ...newCard('validation', 1).data, rule: 'schema_contract: customer_id:string' } }
+    const output = { ...newCard('output', 2), id: 'drift-output' }
+    const findings = validatePipeline([source, contract, output], [{ id: 'e-1', source: source.id, target: contract.id }, { id: 'e-2', source: contract.id, target: output.id }])
+    expect(findings).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'schema-contract-type-drift-contract-customer_id', atomId: 'schema-contract', severity: 'error' })]))
   })
 })

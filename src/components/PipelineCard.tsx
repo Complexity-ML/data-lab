@@ -1,11 +1,12 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { BrainCircuit, ChartColumn, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
   source: Database,
   profile: ChartColumn,
   analysis: BrainCircuit,
+  impact: ChartNetwork,
   split: GitBranch,
   decision: Dices,
   transform: WandSparkles,

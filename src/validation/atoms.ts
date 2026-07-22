@@ -1,4 +1,4 @@
-import type { CardKind } from '../domain/pipeline'
+import type { CardKind, PipelineNode } from '../domain/pipeline'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
 
 function issue(atomId: string, value: Omit<ValidationIssue, 'atomId'>): ValidationIssue {
@@ -101,6 +101,43 @@ export const cardContractsAtom: ValidationAtom = {
       if (node.data.kind !== 'source' && !context.edges.some((edge) => edge.target === node.id)) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
       if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id)) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
+    })
+  },
+}
+
+export const schemaContractAtom: ValidationAtom = {
+  id: 'schema-contract',
+  label: 'Declared schema contracts',
+  run({ nodes, edges }) {
+    const byId = new Map(nodes.map((node) => [node.id, node]))
+    const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
+    for (const edge of edges) incoming.get(edge.target)?.push(edge.source)
+    return nodes.flatMap((contract) => {
+      if (contract.data.kind !== 'validation') return []
+      const declaration = contract.data.rule?.match(/schema_contract\s*:\s*(.+)/i)?.[1]
+      if (!declaration) return []
+      const expected = declaration.split(',').flatMap((entry) => {
+        const [name, type] = entry.trim().split(':').map((value) => value.trim())
+        return name && ['string', 'number', 'boolean', 'timestamp'].includes(type) ? [{ name, type }] : []
+      })
+      const queue = [...(incoming.get(contract.id) ?? [])]
+      const visited = new Set<string>()
+      let upstream = undefined as PipelineNode | undefined
+      while (queue.length && !upstream) {
+        const id = queue.shift()!
+        if (visited.has(id)) continue
+        visited.add(id)
+        const candidate = byId.get(id)
+        if (!candidate) continue
+        if (candidate.data.schema.length) upstream = candidate
+        else queue.push(...(incoming.get(id) ?? []))
+      }
+      if (!upstream) return [issue(this.id, { id: `schema-contract-unavailable-${contract.id}`, severity: 'warning', nodeId: contract.id, title: 'Schema contract cannot be evaluated', detail: 'No upstream card exposes a schema for this declared contract.' })]
+      return expected.flatMap((field) => {
+        const actual = upstream!.data.schema.find((candidate) => candidate.name === field.name)
+        if (!actual) return [issue(this.id, { id: `schema-contract-missing-${contract.id}-${field.name}`, severity: 'error', nodeId: contract.id, title: `Required field ${field.name} is missing`, detail: `${contract.data.label} expects ${field.name}:${field.type}, but ${upstream!.data.label} does not expose that field.` })]
+        return actual.type !== field.type ? [issue(this.id, { id: `schema-contract-type-${contract.id}-${field.name}`, severity: 'error', nodeId: contract.id, title: `Breaking type drift on ${field.name}`, detail: `${contract.data.label} expects ${field.name}:${field.type}, but ${upstream!.data.label} exposes ${field.name}:${actual.type}.` })] : []
+      })
     })
   },
 }

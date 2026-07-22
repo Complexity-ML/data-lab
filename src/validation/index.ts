@@ -1,6 +1,6 @@
 import type { Edge } from '@xyflow/react'
 import type { PipelineNode } from '../domain/pipeline'
-import { acyclicLineageAtom, cardContractsAtom, dataHubGovernanceAtom, edgeIntegrityAtom, pipelinePresenceAtom, pipelineTerminalsAtom, sensitiveDataAtom } from './atoms'
+import { acyclicLineageAtom, cardContractsAtom, dataHubGovernanceAtom, edgeIntegrityAtom, pipelinePresenceAtom, pipelineTerminalsAtom, schemaContractAtom, sensitiveDataAtom } from './atoms'
 import type { ValidationAtom, ValidationIssue } from './types'
 
 export const validationAtoms: ValidationAtom[] = [
@@ -9,6 +9,7 @@ export const validationAtoms: ValidationAtom[] = [
   edgeIntegrityAtom,
   acyclicLineageAtom,
   cardContractsAtom,
+  schemaContractAtom,
   sensitiveDataAtom,
   dataHubGovernanceAtom,
 ]
