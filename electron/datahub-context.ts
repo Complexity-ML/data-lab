@@ -23,6 +23,15 @@ export function sanitizeEvidenceSummary(value: string): string {
     .replace(/([?&](?:api[_-]?key|access[_-]?token|token|secret|password)=)[^&#\s]+/gi, '$1[REDACTED]')
 }
 
+export function sanitizeCatalogText(value: unknown, maxLength = 1_000): string {
+  if (typeof value !== 'string') return ''
+  return sanitizeEvidenceSummary(value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength)
+}
+
 function record(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}
 }
@@ -57,7 +66,7 @@ export function parseSearchResults(payload: unknown): { urn: string; name: strin
     if (!urn.startsWith('urn:li:dataset:') || seen.has(urn)) return []
     seen.add(urn)
     const properties = record(entity.properties)
-    return [{ urn, name: typeof properties.name === 'string' ? properties.name : datasetIdentity(urn).name }]
+    return [{ urn, name: sanitizeCatalogText(properties.name, 240) || datasetIdentity(urn).name }]
   }).slice(0, 20)
 }
 
@@ -70,7 +79,7 @@ function normalizedType(value: unknown): 'string' | 'number' | 'boolean' | 'time
 }
 
 function names(values: unknown[], resolver: (value: JsonRecord) => unknown): string[] {
-  return [...new Set(values.map((value) => resolver(record(value))).filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map((value) => value.trim().slice(0, 160)))]
+  return [...new Set(values.map((value) => sanitizeCatalogText(resolver(record(value)), 160)).filter(Boolean))]
 }
 
 function findDatasetUrns(value: unknown, found = new Map<string, boolean>(), depth = 0): Map<string, boolean> {
@@ -82,7 +91,7 @@ function findDatasetUrns(value: unknown, found = new Map<string, boolean>(), dep
   const current = value as JsonRecord
   const sensitive = /pii|sensitive|personal|gdpr/i.test(JSON.stringify(current))
   for (const item of Object.values(current)) {
-    if (typeof item === 'string' && item.startsWith('urn:li:dataset:')) found.set(item, Boolean(found.get(item)) || sensitive)
+    if (typeof item === 'string' && item.startsWith('urn:li:dataset:') && item.length <= 2_000) found.set(item, Boolean(found.get(item)) || sensitive)
     else findDatasetUrns(item, found, depth + 1)
   }
   return found
@@ -117,7 +126,7 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
   const fields = array(schema.fields).map((value) => {
     const field = record(value)
     const fieldTags = [...new Set([...array(field.editedTags), ...array(field.editedGlossaryTerms)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 160)))]
-    return { name: typeof field.fieldPath === 'string' ? field.fieldPath.slice(0, 240) : '', type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }
+    return { name: sanitizeCatalogText(field.fieldPath, 240), type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }
   }).filter((field) => field.name).slice(0, 250)
   const serialized = JSON.stringify(entity)
   const capturedAt = options.capturedAt ?? new Date().toISOString()
@@ -125,12 +134,12 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
 
   return {
     urn,
-    name: typeof entity.name === 'string' ? entity.name : typeof properties.name === 'string' ? properties.name : options.name ?? identity.name,
-    platform: typeof platform.name === 'string' ? platform.name : identity.platform,
+    name: sanitizeCatalogText(entity.name, 240) || sanitizeCatalogText(properties.name, 240) || sanitizeCatalogText(options.name, 240) || identity.name,
+    platform: sanitizeCatalogText(platform.name, 120) || identity.platform,
     environment: identity.environment,
-    description: typeof editableProperties.description === 'string' ? editableProperties.description : typeof properties.description === 'string' ? properties.description : 'No description available in DataHub.',
+    description: sanitizeCatalogText(editableProperties.description, 2_000) || sanitizeCatalogText(properties.description, 2_000) || 'No description available in DataHub.',
     owners,
-    domain: typeof domainName === 'string' ? domainName : undefined,
+    domain: sanitizeCatalogText(domainName, 160) || undefined,
     tags: [...new Set([...tags, ...terms])],
     fields,
     qualityStatus: /"result"\s*:\s*"?(FAIL|ERROR)|failing|critical/i.test(serialized) ? 'failing' : /assertion|quality|health/i.test(serialized) ? 'healthy' : 'unavailable',

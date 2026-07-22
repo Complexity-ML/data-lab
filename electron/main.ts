@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type Br
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
-import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
+import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, parseDataHubDecisionRequest, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
@@ -154,6 +154,18 @@ function createMainWindow() {
   })
   mainWindow = window
 
+  const developmentUrl = process.env.VITE_DEV_SERVER_URL
+  const isTrustedRendererUrl = (target: string) => {
+    try {
+      const parsed = new URL(target)
+      if (developmentUrl) return parsed.origin === new URL(developmentUrl).origin
+      return parsed.protocol === 'file:' && decodeURIComponent(parsed.pathname).endsWith('/dist/index.html')
+    } catch { return false }
+  }
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-navigate', (event, target) => { if (!isTrustedRendererUrl(target)) event.preventDefault() })
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
+
   const publishWindowState = () => {
     if (!window.isDestroyed()) window.webContents.send(windowStateChangedChannel, { fullscreen: window.isFullScreen() })
   }
@@ -171,7 +183,6 @@ function createMainWindow() {
     if (mainWindow === window) mainWindow = undefined
   })
 
-  const developmentUrl = process.env.VITE_DEV_SERVER_URL
   if (developmentUrl) void window.loadURL(developmentUrl)
   else void window.loadFile(join(currentDirectory, '..', 'dist', 'index.html'))
 }
@@ -201,7 +212,23 @@ app.whenReady().then(() => {
     return inspectDataHubAsset(payload.urn, payload.force === true)
   })
   ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
-  ipcMain.handle(mcpWritebackChannel, (_event, payload: unknown) => writeDataHubDecision(payload))
+  ipcMain.handle(mcpWritebackChannel, async (event, payload: unknown) => {
+    const request = parseDataHubDecisionRequest(payload)
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      type: 'warning' as const,
+      title: 'Confirm DataHub write-back',
+      message: 'Publish this approved Decision to DataHub?',
+      detail: `Tool: save_document\nRevision: ${request.revisionId}\nTitle: DATA LAB · ${request.title}\nRelated assets: ${request.relatedAssets.length}\n\nThis is an external mutation and cannot be undone by restoring the local graph.`,
+      buttons: ['Publish to DataHub', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    }
+    const confirmation = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+    if (confirmation.response !== 0) throw new Error('DataHub write-back cancelled before any external mutation')
+    return writeDataHubDecision(request)
+  })
   ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown; remind?: unknown }) => notifyHumanReview(payload))
   ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
   ipcMain.handle(aiStatusChannel, () => getAiStatus())

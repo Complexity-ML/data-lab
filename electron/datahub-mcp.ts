@@ -55,6 +55,8 @@ let toolCatalog: ToolCatalog | undefined
 let toolDiscoveryPromise: Promise<ToolCatalog> | undefined
 const contextCache = new Map<string, { result: unknown; capturedAt: number; expiresAt: number }>()
 const knownReadTools = new Set(['search', 'get_entities', 'list_schema_fields', 'get_lineage'])
+const maxMcpResultBytes = 2_000_000
+const maxMcpCatalogBytes = 512_000
 const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_entities: 5 * 60_000,
   list_schema_fields: 2 * 60_000,
@@ -83,6 +85,18 @@ const settingKeys = {
 
 function validateDatasetUrn(urn: string) {
   if (!urn.startsWith('urn:li:dataset:') || urn.length > 2_000) throw new Error('A valid DataHub dataset URN is required')
+}
+
+export function assertBoundedMcpPayload<T>(value: T, label = 'DataHub MCP response', maxBytes = maxMcpResultBytes): T {
+  let serialized: string
+  try { serialized = JSON.stringify(value) } catch { throw new Error(`${label} is not valid serializable data`) }
+  const bytes = Buffer.byteLength(serialized, 'utf8')
+  if (bytes > maxBytes) throw new Error(`${label} exceeded the ${maxBytes}-byte safety limit`)
+  return value
+}
+
+function safeToolName(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 120 && /^[a-z0-9_.-]+$/i.test(value)
 }
 
 function decryptStoredToken(encrypted: string | null): string | undefined {
@@ -202,6 +216,7 @@ async function discoverTools(client: Client, label = 'DataHub MCP tool discovery
   if (toolCatalog) return toolCatalog
   if (!toolDiscoveryPromise) {
     const pending = client.listTools().then((catalog) => {
+      assertBoundedMcpPayload(catalog, 'DataHub MCP tool catalog', maxMcpCatalogBytes)
       toolCatalog = catalog
       return catalog
     })
@@ -214,7 +229,7 @@ async function discoverTools(client: Client, label = 'DataHub MCP tool discovery
 export async function resolveReadableToolNames(discovery: () => Promise<{ tools: { name: string }[] }>): Promise<Set<string>> {
   try {
     const catalog = await discovery()
-    return new Set(catalog.tools.map((tool) => tool.name))
+    return new Set(catalog.tools.map((tool) => tool.name).filter(safeToolName))
   } catch {
     // Read calls have their own timeouts and return bounded error evidence. A slow
     // listTools response must not block known read-only DataHub operations.
@@ -229,7 +244,7 @@ async function discoverReadableToolNames(client: Client): Promise<Set<string>> {
 export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
   const config = configuration()
   if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], settings: config.settings }
-  const tools = toolCatalog?.tools.map((tool) => tool.name).sort() ?? []
+  const tools = toolCatalog?.tools.map((tool) => tool.name).filter(safeToolName).sort() ?? []
   return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? `DataHub MCP connected${tools.length ? ` · ${tools.length} tools available` : ''}` : config.message, toolCount: tools.length, tools, settings: config.settings }
 }
 
@@ -261,7 +276,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
   if (config.mode === 'demo') return getDataHubMcpConfigurationStatus()
   const client = await connectClient()
   const tools = await discoverTools(client)
-  const names = tools.tools.map((tool) => tool.name).sort()
+  const names = tools.tools.map((tool) => tool.name).filter(safeToolName).sort()
   return {
     mode: 'connected',
     transport: activeMode ?? config.mode,
@@ -301,7 +316,7 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
     evidence: { name, status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
   }
   try {
-    const result = await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name)
+    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name), `${name} response`)
     const status = result.isError ? 'error' as const : 'ok' as const
     const expiresAt = now + resolveEvidenceTtlMs()[name]
     if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
@@ -324,13 +339,13 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
   const available = await discoverReadableToolNames(client)
   if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
   const structuredQuery = clean === '*' || clean.startsWith('/q ') ? clean : `/q ${clean.replace(/\s+/g, '+')}`
-  const searchResult = await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search')
+  const searchResult = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search'), 'search response')
   if (searchResult.isError) throw new Error(summarizeResult(searchResult))
   const matches = parseSearchResults(readStructuredToolResult(searchResult))
   if (!matches.length) return []
   let details: Awaited<ReturnType<typeof client.callTool>> | undefined
   if (available.has('get_entities')) {
-    try { details = await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities') }
+    try { details = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities'), 'get_entities response') }
     catch { details = undefined }
   }
   const entityPayload = details && !details.isError ? readStructuredToolResult(details) : undefined
@@ -366,9 +381,9 @@ export function invalidateDataHubContext(urn?: string) {
   return { invalidated: true }
 }
 
-export async function writeDataHubDecision(payload: unknown): Promise<{ written: true; tool: 'save_document'; summary: string }> {
-  const config = configuration()
-  if (!config.settings.writebackEnabled) throw new Error('DataHub write-back is disabled in Settings')
+export interface DataHubDecisionRequest { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }
+
+export function parseDataHubDecisionRequest(payload: unknown): DataHubDecisionRequest {
   if (!payload || typeof payload !== 'object') throw new Error('Invalid DataHub write-back request')
   const value = payload as Record<string, unknown>
   const revisionId = typeof value.revisionId === 'string' ? value.revisionId.trim().slice(0, 180) : ''
@@ -377,12 +392,19 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
   const author = typeof value.author === 'string' ? value.author.trim().slice(0, 180) : 'DATA LAB operator'
   const relatedAssets = Array.isArray(value.relatedAssets) ? value.relatedAssets.filter((item): item is string => typeof item === 'string' && item.startsWith('urn:li:')).slice(0, 20) : []
   if (!revisionId || !title || !rationale) throw new Error('Revision ID, title and rationale are required for DataHub write-back')
+  return { revisionId, title, rationale, author, relatedAssets }
+}
+
+export async function writeDataHubDecision(payload: unknown): Promise<{ written: true; tool: 'save_document'; summary: string }> {
+  const config = configuration()
+  if (!config.settings.writebackEnabled) throw new Error('DataHub write-back is disabled in Settings')
+  const { revisionId, title, rationale, author, relatedAssets } = parseDataHubDecisionRequest(payload)
   const client = await connectClient()
   const listed = await discoverTools(client, 'DataHub MCP mutation discovery')
   const tool = listed.tools.find((candidate) => candidate.name === 'save_document')
   if (!tool || tool.annotations?.readOnlyHint !== false) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
   const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
-  const result = await withTimeout(client.callTool({ name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }), 20_000, 'save_document')
+  const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }), 20_000, 'save_document'), 'save_document response')
   if (result.isError) throw new Error(summarizeResult(result))
   return { written: true, tool: 'save_document', summary: summarizeResult(result) }
 }
