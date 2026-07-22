@@ -1,7 +1,8 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
+import { scenarioPresets } from './presets'
 
-export type CardKind = 'source' | 'profile' | 'analysis' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -88,6 +89,7 @@ export const cardLabels: Record<CardKind, string> = {
   source: 'Data Source',
   profile: 'Data Profile',
   analysis: 'Data Analysis',
+  impact: 'Impact Analysis',
   split: 'Split',
   decision: 'Agent Decision',
   transform: 'Transform',
@@ -229,18 +231,21 @@ export const customerActivationEdges: Edge[] = [
 export const initialNodes: PipelineNode[] = []
 export const initialEdges: Edge[] = []
 
-export type PipelinePresetId = 'empty' | 'customer-activation'
+export type PipelinePresetId = 'empty' | 'customer-activation' | 'pii-masking' | 'schema-drift' | 'broken-governance'
 
 export function loadPipelinePreset(preset: PipelinePresetId): { title: string; nodes: PipelineNode[]; edges: Edge[] } {
   if (preset === 'empty') return { title: 'Untitled pipeline', nodes: [], edges: [] }
+  const selected = preset === 'customer-activation'
+    ? { title: 'Customer activation', nodes: customerActivationNodes, edges: customerActivationEdges }
+    : scenarioPresets[preset]
   return {
-    title: 'Customer activation',
-    nodes: customerActivationNodes.map((node) => ({
+    title: selected.title,
+    nodes: selected.nodes.map((node) => ({
       ...node,
       position: { ...node.position },
       data: { ...node.data, schema: node.data.schema.map((field) => ({ ...field, tags: field.tags ? [...field.tags] : undefined })) },
     })),
-    edges: customerActivationEdges.map((edge) => ({ ...edge })),
+    edges: selected.edges.map((edge) => ({ ...edge })),
   }
 }
 
@@ -270,7 +275,7 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
       owner: 'Unassigned',
       status: 'draft',
       schema: [],
-      rule: kind === 'split' ? 'condition = true' : undefined,
+      rule: kind === 'split' ? 'condition = true' : kind === 'impact' ? 'scope(change) → DataHub lineage → ranked risks → recommended actions' : undefined,
     },
   }
 }

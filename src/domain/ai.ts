@@ -61,7 +61,7 @@ export interface AiProposalResponse {
   usage?: unknown
 }
 
-const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)

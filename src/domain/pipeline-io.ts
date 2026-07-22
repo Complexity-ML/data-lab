@@ -5,7 +5,7 @@ import type { DataHubEvidence } from './datahub'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
-const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function redactExportText(value: string) {
   return value

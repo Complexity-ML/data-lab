@@ -305,6 +305,7 @@ button { color: inherit; }
 .palette-source > span { color: #2563eb; background: var(--source); }
 .palette-profile > span { color: #047857; background: var(--profile); }
 .palette-analysis > span { color: #4f46e5; background: var(--analysis); }
+.palette-impact > span { color: #c2410c; background: var(--impact); }
 .palette-split > span { color: #7c3aed; background: var(--split); }
 .palette-decision > span { color: #9333ea; background: var(--decision); }
 .palette-transform > span { color: #b45309; background: var(--transform); }
@@ -359,6 +360,7 @@ button { color: inherit; }
 .pipeline-card.card-source { border-left-color: var(--source-strong); background: linear-gradient(120deg, var(--source), #fff 55%); }
 .pipeline-card.card-profile { border-left-color: var(--profile-strong); background: linear-gradient(120deg, var(--profile), #fff 55%); }
 .pipeline-card.card-analysis { border-left-color: var(--analysis-strong); background: linear-gradient(120deg, var(--analysis), #fff 55%); }
+.pipeline-card.card-impact { border-left-color: var(--impact-strong); background: linear-gradient(120deg, var(--impact), #fff 55%); }
 .pipeline-card.card-split { border-left-color: var(--split-strong); background: linear-gradient(120deg, var(--split), #fff 55%); }
 .pipeline-card.card-decision { border-left-color: var(--decision-strong); background: linear-gradient(120deg, var(--decision), #fff 55%); }
 .pipeline-card.card-transform { border-left-color: var(--transform-strong); background: linear-gradient(120deg, var(--transform), #fff 55%); }
@@ -631,6 +633,7 @@ button { color: inherit; }
 :root[data-theme='dark'] .pipeline-card.card-source { background: linear-gradient(118deg, rgb(37 99 235 / 31%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(96 165 250 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-profile { background: linear-gradient(118deg, rgb(5 150 105 / 31%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(52 211 153 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-analysis { background: linear-gradient(118deg, rgb(79 70 229 / 34%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(129 140 248 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
+:root[data-theme='dark'] .pipeline-card.card-impact { background: linear-gradient(118deg, rgb(234 88 12 / 30%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(251 146 60 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-split { background: linear-gradient(118deg, rgb(124 58 237 / 32%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(167 139 250 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-decision { background: linear-gradient(118deg, rgb(168 85 247 / 34%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(192 132 252 / 22%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-transform { background: linear-gradient(118deg, rgb(217 119 6 / 29%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(251 191 36 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }

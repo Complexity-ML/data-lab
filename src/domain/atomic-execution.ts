@@ -89,7 +89,7 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
       } else {
         nodeStates[node.id] = 'completed'
         completed.push(node.id)
-        events.push({ nodeId: node.id, sequence: ++sequence, state: 'completed', message: 'Atomic card commit completed.' })
+        events.push({ nodeId: node.id, sequence: ++sequence, state: 'completed', message: node.data.kind === 'impact' ? 'Impact Analysis atom committed from its versioned evidence snapshot.' : 'Atomic card commit completed.' })
       }
       progressed = true
     }

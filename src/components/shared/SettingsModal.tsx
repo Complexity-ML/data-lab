@@ -348,6 +348,9 @@ export function SettingsModal(props: SettingsModalProps) {
           <section className="settings-section preset-grid">
             <button onClick={() => onLoadPreset('empty')} type="button"><LayoutTemplate size={21} /><strong>Empty canvas</strong><small>Clear the workspace and build from your own DataHub source.</small></button>
             <button onClick={() => onLoadPreset('customer-activation')} type="button"><Database size={21} /><strong>Customer activation</strong><small>Load the ecommerce governance example for exploration.</small></button>
+            <button onClick={() => onLoadPreset('pii-masking')} type="button"><KeyRound size={21} /><strong>PII masking lab</strong><small>See the agent insert a governed protection step before activation.</small></button>
+            <button onClick={() => onLoadPreset('schema-drift')} type="button"><Network size={21} /><strong>ML impact &amp; drift</strong><small>Trace a training schema change through features to a production model.</small></button>
+            <button onClick={() => onLoadPreset('broken-governance')} type="button"><AlertTriangle size={21} /><strong>Ownership &amp; quality</strong><small>Repair missing ownership and failing quality metadata.</small></button>
           </section>
         </article>}
 
