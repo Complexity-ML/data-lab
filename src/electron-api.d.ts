@@ -1,6 +1,7 @@
 import type { SchemaField } from './domain/pipeline'
 import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
 import type { DataHubAssetSummary } from './domain/datahub'
+import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from './domain/workspace'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -78,8 +79,15 @@ declare global {
       configureChatGPT(payload: { model: string; effort: string }): Promise<ChatGPTSessionStatus>
       runChatGPTProposal(payload: unknown): Promise<AiProposalResponse>
       cancelChatGPTProposal(): Promise<{ cancelled: boolean }>
-      loadWorkspace(): Promise<{ projectTitle?: string; nodes?: import('./domain/pipeline').PipelineNode[]; edges?: import('@xyflow/react').Edge[]; versions?: import('./domain/versioning').PipelineVersion[] } | null>
-      saveWorkspace(payload: { projectTitle: string; nodes: import('./domain/pipeline').PipelineNode[]; edges: import('@xyflow/react').Edge[]; versions: import('./domain/versioning').PipelineVersion[] }): Promise<{ saved: true }>
+      loadWorkspaceState(): Promise<WorkspaceManagerState>
+      createWorkspace(name: string, workspace: WorkspacePayload): Promise<WorkspaceManagerState>
+      renameWorkspace(workspaceId: string, name: string): Promise<WorkspaceSummary[]>
+      duplicateWorkspace(workspaceId: string, name?: string): Promise<WorkspaceManagerState>
+      archiveWorkspace(workspaceId: string): Promise<WorkspaceManagerState>
+      openWorkspace(workspaceId: string): Promise<WorkspaceManagerState>
+      autosaveWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string } | { saved: false; reason: 'no-active-workspace' }>
+      commitWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string }>
+      resolveWorkspaceRecovery(action: 'recover' | 'discard'): Promise<WorkspaceManagerState>
       getActiveAiSource(): Promise<{ source: ActiveAiSource }>
       setActiveAiSource(source: ActiveAiSource): Promise<{ source: ActiveAiSource }>
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void

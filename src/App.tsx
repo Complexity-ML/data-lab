@@ -5,6 +5,7 @@ import { AppHeader } from './components/AppHeader'
 import { ReviewPanel } from './components/ReviewPanel'
 import { SettingsModal } from './components/shared/SettingsModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
+import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
 import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
@@ -13,10 +14,12 @@ import { layoutPipeline } from './domain/layout'
 import { createPipelineExport, parsePipelineExport } from './domain/pipeline-io'
 import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
 import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
+import { notifyError } from './domain/toasts'
 import { validatePipeline } from './validation'
 import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
 import { useDataHubConnection } from './hooks/useDataHubConnection'
 import { usePipelineVersions } from './hooks/usePipelineVersions'
+import { useWorkspacePersistence } from './hooks/useWorkspacePersistence'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
@@ -38,7 +41,8 @@ export default function App() {
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
-  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
+  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
+  const workspacePersistence = useWorkspacePersistence({ edges, inspectorOpen, libraryOpen, nodes, projectTitle, setActivity, setEdges, setInspectorOpen, setLibraryOpen, setNodes, setProjectTitle, setSelectedId, setVersions, versions })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const flowInstance = useRef<{ screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -53,19 +57,6 @@ export default function App() {
 
   useEffect(() => {
     window.localStorage.removeItem('data-lab-versions')
-  }, [])
-
-  useEffect(() => {
-    if (!window.dataLab) return
-    void window.dataLab.loadWorkspace().then((saved) => {
-      if (!saved || !Array.isArray(saved.nodes) || !Array.isArray(saved.edges) || saved.nodes.length === 0) return
-      setNodes(saved.nodes)
-      setEdges(saved.edges)
-      setVersions(Array.isArray(saved.versions) ? saved.versions : [])
-      setProjectTitle(typeof saved.projectTitle === 'string' ? saved.projectTitle : 'Saved pipeline')
-      setSelectedId(saved.nodes[0]?.id ?? '')
-      setActivity(`SQLite workspace restored · ${saved.nodes.length} cards · ${saved.versions?.length ?? 0} versions`)
-    }).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -198,6 +189,7 @@ export default function App() {
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
+      notifyError(error, 'Agent run failed')
       if (agentRunId.current !== runId) return
       setActivity(`Agent run failed · ${error instanceof Error ? error.message : 'unknown provider error'} · graph unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
@@ -250,6 +242,7 @@ export default function App() {
       setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
+      notifyError(error, 'Card analysis failed')
       if (agentRunId.current !== runId) return
       setActivity(`Card analysis failed · ${error instanceof Error ? error.message : 'unknown provider error'} · card unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
@@ -294,9 +287,10 @@ export default function App() {
       setProjectTitle(artifact.projectTitle)
       setSelectedId(artifact.graph.nodes[0]?.id ?? '')
       setProposal(undefined)
-      if (window.dataLab) await window.dataLab.saveWorkspace({ projectTitle: artifact.projectTitle, nodes: artifact.graph.nodes, edges: artifact.graph.edges, versions: artifact.versions })
+      await workspacePersistence.persistImportedWorkspace({ projectTitle: artifact.projectTitle, nodes: artifact.graph.nodes, edges: artifact.graph.edges, versions: artifact.versions, projectSettings: { inspectorOpen, libraryOpen } })
       setActivity(`Pipeline imported after full validation · ${artifact.graph.nodes.length} cards · schema v${artifact.schemaVersion}`)
     } catch (error) {
+      notifyError(error, 'Pipeline import failed')
       setActivity(`Import rejected · ${error instanceof Error ? error.message : 'invalid pipeline file'} · active workspace unchanged`)
     }
   }
@@ -321,15 +315,19 @@ export default function App() {
       })
       setActivity(`Revision committed locally · DataHub write-back succeeded · ${result.summary}`)
     } catch (error) {
+      notifyError(error, 'DataHub write-back failed')
       setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
     }
   }
 
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
-    <AppHeader agentRunning={agentRunning} cardCount={nodes.length} onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} onRun={() => void auditWithAgent()} projectTitle={projectTitle} />
+    <AppHeader agentRunning={agentRunning} cardCount={nodes.length} onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} onRun={() => void auditWithAgent()} projectTitle={projectTitle} saveState={workspacePersistence.saveState} />
+
+    {workspacePersistence.recovery && <WorkspaceRecoveryModal onDiscard={() => void workspacePersistence.resolveRecovery('discard')} onRecover={() => void workspacePersistence.resolveRecovery('recover')} updatedAt={workspacePersistence.recovery.updatedAt} />}
 
     {settingsOpen && <SettingsModal
       activeAiSource={activeAiSource}
+      activeWorkspaceId={workspacePersistence.activeWorkspaceId}
       aiStatus={aiStatus}
       chatGPTStatus={chatGPTStatus}
       connectionMode={connectionMode}
@@ -340,18 +338,23 @@ export default function App() {
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
       onApprovePendingReview={approvePendingVersion}
+      onArchiveWorkspace={workspacePersistence.archiveWorkspace}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
       onConfigureChatGPT={configureChatGPT}
       onConnectChatGPT={connectChatGPT}
+      onCreateWorkspace={workspacePersistence.createWorkspace}
       onDisconnectChatGPT={disconnectChatGPT}
       onEmergencyStop={stopAgent}
+      onDuplicateWorkspace={workspacePersistence.duplicateWorkspace}
       onExportPipeline={exportPipelineJson}
       onImportPipeline={importPipelineJson}
-      onLoadPreset={(presetId) => { loadPreset(presetId); setSettingsOpen(false) }}
+      onLoadPreset={(presetId) => { workspacePersistence.detachWorkspace(); loadPreset(presetId); setSettingsOpen(false) }}
+      onOpenWorkspace={workspacePersistence.openWorkspace}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
       onRejectPendingReview={rejectPendingVersionById}
       onRemindHumanReview={(version) => { if (window.dataLab) void window.dataLab.notifyHumanReview({ cardLabel: version.label, reason: version.description ?? 'Human Review is still pending.', versionId: version.id, remind: true }) }}
+      onRenameWorkspace={workspacePersistence.renameWorkspace}
       onSaveAiSettings={saveAiConnection}
       onSaveDataHubSettings={saveDataHubSettings}
       onSelectActiveAiSource={selectActiveAgentSource}
@@ -361,10 +364,13 @@ export default function App() {
       onValidate={() => setActivity(`${errors.length} blocking issue${errors.length === 1 ? '' : 's'} · ${issues.length} total findings`)}
       onRestoreVersion={restoreVersion}
       onSaveVersion={saveManualVersion}
+      onSaveWorkspace={workspacePersistence.saveWorkspace}
       projectTitle={projectTitle}
       selectedVersionId={requestedVersionId}
       theme={theme}
       versions={versions.map(({ id, label, createdAt, origin, blockingIssues, status, description, evidence }) => ({ id, label, createdAt, origin, blockingIssues, status, description, evidence }))}
+      workspaceSaveState={workspacePersistence.saveState}
+      workspaces={workspacePersistence.workspaces}
     />}
 
     <section className={`workspace${libraryOpen ? '' : ' library-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}`}>

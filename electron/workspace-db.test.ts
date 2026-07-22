@@ -1,10 +1,34 @@
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
+import {
+  archiveWorkspace,
+  autosaveWorkspaceDraft,
+  beginWorkspaceSession,
+  closeWorkspaceDatabase,
+  commitActiveWorkspace,
+  createWorkspace,
+  duplicateWorkspace,
+  listWorkspaces,
+  loadAppSetting,
+  loadSavedWorkspace,
+  loadWorkspaceManagerState,
+  markWorkspaceSessionClean,
+  openWorkspace,
+  renameWorkspace,
+  resolveWorkspaceRecovery,
+  saveAppSetting,
+  saveWorkspace,
+} from './workspace-db.js'
 
 let testDirectory: string | undefined
+
+function directory(label = 'workspace') {
+  testDirectory = mkdtempSync(join(tmpdir(), `data-lab-${label}-`))
+  return testDirectory
+}
 
 afterEach(() => {
   closeWorkspaceDatabase()
@@ -13,32 +37,113 @@ afterEach(() => {
 })
 
 describe('SQLite workspace persistence', () => {
-  it('restores the active graph and review lifecycle after restart', () => {
-    testDirectory = mkdtempSync(join(tmpdir(), 'data-lab-workspace-'))
+  it('starts with a blank workbench on a new installation', () => {
+    const target = directory('blank')
+    const state = loadWorkspaceManagerState(target)
+
+    expect(state.activeWorkspace).toBeUndefined()
+    expect(state.activeWorkspaceId).toBeNull()
+    expect(state.workspaces).toEqual([])
+    expect(autosaveWorkspaceDraft(target, { nodes: [{ id: 'example' }] })).toEqual({ saved: false, reason: 'no-active-workspace' })
+  })
+
+  it('migrates the legacy singleton without losing review history', () => {
+    const target = directory('migration')
+    const legacy = new DatabaseSync(join(target, 'data-lab.sqlite'))
+    legacy.exec('CREATE TABLE workspace_state (id INTEGER PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)')
     const payload = {
       projectTitle: 'Customer activation',
       nodes: [{ id: 'active-source' }],
       edges: [],
-      versions: [
-        { id: 'v-committed', status: 'committed' },
-        { id: 'v-review', status: 'pending-review', description: 'Upgrade: mask email' },
-        { id: 'v-rejected', status: 'rejected' },
-      ],
+      versions: [{ id: 'v-review', status: 'pending-review', description: 'Upgrade: mask email' }],
     }
+    legacy.prepare('INSERT INTO workspace_state (id, payload, updated_at) VALUES (1, ?, ?)').run(JSON.stringify(payload), '2026-07-20T08:00:00.000Z')
+    legacy.close()
 
-    expect(loadSavedWorkspace(testDirectory)).toBeNull()
-    expect(saveWorkspace(testDirectory, payload)).toEqual({ saved: true })
-    closeWorkspaceDatabase()
-    expect(loadSavedWorkspace(testDirectory)).toEqual(payload)
+    const state = loadWorkspaceManagerState(target)
+    expect(state.activeWorkspace?.name).toBe('Customer activation')
+    expect(state.activeWorkspace?.payload).toEqual(payload)
+    expect(state.workspaces).toHaveLength(1)
+    expect(loadSavedWorkspace(target)).toEqual(payload)
   })
 
-  it('persists application settings independently from the active workspace', () => {
-    testDirectory = mkdtempSync(join(tmpdir(), 'data-lab-settings-'))
-    saveAppSetting(testDirectory, 'active-ai-provider', 'anthropic')
-    saveWorkspace(testDirectory, { projectTitle: 'Independent graph' })
+  it('creates, renames, duplicates, opens and archives independent workspaces', () => {
+    const target = directory('manager')
+    const firstPayload = { projectTitle: 'Marketing', nodes: [{ id: 'source-a' }], projectSettings: { inspectorOpen: false, libraryOpen: true } }
+    const first = createWorkspace(target, 'Marketing', firstPayload)
+    const firstId = first.activeWorkspaceId!
+    renameWorkspace(target, firstId, 'Marketing governed')
+    const duplicate = duplicateWorkspace(target, firstId)
+    const duplicateId = duplicate.activeWorkspaceId!
+
+    expect(duplicateId).not.toBe(firstId)
+    expect(duplicate.activeWorkspace?.name).toBe('Marketing governed copy')
+    expect(duplicate.activeWorkspace?.payload).toEqual(firstPayload)
+
+    const reopened = openWorkspace(target, firstId)
+    expect(reopened.activeWorkspace?.name).toBe('Marketing governed')
+    const afterArchive = archiveWorkspace(target, firstId)
+    expect(afterArchive.activeWorkspaceId).toBe(duplicateId)
+    expect(afterArchive.workspaces.find((workspace) => workspace.id === firstId)?.archived).toBe(true)
+    expect(listWorkspaces(target)).toHaveLength(2)
+  })
+
+  it('keeps debounced drafts separate and offers recovery only after an unclean shutdown', () => {
+    const target = directory('recovery')
+    createWorkspace(target, 'Orders', { projectTitle: 'Orders', nodes: [{ id: 'baseline' }], versions: [] })
+    expect(beginWorkspaceSession(target)).toBe(false)
+    const draft = { projectTitle: 'Orders', nodes: [{ id: 'baseline' }], versions: [{ id: 'pending', status: 'pending-review', proposedNodes: [{ id: 'agent-proposal' }] }] }
+    expect(autosaveWorkspaceDraft(target, draft).saved).toBe(true)
+    expect(loadSavedWorkspace(target)).toEqual({ projectTitle: 'Orders', nodes: [{ id: 'baseline' }], versions: [] })
+
+    closeWorkspaceDatabase()
+    expect(beginWorkspaceSession(target)).toBe(true)
+    const crashed = loadWorkspaceManagerState(target, true)
+    expect(crashed.activeWorkspace?.payload).toEqual({ projectTitle: 'Orders', nodes: [{ id: 'baseline' }], versions: [] })
+    expect(crashed.recovery?.payload).toEqual(draft)
+    expect(crashed.activeWorkspace?.dirty).toBe(true)
+
+    const recovered = resolveWorkspaceRecovery(target, 'recover')
+    expect(recovered.activeWorkspace?.payload).toEqual(draft)
+    expect(recovered.recovery).toBeUndefined()
+    expect(recovered.activeWorkspace?.dirty).toBe(false)
+  })
+
+  it('can discard a crash draft and promotes autosaves on a clean shutdown', () => {
+    const target = directory('clean')
+    createWorkspace(target, 'Baseline', { value: 1 })
+    beginWorkspaceSession(target)
+    autosaveWorkspaceDraft(target, { value: 2 })
+    expect(resolveWorkspaceRecovery(target, 'discard').activeWorkspace?.payload).toEqual({ value: 1 })
+
+    autosaveWorkspaceDraft(target, { value: 3 })
+    markWorkspaceSessionClean(target)
+    closeWorkspaceDatabase()
+    expect(beginWorkspaceSession(target)).toBe(false)
+    expect(loadWorkspaceManagerState(target).activeWorkspace?.payload).toEqual({ value: 3 })
+  })
+
+  it('commits an autosaved draft before explicitly switching workspaces', () => {
+    const target = directory('switch')
+    const first = createWorkspace(target, 'First', { value: 'baseline' })
+    const firstId = first.activeWorkspaceId!
+    autosaveWorkspaceDraft(target, { value: 'autosaved before switch' })
+    const second = createWorkspace(target, 'Second', { value: 'second' })
+
+    openWorkspace(target, firstId)
+    expect(loadWorkspaceManagerState(target).activeWorkspace?.payload).toEqual({ value: 'autosaved before switch' })
+    expect(second.workspaces.find((workspace) => workspace.id === firstId)?.dirty).toBe(false)
+  })
+
+  it('supports explicit commits and preserves application settings independently', () => {
+    const target = directory('settings')
+    saveAppSetting(target, 'active-ai-provider', 'anthropic')
+    expect(saveWorkspace(target, { projectTitle: 'Independent graph' })).toEqual({ saved: true })
+    autosaveWorkspaceDraft(target, { projectTitle: 'Draft graph' })
+    commitActiveWorkspace(target, { projectTitle: 'Committed graph' })
     closeWorkspaceDatabase()
 
-    expect(loadAppSetting(testDirectory, 'active-ai-provider')).toBe('anthropic')
-    expect(loadSavedWorkspace(testDirectory)).toEqual({ projectTitle: 'Independent graph' })
+    expect(loadAppSetting(target, 'active-ai-provider')).toBe('anthropic')
+    expect(loadSavedWorkspace(target)).toEqual({ projectTitle: 'Committed graph' })
   })
 })

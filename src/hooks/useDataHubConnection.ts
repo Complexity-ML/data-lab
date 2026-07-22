@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { notifyError } from '../domain/toasts'
 
 type ConnectionMode = 'demo' | 'connected'
 type McpTransport = 'demo' | 'http' | 'stdio'
@@ -47,6 +48,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
       applyStatus(status)
       setActivity(status.mode === 'connected' ? `${status.message} · ready for agent audits` : status.message)
     } catch (error) {
+      notifyError(error, 'DataHub MCP connection failed')
       setConnectionMode('demo')
       setMcpMessage(error instanceof Error ? error.message : 'unknown error')
       setActivity(`DataHub MCP connection failed · ${error instanceof Error ? error.message : 'unknown error'}`)

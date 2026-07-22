@@ -8,7 +8,6 @@ import { validatePipeline } from '../validation'
 type PipelineVersionsOptions = {
   edges: Edge[]
   nodes: PipelineNode[]
-  projectTitle: string
   proposal?: AgentProposal
   setActivity: (message: string) => void
   setEdges: Dispatch<SetStateAction<Edge[]>>
@@ -18,13 +17,9 @@ type PipelineVersionsOptions = {
   setSelectedId: Dispatch<SetStateAction<string>>
 }
 
-export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId }: PipelineVersionsOptions) {
+export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId }: PipelineVersionsOptions) {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [pendingVersionId, setPendingVersionId] = useState<string>()
-
-  const persist = (nextVersions: PipelineVersion[], nextNodes = nodes, nextEdges = edges) => {
-    if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes: nextNodes, edges: nextEdges, versions: nextVersions })
-  }
 
   const recordPendingReview = (nextProposal: AgentProposal) => {
     const preview = applyProposal(nodes, edges, nextProposal)
@@ -34,11 +29,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale} Incremental diff: +${nextProposal.addedNodes.length} cards, ~${nextProposal.updatedNodes.length} cards, +${nextProposal.addedEdges.length} edges, -${nextProposal.removedEdgeIds.length} edges.`
     version.evidence = nextProposal.evidence
     setPendingVersionId(version.id)
-    setVersions((current) => {
-      const nextVersions = appendPipelineVersion(current, version)
-      persist(nextVersions)
-      return nextVersions
-    })
+    setVersions((current) => appendPipelineVersion(current, version))
     return version.id
   }
 
@@ -56,11 +47,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     version.evidence = proposal.evidence
     setNodes(layouted)
     setEdges(next.edges)
-    setVersions((current) => {
-      const nextVersions = commitPendingVersion(current, pendingVersionId, version)
-      persist(nextVersions, layouted, next.edges)
-      return nextVersions
-    })
+    setVersions((current) => commitPendingVersion(current, pendingVersionId, version))
     setSelectedId(proposal.updatedNodes[0]?.nodeId ?? proposal.addedNodes[0]?.id ?? '')
     setProposal(undefined)
     setPendingVersionId(undefined)
@@ -69,11 +56,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
   }
 
   const rejectProposal = () => {
-    if (pendingVersionId) setVersions((current) => {
-      const nextVersions = rejectPendingVersion(current, pendingVersionId)
-      persist(nextVersions)
-      return nextVersions
-    })
+    if (pendingVersionId) setVersions((current) => rejectPendingVersion(current, pendingVersionId))
     setPendingVersionId(undefined)
     setProposal(undefined)
     setActivity('Agent proposal rejected · revision marked rejected · active branch unchanged')
@@ -86,11 +69,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     const layouted = layoutPipeline(version.nodes, version.edges)
     setNodes(layouted)
     setEdges(version.edges)
-    setVersions((current) => {
-      const nextVersions = current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, status: 'committed' as const } : candidate)
-      persist(nextVersions, layouted, version.edges)
-      return nextVersions
-    })
+    setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, status: 'committed' as const } : candidate))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
     setSelectedId(layouted[0]?.id ?? '')
     setActivity(`Human Review approved · ${version.label} committed atomically`)
@@ -100,11 +79,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
   const rejectPendingVersionById = (versionId: string) => {
     const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
     if (!version) { setActivity('Review is no longer pending'); return false }
-    setVersions((current) => {
-      const nextVersions = rejectPendingVersion(current, versionId)
-      persist(nextVersions)
-      return nextVersions
-    })
+    setVersions((current) => rejectPendingVersion(current, versionId))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
     setActivity(`Human Review rejected · ${version.label} remains visible in history · active graph unchanged`)
     return true
@@ -118,11 +93,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
       return
     }
     const version = createPipelineVersion(nodes, edges, `Manual checkpoint ${versions.length + 1}`, 'manual', currentIssues)
-    setVersions((current) => {
-      const nextVersions = appendPipelineVersion(current, version)
-      persist(nextVersions)
-      return nextVersions
-    })
+    setVersions((current) => appendPipelineVersion(current, version))
     setActivity(`Version saved · ${version.label}`)
   }
 
@@ -136,7 +107,6 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     setPendingVersionId(undefined)
     setSelectedId(restored.nodes[0]?.id ?? '')
     setActivity(`Version restored · ${version.label}`)
-    persist(versions, restored.nodes, restored.edges)
   }
 
   const loadPreset = (presetId: PipelinePresetId) => {

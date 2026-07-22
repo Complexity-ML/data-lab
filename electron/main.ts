@@ -1,11 +1,11 @@
-import { app, BrowserWindow, ipcMain, Notification, shell, type BrowserWindowConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type BrowserWindowConstructorOptions, type MenuItemConstructorOptions } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
+import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
 
@@ -37,12 +37,52 @@ const chatGPTConfigureChannel = 'data-lab:chatgpt-configure'
 const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
 const chatGPTCancelChannel = 'data-lab:chatgpt-cancel'
 const workspaceLoadChannel = 'data-lab:workspace-load'
-const workspaceSaveChannel = 'data-lab:workspace-save'
+const workspaceCreateChannel = 'data-lab:workspace-create'
+const workspaceRenameChannel = 'data-lab:workspace-rename'
+const workspaceDuplicateChannel = 'data-lab:workspace-duplicate'
+const workspaceArchiveChannel = 'data-lab:workspace-archive'
+const workspaceOpenChannel = 'data-lab:workspace-open'
+const workspaceAutosaveChannel = 'data-lab:workspace-autosave'
+const workspaceCommitChannel = 'data-lab:workspace-commit'
+const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 let mainWindow: BrowserWindow | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
+let workspaceSessionWasUnclean = false
+
+app.setName('DATA LAB')
+
+function configureApplicationMenu() {
+  if (process.platform !== 'darwin') return
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'DATA LAB',
+      submenu: [
+        {
+          label: 'About DATA LAB',
+          click: () => { void dialog.showMessageBox({ title: 'About DATA LAB', message: 'DATA LAB', detail: `Context-aware pipeline studio\nVersion ${app.getVersion()}`, buttons: ['OK'] }) },
+        },
+        { type: 'separator' },
+        { label: 'Open DATA LAB', accelerator: 'CmdOrCtrl+0', click: focusMainWindow },
+        { role: 'services' },
+        { type: 'separator' },
+        { label: 'Hide DATA LAB', role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { label: 'Quit DATA LAB', role: 'quit' },
+      ],
+    },
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    { role: 'help', submenu: [{ label: 'DataHub documentation', click: () => void shell.openExternal('https://docs.datahub.com/') }] },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 
 function currentActiveAiSource(): ActiveAiSource {
   const saved = loadAppSetting(app.getPath('userData'), 'active-ai-provider')
@@ -119,7 +159,7 @@ function createMainWindow() {
     window.on('close', (event) => {
       if (isQuitting) return
       event.preventDefault()
-      window.hide()
+      app.hide()
     })
   }
   window.on('closed', () => {
@@ -132,6 +172,8 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  workspaceSessionWasUnclean = beginWorkspaceSession(app.getPath('userData'))
+  configureApplicationMenu()
   chatGPT = new ChatGPTAgentSession((url) => shell.openExternal(url), app.getVersion(), join(app.getPath('userData'), 'chatgpt-agent'))
   ipcMain.handle(statusChannel, () => getDataHubStatus())
   ipcMain.handle(datasetChannel, (_event, payload: { urn?: unknown }) => {
@@ -178,10 +220,18 @@ app.whenReady().then(() => {
     return chatGPT?.runProposal(payload)
   })
   ipcMain.handle(chatGPTCancelChannel, () => chatGPT?.cancel() ?? { cancelled: false })
-  ipcMain.handle(workspaceLoadChannel, () => loadSavedWorkspace(app.getPath('userData')))
-  ipcMain.handle(workspaceSaveChannel, (_event, payload: unknown) => {
-    if (!payload || typeof payload !== 'object') throw new Error('Invalid workspace payload')
-    return saveWorkspace(app.getPath('userData'), payload)
+  ipcMain.handle(workspaceLoadChannel, () => loadWorkspaceManagerState(app.getPath('userData'), workspaceSessionWasUnclean))
+  ipcMain.handle(workspaceCreateChannel, (_event, payload: { name?: unknown; workspace?: unknown }) => createWorkspace(app.getPath('userData'), payload?.name, payload?.workspace))
+  ipcMain.handle(workspaceRenameChannel, (_event, payload: { workspaceId?: unknown; name?: unknown }) => renameWorkspace(app.getPath('userData'), payload?.workspaceId, payload?.name))
+  ipcMain.handle(workspaceDuplicateChannel, (_event, payload: { workspaceId?: unknown; name?: unknown }) => duplicateWorkspace(app.getPath('userData'), payload?.workspaceId, payload?.name))
+  ipcMain.handle(workspaceArchiveChannel, (_event, payload: { workspaceId?: unknown }) => archiveWorkspace(app.getPath('userData'), payload?.workspaceId))
+  ipcMain.handle(workspaceOpenChannel, (_event, payload: { workspaceId?: unknown }) => openWorkspace(app.getPath('userData'), payload?.workspaceId))
+  ipcMain.handle(workspaceAutosaveChannel, (_event, payload: unknown) => autosaveWorkspaceDraft(app.getPath('userData'), payload))
+  ipcMain.handle(workspaceCommitChannel, (_event, payload: unknown) => commitActiveWorkspace(app.getPath('userData'), payload))
+  ipcMain.handle(workspaceRecoveryChannel, (_event, payload: { action?: unknown }) => {
+    const state = resolveWorkspaceRecovery(app.getPath('userData'), payload?.action)
+    workspaceSessionWasUnclean = false
+    return state
   })
   ipcMain.handle(activeAiSourceChannel, () => ({ source: currentActiveAiSource() }))
   ipcMain.handle(activeAiSourceSaveChannel, (_event, payload: { source?: unknown }) => selectActiveAiSource(payload ?? {}))
@@ -198,6 +248,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true
   chatGPT?.stop()
+  markWorkspaceSessionClean(app.getPath('userData'))
   closeWorkspaceDatabase()
   void closeDataHubMcp()
 })
