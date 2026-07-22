@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { AgentPrompt } from './components/shared/AgentPrompt'
+import { disconnectedAiStatus, disconnectedChatGPTStatus } from './hooks/useAiConnections'
 
 interface MockNode {
   id: string
@@ -83,12 +84,32 @@ beforeEach(() => {
   delete window.dataLab
 })
 
+function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<typeof window.dataLab>['loadWorkspaceState']>>) {
+  const autosaveWorkspace = vi.fn(async () => ({ saved: true as const, workspaceId: state.activeWorkspaceId ?? 'workspace', updatedAt: new Date().toISOString() }))
+  const api = {
+    runtime: 'electron' as const,
+    platform: 'darwin' as const,
+    getAiStatus: vi.fn(async () => disconnectedAiStatus),
+    getChatGPTStatus: vi.fn(async () => disconnectedChatGPTStatus),
+    getActiveAiSource: vi.fn(async () => ({ source: 'openai' as const })),
+    getDataHubMcpStatus: vi.fn(async () => ({ mode: 'demo' as const, transport: 'demo' as const, message: 'Not connected', toolCount: 0, tools: [], settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } })),
+    loadWorkspaceState: vi.fn(async () => state),
+    autosaveWorkspace,
+    resolveWorkspaceRecovery: vi.fn(async () => ({ ...state, recovery: undefined, uncleanShutdown: false })),
+    getWindowState: vi.fn(async () => ({ fullscreen: false })),
+    onWindowStateChanged: vi.fn(() => () => undefined),
+    onHumanReviewOpened: vi.fn(() => () => undefined),
+  } as unknown as NonNullable<typeof window.dataLab>
+  window.dataLab = api
+  return { api, autosaveWorkspace }
+}
+
 describe('visual pipeline workspace regressions', () => {
   it('opens a new install blank, with zero versions and no false successful run state', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByText('0 cards', { exact: false })).toBeTruthy()
+    expect(screen.getAllByText('0 cards', { exact: false }).length).toBeGreaterThan(0)
     expect((screen.getByRole('button', { name: 'Run agent flow' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Pipeline is empty')).toBeTruthy()
     expect(screen.queryByText('All atomic checks passed')).toBeNull()
@@ -150,6 +171,60 @@ describe('visual pipeline workspace regressions', () => {
     expect(droppedCard?.dataset.x).toBe('384')
     expect(droppedCard?.dataset.y).toBe('234')
     expect(container.querySelectorAll('[data-node-id]')).toHaveLength(2)
+  })
+
+  it('restores an explicitly active blank workspace and shows its saved state', async () => {
+    installElectronWorkspaceMock({
+      activeWorkspaceId: 'blank-workspace',
+      activeWorkspace: { id: 'blank-workspace', name: 'Governance blank', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Saved blank pipeline', nodes: [], edges: [], versions: [] } },
+      uncleanShutdown: false,
+      workspaces: [{ id: 'blank-workspace', name: 'Governance blank', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
+    })
+    render(<App />)
+
+    expect(await screen.findByText('Saved blank pipeline')).toBeTruthy()
+    expect(screen.getByText('Saved')).toBeTruthy()
+    expect(screen.getAllByText('0 cards', { exact: false }).length).toBeGreaterThan(0)
+  })
+
+  it('does not autosave an example over the last active workspace', async () => {
+    const user = userEvent.setup()
+    const { autosaveWorkspace } = installElectronWorkspaceMock({
+      activeWorkspaceId: 'real-workspace',
+      activeWorkspace: { id: 'real-workspace', name: 'Real work', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Real work', nodes: [], edges: [], versions: [] } },
+      uncleanShutdown: false,
+      workspaces: [{ id: 'real-workspace', name: 'Real work', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
+    })
+    render(<App />)
+    await screen.findByText('Real work')
+
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    await user.click(screen.getByRole('button', { name: 'ExamplesStart empty or explore' }))
+    await user.click(screen.getByRole('button', { name: 'Customer activationLoad the ecommerce governance example for exploration.' }))
+
+    expect(await screen.findByText('Customer activation')).toBeTruthy()
+    await new Promise((resolve) => window.setTimeout(resolve, 750))
+    await waitFor(() => expect(autosaveWorkspace).not.toHaveBeenCalled())
+    expect(screen.getByText('Unsaved')).toBeTruthy()
+  })
+
+  it('offers recovery instead of applying a crash draft silently', async () => {
+    const user = userEvent.setup()
+    const baseline = { projectTitle: 'Committed pipeline', nodes: [], edges: [], versions: [] }
+    const draft = { projectTitle: 'Recovered draft', nodes: [], edges: [], versions: [] }
+    const { api } = installElectronWorkspaceMock({
+      activeWorkspaceId: 'recoverable',
+      activeWorkspace: { id: 'recoverable', name: 'Recoverable', archived: false, dirty: true, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:05:00.000Z', payload: baseline },
+      recovery: { payload: draft, updatedAt: '2026-07-22T20:05:00.000Z' },
+      uncleanShutdown: true,
+      workspaces: [{ id: 'recoverable', name: 'Recoverable', archived: false, dirty: true, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:05:00.000Z' }],
+    })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Recover your autosaved work?' })).toBeTruthy()
+    expect(screen.getByText('Committed pipeline')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Recover draft' }))
+    expect(api.resolveWorkspaceRecovery).toHaveBeenCalledWith('recover')
   })
 })
 

@@ -27,7 +27,14 @@ const chatGPTConfigureChannel = 'data-lab:chatgpt-configure'
 const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
 const chatGPTCancelChannel = 'data-lab:chatgpt-cancel'
 const workspaceLoadChannel = 'data-lab:workspace-load'
-const workspaceSaveChannel = 'data-lab:workspace-save'
+const workspaceCreateChannel = 'data-lab:workspace-create'
+const workspaceRenameChannel = 'data-lab:workspace-rename'
+const workspaceDuplicateChannel = 'data-lab:workspace-duplicate'
+const workspaceArchiveChannel = 'data-lab:workspace-archive'
+const workspaceOpenChannel = 'data-lab:workspace-open'
+const workspaceAutosaveChannel = 'data-lab:workspace-autosave'
+const workspaceCommitChannel = 'data-lab:workspace-commit'
+const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 
@@ -57,8 +64,15 @@ contextBridge.exposeInMainWorld('dataLab', {
   configureChatGPT: (payload: { model: string; effort: string }) => ipcRenderer.invoke(chatGPTConfigureChannel, payload),
   runChatGPTProposal: (payload: unknown) => ipcRenderer.invoke(chatGPTProposalChannel, payload),
   cancelChatGPTProposal: () => ipcRenderer.invoke(chatGPTCancelChannel),
-  loadWorkspace: () => ipcRenderer.invoke(workspaceLoadChannel),
-  saveWorkspace: (payload: unknown) => ipcRenderer.invoke(workspaceSaveChannel, payload),
+  loadWorkspaceState: () => ipcRenderer.invoke(workspaceLoadChannel),
+  createWorkspace: (name: string, workspace: unknown) => ipcRenderer.invoke(workspaceCreateChannel, { name, workspace }),
+  renameWorkspace: (workspaceId: string, name: string) => ipcRenderer.invoke(workspaceRenameChannel, { workspaceId, name }),
+  duplicateWorkspace: (workspaceId: string, name?: string) => ipcRenderer.invoke(workspaceDuplicateChannel, { workspaceId, name }),
+  archiveWorkspace: (workspaceId: string) => ipcRenderer.invoke(workspaceArchiveChannel, { workspaceId }),
+  openWorkspace: (workspaceId: string) => ipcRenderer.invoke(workspaceOpenChannel, { workspaceId }),
+  autosaveWorkspace: (workspace: unknown) => ipcRenderer.invoke(workspaceAutosaveChannel, workspace),
+  commitWorkspace: (workspace: unknown) => ipcRenderer.invoke(workspaceCommitChannel, workspace),
+  resolveWorkspaceRecovery: (action: 'recover' | 'discard') => ipcRenderer.invoke(workspaceRecoveryChannel, { action }),
   getActiveAiSource: () => ipcRenderer.invoke(activeAiSourceChannel),
   setActiveAiSource: (source: 'chatgpt' | 'openai' | 'anthropic' | 'moonshot') => ipcRenderer.invoke(activeAiSourceSaveChannel, { source }),
   onHumanReviewOpened: (callback: (payload: { versionId?: string }) => void) => {

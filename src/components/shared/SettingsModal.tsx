@@ -1,12 +1,15 @@
-import { AlertTriangle, Bot, CheckCircle2, Database, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Database, FolderKanban, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
+import type { WorkspaceSaveState, WorkspaceSummary } from '../../domain/workspace'
+import { notifyError } from '../../domain/toasts'
 import { ActionButton } from './ActionButton'
 import { Modal } from './Modal'
 import { VersionBrowser, type VersionSummary } from './VersionBrowser'
+import { WorkspaceManager } from './WorkspaceManager'
 
-export type SettingsSection = 'appearance' | 'ai' | 'datahub' | 'presets' | 'pipeline' | 'versions'
+export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
   activeAiSource: ActiveAiSource
@@ -28,17 +31,22 @@ interface SettingsModalProps {
   initialSection?: SettingsSection
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
+  onArchiveWorkspace: (workspaceId: string) => Promise<void>
   onClose: () => void
   onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
   onConnectChatGPT: () => Promise<void>
+  onCreateWorkspace: (name: string) => Promise<void>
   onDisconnectChatGPT: () => Promise<void>
   onEmergencyStop: () => void
+  onDuplicateWorkspace: (workspaceId: string) => Promise<void>
   onExportPipeline: () => void
   onImportPipeline: (file: File) => Promise<void>
   onLoadPreset: (preset: PipelinePresetId) => void
+  onOpenWorkspace: (workspaceId: string) => Promise<void>
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onRejectPendingReview: (versionId: string) => void
   onRemindHumanReview: (version: VersionSummary) => void
+  onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
@@ -48,14 +56,18 @@ interface SettingsModalProps {
   onThemeChange: (theme: 'light' | 'dark') => void
   onRestoreVersion: (versionId: string) => void
   onSaveVersion: () => void
+  onSaveWorkspace: () => Promise<void>
+  activeWorkspaceId: string | null
   projectTitle: string
   selectedVersionId?: string
   theme: 'light' | 'dark'
   versions: VersionSummary[]
+  workspaceSaveState: WorkspaceSaveState
+  workspaces: WorkspaceSummary[]
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onEmergencyStop, onExportPipeline, onImportPipeline, onLoadPreset, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDuplicateWorkspace, onEmergencyStop, onExportPipeline, onImportPipeline, onLoadPreset, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -83,6 +95,7 @@ export function SettingsModal(props: SettingsModalProps) {
       await onSyncDataHub()
       setDataHubFeedback('DataHub connection saved securely and MCP tools discovered.')
     } catch (error) {
+      notifyError(error, 'Unable to connect DataHub MCP')
       setDataHubFeedback(error instanceof Error ? error.message : 'Unable to connect DataHub MCP.')
     } finally { setDataHubBusy(false) }
   }
@@ -95,6 +108,7 @@ export function SettingsModal(props: SettingsModalProps) {
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
       setDataHubFeedback(dataHubSettings.tokenSource === 'environment' ? 'The app token was cleared. An environment token may remain active.' : 'The encrypted DataHub token was removed.')
     } catch (error) {
+      notifyError(error, 'Unable to remove the DataHub token')
       setDataHubFeedback(error instanceof Error ? error.message : 'Unable to remove the DataHub token.')
     } finally { setDataHubBusy(false) }
   }
@@ -123,6 +137,7 @@ export function SettingsModal(props: SettingsModalProps) {
       clearSavedKey()
       setAiFeedback('Connection settings saved securely.')
     } catch (error) {
+      notifyError(error, 'Unable to save the AI connection')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to save the AI connection.')
     } finally { setAiBusy(false) }
   }
@@ -141,6 +156,7 @@ export function SettingsModal(props: SettingsModalProps) {
       await onTestAiConnection()
       setAiFeedback(`${draft.provider === 'anthropic' ? 'Claude' : draft.provider === 'moonshot' ? 'Kimi' : 'OpenAI'} connection and model catalog verified.`)
     } catch (error) {
+      notifyError(error, 'Provider connection failed')
       setAiFeedback(error instanceof Error ? error.message : 'Provider connection failed.')
     } finally { setAiBusy(false) }
   }
@@ -153,6 +169,7 @@ export function SettingsModal(props: SettingsModalProps) {
       const provider = status.providers[aiSettings.provider]
       setAiFeedback(`Catalog refreshed · ${provider.catalog.length} models · ${provider.catalogRefreshedAt ? new Date(provider.catalogRefreshedAt).toLocaleString() : 'just now'}. Your manual model ID was preserved.`)
     } catch (error) {
+      notifyError(error, 'Model catalog refresh failed')
       setAiFeedback(`${error instanceof Error ? error.message : 'Model catalog refresh failed'} · The current manual model ID is unchanged.`)
     } finally { setAiBusy(false) }
   }
@@ -166,6 +183,7 @@ export function SettingsModal(props: SettingsModalProps) {
       clearSavedKey()
       setAiFeedback(status.providers[aiSettings.provider].credentialSource === 'environment' ? 'The saved key was removed. An environment key remains active outside DATA LAB.' : 'The provider key was removed from secure storage.')
     } catch (error) {
+      notifyError(error, 'Unable to remove the provider key')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to remove the provider key.')
     } finally { setAiBusy(false) }
   }
@@ -177,6 +195,7 @@ export function SettingsModal(props: SettingsModalProps) {
       await onConnectChatGPT()
       setAiFeedback('ChatGPT account connected. Choose it as the active agent source below.')
     } catch (error) {
+      notifyError(error, 'Unable to connect the ChatGPT account')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to connect the ChatGPT account.')
     } finally { setAiBusy(false) }
   }
@@ -188,6 +207,7 @@ export function SettingsModal(props: SettingsModalProps) {
       await onDisconnectChatGPT()
       setAiFeedback('ChatGPT account disconnected.')
     } catch (error) {
+      notifyError(error, 'Unable to disconnect the ChatGPT account')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to disconnect the ChatGPT account.')
     } finally { setAiBusy(false) }
   }
@@ -207,6 +227,7 @@ export function SettingsModal(props: SettingsModalProps) {
       await onSelectActiveAiSource(source)
       setAiFeedback(`${source === 'chatgpt' ? 'ChatGPT' : source === 'anthropic' ? 'Claude' : source === 'moonshot' ? 'Kimi' : 'OpenAI'} will run the next agent request.`)
     } catch (error) {
+      notifyError(error, 'Unable to select the active agent source')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to select the active agent source.')
     } finally { setAiBusy(false) }
   }
@@ -224,6 +245,7 @@ export function SettingsModal(props: SettingsModalProps) {
       <nav aria-label="Settings sections" className="settings-sidebar">
         <small>SETTINGS MENU</small>
         {menu('appearance', 'Appearance', 'Theme and interface', <Palette size={17} />)}
+        {menu('workspaces', 'Workspaces', 'Save, switch and recover', <FolderKanban size={17} />)}
         {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
         {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
         {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
@@ -242,6 +264,11 @@ export function SettingsModal(props: SettingsModalProps) {
               <button aria-pressed={theme === 'dark'} className={theme === 'dark' ? 'is-active' : ''} onClick={() => onThemeChange('dark')} type="button"><Moon size={20} /><span><strong>Dark</strong><small>Distinct colored cards on slate</small></span></button>
             </div>
           </section>
+        </article>}
+
+        {activeSection === 'workspaces' && <article className="settings-page">
+          <div className="settings-page-heading"><small>WORKSPACES</small><h3>Local projects and recovery</h3><p>Each graph, version history and pending agent review stays isolated in its own SQLite workspace.</p></div>
+          <WorkspaceManager activeWorkspaceId={activeWorkspaceId} onArchive={onArchiveWorkspace} onCreate={onCreateWorkspace} onDuplicate={onDuplicateWorkspace} onOpen={onOpenWorkspace} onRename={onRenameWorkspace} onSave={onSaveWorkspace} projectTitle={projectTitle} saveState={workspaceSaveState} workspaces={workspaces} />
         </article>}
 
         {activeSection === 'ai' && <article className="settings-page">
