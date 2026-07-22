@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { initialEdges, initialNodes } from './pipeline'
+import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
 import { appendPipelineVersion, createPipelineVersion, readPipelineVersions, restorePipelineVersion } from './versioning'
 
 describe('pipeline versioning', () => {

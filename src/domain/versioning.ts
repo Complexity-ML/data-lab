@@ -10,6 +10,8 @@ export interface PipelineVersion {
   nodes: PipelineNode[]
   edges: Edge[]
   blockingIssues: number
+  status?: 'committed' | 'pending-review' | 'rejected'
+  description?: string
 }
 
 function copyGraph<T>(value: T): T {
@@ -25,6 +27,7 @@ export function createPipelineVersion(nodes: PipelineNode[], edges: Edge[], labe
     nodes: copyGraph(nodes),
     edges: copyGraph(edges),
     blockingIssues: issues.filter((issue) => issue.severity === 'error').length,
+    status: 'committed',
   }
 }
 

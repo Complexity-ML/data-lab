@@ -1,14 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { initialEdges, initialNodes, newCard } from '../domain/pipeline'
+import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from '../domain/pipeline'
 import { validatePipeline, validationAtoms } from '.'
 
 describe('atomic pipeline validation', () => {
   it('exposes small independently addressable validators', () => {
     expect(validationAtoms.map((atom) => atom.id)).toEqual([
+      'pipeline-presence',
       'edge-integrity',
       'acyclic-lineage',
       'card-contracts',
       'sensitive-data-path',
+    ])
+  })
+
+  it('rejects an empty pipeline instead of reporting a false success', () => {
+    expect(validatePipeline([], [])).toEqual([
+      expect.objectContaining({
+        id: 'empty-pipeline',
+        atomId: 'pipeline-presence',
+        severity: 'error',
+      }),
     ])
   })
 

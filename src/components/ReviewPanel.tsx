@@ -18,6 +18,7 @@ export function ReviewPanel({ proposal, onApply, onClose, onDiscard }: ReviewPan
     </div>
 
     <p className="review-summary">{proposal.summary}</p>
+    {(proposal.model || proposal.confidence !== undefined) && <div className="review-agent-meta"><span>{proposal.model ?? 'Connected model'}</span>{proposal.confidence !== undefined && <span>{Math.round(proposal.confidence * 100)}% confidence</span>}<span>{proposal.requiresHumanReview ? 'Human Review path' : 'Agent Decision path'}</span></div>}
     <div className="review-rationale"><ShieldCheck size={17} /><p>{proposal.rationale}</p></div>
 
     {proposal.runTrace?.length ? <section className="review-section run-trace">

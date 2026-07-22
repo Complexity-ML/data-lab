@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { elasticHorizontalPath } from '../components/shared/ElasticEdge'
 import { layoutPipeline } from './layout'
-import { initialEdges, initialNodes } from './pipeline'
+import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
 
 describe('pipeline XY layout', () => {
   it('places every lineage edge from left to right', () => {
@@ -19,5 +20,11 @@ describe('pipeline XY layout', () => {
   it('does not reposition a cyclic graph', () => {
     const cycle = [...initialEdges, { id: 'cycle', source: 'activation-output', target: 'customers-source' }]
     expect(layoutPipeline(initialNodes, cycle)).toBe(initialNodes)
+  })
+
+  it('renders elastic cables as cubic curves instead of square steps', () => {
+    const path = elasticHorizontalPath(10, 20, 310, 140)
+    expect(path).toContain(' C ')
+    expect(path).toContain('310 140')
   })
 })

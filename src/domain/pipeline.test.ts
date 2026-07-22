@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { validatePipeline } from '../validation'
-import { applyProposal, createGovernanceProposal, initialEdges, initialNodes } from './pipeline'
+import { governanceProposalFixture } from '../test/fixtures/agent-proposals'
+import { applyProposal, customerActivationEdges, customerActivationNodes, initialEdges as blankEdges, initialNodes as blankNodes } from './pipeline'
+
+const initialNodes = customerActivationNodes
+const initialEdges = customerActivationEdges
 
 describe('pipeline validation', () => {
+  it('starts the production workbench blank', () => {
+    expect(blankNodes).toEqual([])
+    expect(blankEdges).toEqual([])
+  })
   it('detects the unmasked PII path in the starter graph', () => {
     expect(validatePipeline(initialNodes, initialEdges).some((issue) => issue.id === 'pii-activation')).toBe(true)
   })
 
   it('clears the PII error after the reviewed agent proposal is applied', () => {
-    const proposal = createGovernanceProposal(initialNodes, initialEdges)
+    const proposal = governanceProposalFixture(initialNodes, initialEdges)
     const next = applyProposal(initialNodes, initialEdges, proposal)
     expect(validatePipeline(next.nodes, next.edges).some((issue) => issue.id === 'pii-activation')).toBe(false)
   })
@@ -22,13 +30,13 @@ describe('pipeline validation', () => {
     const phoneNodes = initialNodes.map((node) => node.id === 'customers-source'
       ? { ...node, data: { ...node.data, schema: [{ name: 'phone_number', type: 'string' as const, tags: ['Sensitive'] }] } }
       : node)
-    const proposal = createGovernanceProposal(phoneNodes, initialEdges)
+    const proposal = governanceProposalFixture(phoneNodes, initialEdges)
     expect(proposal.addedNodes[0].data.rule).toContain('phone_number')
     expect(proposal.addedNodes[0].data.rule).not.toContain('email')
   })
 
   it('requests review without changing the graph when MCP evidence is uncertain', () => {
-    const proposal = createGovernanceProposal(initialNodes, initialEdges, { uncertain: true })
+    const proposal = governanceProposalFixture(initialNodes, initialEdges, true)
     expect(proposal.addedNodes).toEqual([])
     expect(proposal.removedEdgeIds).toEqual([])
     expect(proposal.updatedNodes[0].patch.kind).toBe('review')

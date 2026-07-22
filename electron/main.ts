@@ -1,8 +1,11 @@
-import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, shell, type BrowserWindowConstructorOptions } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus } from './datahub-mcp.js'
+import { cancelAiProposal, getAiStatus, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
+import { ChatGPTAgentSession } from './chatgpt-session.js'
+import { closeWorkspaceDatabase, loadSavedWorkspace, saveWorkspace } from './workspace-db.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -10,10 +13,57 @@ const datasetChannel = 'data-lab:datahub-dataset'
 const mcpStatusChannel = 'data-lab:datahub-mcp-status'
 const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
 const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
+const humanReviewNotificationChannel = 'data-lab:human-review-notification'
+const windowStateChannel = 'data-lab:window-state'
+const windowStateChangedChannel = 'data-lab:window-state-changed'
+const aiStatusChannel = 'data-lab:ai-status'
+const aiSaveChannel = 'data-lab:ai-save'
+const aiTestChannel = 'data-lab:ai-test'
+const aiProposalChannel = 'data-lab:ai-proposal'
+const aiCancelChannel = 'data-lab:ai-cancel'
+const humanReviewOpenedChannel = 'data-lab:human-review-opened'
+const chatGPTStatusChannel = 'data-lab:chatgpt-status'
+const chatGPTConnectChannel = 'data-lab:chatgpt-connect'
+const chatGPTDisconnectChannel = 'data-lab:chatgpt-disconnect'
+const chatGPTConfigureChannel = 'data-lab:chatgpt-configure'
+const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
+const chatGPTCancelChannel = 'data-lab:chatgpt-cancel'
+const workspaceLoadChannel = 'data-lab:workspace-load'
+const workspaceSaveChannel = 'data-lab:workspace-save'
+let mainWindow: BrowserWindow | undefined
+let isQuitting = false
+let chatGPT: ChatGPTAgentSession | undefined
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown }): { shown: boolean } {
+  const cardLabel = typeof payload?.cardLabel === 'string' ? payload.cardLabel.trim().slice(0, 120) : 'Agent flow'
+  const reason = typeof payload?.reason === 'string' ? payload.reason.trim().slice(0, 280) : 'The agent needs a human decision.'
+  if (!Notification.isSupported()) return { shown: false }
+
+  const notification = new Notification({
+    title: 'DATA LAB · Human review required',
+    body: `${cardLabel} — ${reason}`,
+  })
+  notification.on('click', () => {
+    focusMainWindow()
+    mainWindow?.webContents.send(humanReviewOpenedChannel)
+  })
+  notification.show()
+  return { shown: true }
+}
 
 function createMainWindow() {
   const platformFrame: BrowserWindowConstructorOptions = process.platform === 'darwin'
-    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 24 } }
+    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 26 } }
     : { titleBarStyle: 'default', autoHideMenuBar: true }
   const window = new BrowserWindow({
     width: 1500,
@@ -31,6 +81,24 @@ function createMainWindow() {
       webSecurity: true,
     },
   })
+  mainWindow = window
+
+  const publishWindowState = () => {
+    if (!window.isDestroyed()) window.webContents.send(windowStateChangedChannel, { fullscreen: window.isFullScreen() })
+  }
+  window.on('enter-full-screen', publishWindowState)
+  window.on('leave-full-screen', publishWindowState)
+
+  if (process.platform === 'darwin') {
+    window.on('close', (event) => {
+      if (isQuitting) return
+      event.preventDefault()
+      window.hide()
+    })
+  }
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = undefined
+  })
 
   const developmentUrl = process.env.VITE_DEV_SERVER_URL
   if (developmentUrl) void window.loadURL(developmentUrl)
@@ -38,6 +106,7 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  chatGPT = new ChatGPTAgentSession((url) => shell.openExternal(url), app.getVersion(), join(app.getPath('userData'), 'chatgpt-agent'))
   ipcMain.handle(statusChannel, () => getDataHubStatus())
   ipcMain.handle(datasetChannel, (_event, payload: { urn?: unknown }) => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub dataset request')
@@ -49,9 +118,36 @@ app.whenReady().then(() => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub MCP audit request')
     return auditDataHubWithMcp(payload.urn)
   })
+  ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown }) => notifyHumanReview(payload))
+  ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
+  ipcMain.handle(aiStatusChannel, () => getAiStatus())
+  ipcMain.handle(aiSaveChannel, (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid AI settings request')
+    return saveAiSettings(payload)
+  })
+  ipcMain.handle(aiTestChannel, () => testAiConnection())
+  ipcMain.handle(aiProposalChannel, (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object' || JSON.stringify(payload).length > 100_000) throw new Error('Invalid AI proposal request')
+    return runAiProposal(payload)
+  })
+  ipcMain.handle(aiCancelChannel, () => cancelAiProposal())
+  ipcMain.handle(chatGPTStatusChannel, () => chatGPT?.status())
+  ipcMain.handle(chatGPTConnectChannel, () => chatGPT?.connect())
+  ipcMain.handle(chatGPTDisconnectChannel, () => chatGPT?.disconnect())
+  ipcMain.handle(chatGPTConfigureChannel, (_event, payload: { model?: unknown; effort?: unknown }) => chatGPT?.configure(payload ?? {}))
+  ipcMain.handle(chatGPTProposalChannel, (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object' || JSON.stringify(payload).length > 100_000) throw new Error('Invalid ChatGPT proposal request')
+    return chatGPT?.runProposal(payload)
+  })
+  ipcMain.handle(chatGPTCancelChannel, () => chatGPT?.cancel() ?? { cancelled: false })
+  ipcMain.handle(workspaceLoadChannel, () => loadSavedWorkspace(app.getPath('userData')))
+  ipcMain.handle(workspaceSaveChannel, (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') throw new Error('Invalid workspace payload')
+    return saveWorkspace(app.getPath('userData'), payload)
+  })
   createMainWindow()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
+    focusMainWindow()
   })
 })
 
@@ -60,5 +156,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  isQuitting = true
+  chatGPT?.stop()
+  closeWorkspaceDatabase()
   void closeDataHubMcp()
 })

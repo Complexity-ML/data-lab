@@ -44,6 +44,9 @@ export interface AgentProposal {
   removedEdgeIds: string[]
   datahubReads: string[]
   writeback: string
+  requiresHumanReview?: boolean
+  confidence?: number
+  model?: string
   runTrace?: AgentRunTraceStep[]
 }
 
@@ -58,7 +61,7 @@ export const cardLabels: Record<CardKind, string> = {
   output: 'Output',
 }
 
-export const initialNodes: PipelineNode[] = [
+export const customerActivationNodes: PipelineNode[] = [
   {
     id: 'customers-source',
     type: 'pipeline',
@@ -69,7 +72,7 @@ export const initialNodes: PipelineNode[] = [
       description: 'Curated customer table from Snowflake',
       owner: 'Growth Data',
       status: 'healthy',
-      datahubUrn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers_360,PROD)',
+      datahubUrn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,b2fd91.order_entry_db.order_entry.customers,PROD)',
       schema: [
         { name: 'customer_id', type: 'string' },
         { name: 'email', type: 'string', tags: ['PII'] },
@@ -178,74 +181,31 @@ export const initialNodes: PipelineNode[] = [
   },
 ]
 
-export const initialEdges: Edge[] = [
-  { id: 'e-source-analysis', source: 'customers-source', target: 'schema-analysis', type: 'smoothstep' },
-  { id: 'e-analysis-split', source: 'schema-analysis', target: 'region-split', type: 'smoothstep' },
-  { id: 'e-split-normalize', source: 'region-split', target: 'normalize-customer', sourceHandle: 'approved', type: 'smoothstep', label: 'approved' },
-  { id: 'e-split-quarantine', source: 'region-split', target: 'quarantine-output', sourceHandle: 'quarantine', type: 'smoothstep', label: 'quarantine' },
-  { id: 'e-normalize-decision', source: 'normalize-customer', target: 'agent-decision', type: 'smoothstep' },
-  { id: 'e-decision-validation', source: 'agent-decision', target: 'consent-validation', type: 'smoothstep' },
-  { id: 'e-validation-output', source: 'consent-validation', target: 'activation-output', type: 'smoothstep' },
+export const customerActivationEdges: Edge[] = [
+  { id: 'e-source-analysis', source: 'customers-source', target: 'schema-analysis', type: 'elastic' },
+  { id: 'e-analysis-split', source: 'schema-analysis', target: 'region-split', type: 'elastic' },
+  { id: 'e-split-normalize', source: 'region-split', target: 'normalize-customer', sourceHandle: 'approved', type: 'elastic', label: 'approved' },
+  { id: 'e-split-quarantine', source: 'region-split', target: 'quarantine-output', sourceHandle: 'quarantine', type: 'elastic', label: 'quarantine' },
+  { id: 'e-normalize-decision', source: 'normalize-customer', target: 'agent-decision', type: 'elastic' },
+  { id: 'e-decision-validation', source: 'agent-decision', target: 'consent-validation', type: 'elastic' },
+  { id: 'e-validation-output', source: 'consent-validation', target: 'activation-output', type: 'elastic' },
 ]
 
-export function createGovernanceProposal(nodes: PipelineNode[], edges: Edge[], options: { uncertain?: boolean } = {}): AgentProposal {
-  const source = nodes.find((node) => node.data.kind === 'source')
-  const sensitiveFields = (source?.data.schema ?? [])
-    .filter((field) => field.tags?.some((tag) => /pii|sensitive|confidential/i.test(tag)))
-    .map((field) => field.name)
-  const decision = nodes.find((node) => node.data.kind === 'decision')
-  const target = nodes.find((node) => node.id === 'consent-validation')
-  const incomingDecision = decision ? edges.find((edge) => edge.target === decision.id) : undefined
-  const incomingTarget = target ? edges.find((edge) => edge.target === target.id) : undefined
-  const previousNodeId = incomingDecision?.source ?? incomingTarget?.source ?? 'normalize-customer'
-  const position = decision ? { x: decision.position.x - 285, y: decision.position.y } : target ? { x: target.position.x - 325, y: target.position.y + 150 } : { x: 900, y: 230 }
-  const fieldSummary = sensitiveFields.join(', ')
-  const protectionRule = sensitiveFields.map((field) => `sha256(lower(trim(${field}))) AS ${field}_hash; drop ${field}`).join('\n')
-  const needsProtection = sensitiveFields.length > 0 && !options.uncertain
-  const transformNode: PipelineNode = {
-    id: 'protect-sensitive-fields',
-    type: 'pipeline',
-    position,
-    data: {
-      kind: 'transform',
-      label: `Protect ${fieldSummary}`,
-      description: 'Agent-proposed sensitive-field protection using deterministic SHA-256',
-      owner: 'Data Governance',
-      status: 'draft',
-      schema: [],
-      rule: protectionRule,
-      agentAdded: true,
-    },
-  }
+export const initialNodes: PipelineNode[] = []
+export const initialEdges: Edge[] = []
+
+export type PipelinePresetId = 'empty' | 'customer-activation'
+
+export function loadPipelinePreset(preset: PipelinePresetId): { title: string; nodes: PipelineNode[]; edges: Edge[] } {
+  if (preset === 'empty') return { title: 'Untitled pipeline', nodes: [], edges: [] }
   return {
-    id: 'proposal-mask-pii',
-    title: options.uncertain ? 'Review incomplete DataHub evidence' : `Protect ${fieldSummary} before activation`,
-    summary: options.uncertain ? 'Pause the flow because the agent could not collect enough trusted context.' : `Insert deterministic protection for ${fieldSummary} before the governance gate.`,
-    rationale: options.uncertain ? 'One or more MCP reads failed or returned incomplete evidence. The agent cannot safely change the graph alone.' : `DataHub classifies ${fieldSummary} as sensitive and shows an activation output downstream. The current graph forwards the raw field${sensitiveFields.length === 1 ? '' : 's'}.`,
-    datahubReads: ['get_entities · customers_360', 'list_schema_fields · tag:PII', 'get_lineage · downstream 3 hops'],
-    writeback: 'Save the approved masking decision as a DataHub context document and append the pipeline lineage.',
-    removedEdgeIds: needsProtection ? [incomingDecision?.id ?? incomingTarget?.id].filter((id): id is string => Boolean(id)) : [],
-    updatedNodes: decision ? [{
-      nodeId: decision.id,
-      patch: {
-        kind: 'review',
-        label: 'Human review asked',
-        description: options.uncertain ? 'The agent lacks enough trusted evidence to continue alone' : `The agent is changing sensitive fields: ${fieldSummary}`,
-        owner: 'Data Governance',
-        rule: options.uncertain ? 'Approval required: incomplete MCP evidence' : 'Approval required: sensitive transformation and schema change',
-        status: 'draft',
-        agentAdded: true,
-      },
-      reason: options.uncertain ? 'Confidence policy: request Human Review when evidence is incomplete.' : 'Confidence policy: request Human Review for a sensitive schema change.',
-    }] : [],
-    addedNodes: needsProtection ? [transformNode] : [],
-    addedEdges: needsProtection ? decision ? [
-      { id: 'e-previous-protection', source: previousNodeId, target: transformNode.id, type: 'smoothstep' },
-      { id: 'e-protection-human-review', source: transformNode.id, target: decision.id, type: 'smoothstep' },
-    ] : [
-      { id: 'e-previous-protection', source: previousNodeId, target: transformNode.id, type: 'smoothstep' },
-      { id: 'e-protection-validation', source: transformNode.id, target: target?.id ?? 'consent-validation', type: 'smoothstep' },
-    ] : [],
+    title: 'Customer activation',
+    nodes: customerActivationNodes.map((node) => ({
+      ...node,
+      position: { ...node.position },
+      data: { ...node.data, schema: node.data.schema.map((field) => ({ ...field, tags: field.tags ? [...field.tags] : undefined })) },
+    })),
+    edges: customerActivationEdges.map((edge) => ({ ...edge })),
   }
 }
 
@@ -259,40 +219,6 @@ export function applyProposal(nodes: PipelineNode[], edges: Edge[], proposal: Ag
   return {
     nodes: [...updated.filter((node) => !proposal.addedNodes.some((added) => added.id === node.id)), ...proposal.addedNodes.map((node) => ({ ...node, data: { ...node.data, status: 'healthy' as const, agentAdded: false } }))],
     edges: [...edges.filter((edge) => !removed.has(edge.id) && !proposal.addedEdges.some((added) => added.id === edge.id)), ...proposal.addedEdges],
-  }
-}
-
-export function createCardReworkProposal(node: PipelineNode): AgentProposal {
-  const rules: Record<CardKind, string> = {
-    source: 'Refresh schema, ownership, tags and quality signals from the bound DataHub URN',
-    analysis: 'Inspect schema drift, nullability, PII tags, assertions and downstream lineage',
-    split: 'marketing_consent = true AND customer_id IS NOT NULL',
-    decision: 'Choose the highest-priority correction or request human review when confidence is insufficient',
-    transform: 'upper(trim(country)) AS country; nullif(trim(customer_id), \'\') AS customer_id',
-    review: 'Require named approval when the agent changes sensitive fields, schemas or downstream contracts',
-    validation: 'assert customer_id IS NOT NULL; assert raw PII fields = 0',
-    output: 'Publish only after all governance and schema checks pass',
-  }
-  return {
-    id: `rework-${node.id}`,
-    title: `Rework ${node.data.label}`,
-    summary: 'Update this card from its current DataHub context and make the agent decision explicit.',
-    rationale: `The agent inspected the card as a ${cardLabels[node.data.kind]} and selected a bounded rule compatible with its position in the lineage.`,
-    datahubReads: ['get_entities · card URN/context', 'list_schema_fields · full schema', 'get_lineage · adjacent paths', 'datahub-quality · health signals'],
-    writeback: 'Append the approved card decision and rule to the relevant DataHub context document.',
-    addedNodes: [],
-    updatedNodes: [{
-      nodeId: node.id,
-      patch: {
-        rule: rules[node.data.kind],
-        description: `${node.data.description.replace(/\.$/, '')}. Reworked from DataHub context.`,
-        status: 'draft',
-        agentAdded: true,
-      },
-      reason: 'Make the card executable from catalog evidence rather than a generic placeholder.',
-    }],
-    addedEdges: [],
-    removedEdgeIds: [],
   }
 }
 

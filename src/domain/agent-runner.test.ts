@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { initialEdges, initialNodes } from './pipeline'
+import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
 import { cardRoleContracts, planPrimaryAgentRoute } from './agent-runner'
 
 describe('agent runner', () => {

@@ -22,6 +22,21 @@ function containsCycle({ nodes, edges }: ValidationContext): boolean {
   return nodes.some((node) => visit(node.id))
 }
 
+export const pipelinePresenceAtom: ValidationAtom = {
+  id: 'pipeline-presence',
+  label: 'Pipeline presence',
+  run({ nodes }) {
+    return nodes.length === 0
+      ? [issue(this.id, {
+          id: 'empty-pipeline',
+          severity: 'error',
+          title: 'Pipeline is empty',
+          detail: 'Add at least one Data Source card before running the agent flow.',
+        })]
+      : []
+  },
+}
+
 export const edgeIntegrityAtom: ValidationAtom = {
   id: 'edge-integrity',
   label: 'Edge integrity',

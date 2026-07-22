@@ -1,91 +1,162 @@
-import { AlertTriangle, CheckCircle2, Database, History, Moon, Network, Palette, Play, RotateCcw, Save, Settings, Sun, X } from 'lucide-react'
-import { useState } from 'react'
+import { AlertTriangle, Bot, CheckCircle2, Database, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, Save, Settings, Sun, UserRound, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
+import type { PipelinePresetId } from '../../domain/pipeline'
 import { ActionButton } from './ActionButton'
 import { Modal } from './Modal'
+import { VersionBrowser, type VersionSummary } from './VersionBrowser'
+
+export type SettingsSection = 'appearance' | 'ai' | 'datahub' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
+  aiStatus: AiStatus
+  chatGPTStatus: ChatGPTSessionStatus
   connectionMode: 'demo' | 'connected'
   errorCount: number
   findingCount: number
   mcpMessage: string
   mcpTransport: 'demo' | 'http' | 'stdio'
+  initialSection?: SettingsSection
   onAutoLayout: () => void
   onClose: () => void
+  onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
+  onConnectChatGPT: () => Promise<void>
+  onDisconnectChatGPT: () => Promise<void>
+  onLoadPreset: (preset: PipelinePresetId) => void
+  onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSyncDataHub: () => void
+  onTestAiConnection: () => Promise<void>
   onValidate: () => void
   onThemeChange: (theme: 'light' | 'dark') => void
   onRestoreVersion: (versionId: string) => void
   onSaveVersion: () => void
   theme: 'light' | 'dark'
-  versions: { id: string; label: string; createdAt: string; origin: 'initial' | 'agent' | 'manual'; blockingIssues: number }[]
+  versions: VersionSummary[]
 }
 
-export function SettingsModal({ connectionMode, errorCount, findingCount, mcpMessage, mcpTransport, onAutoLayout, onClose, onRestoreVersion, onSaveVersion, onSyncDataHub, onThemeChange, onValidate, theme, versions }: SettingsModalProps) {
-  const [activeSection, setActiveSection] = useState<'appearance' | 'datahub' | 'pipeline' | 'versions'>('appearance')
+export function SettingsModal(props: SettingsModalProps) {
+  const { aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, theme, versions } = props
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
+  const [apiKey, setApiKey] = useState('')
+  const [aiSettings, setAiSettings] = useState(aiStatus.settings)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiFeedback, setAiFeedback] = useState('')
+
+  useEffect(() => setAiSettings(aiStatus.settings), [aiStatus])
+  useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
+
+  const saveAi = async () => {
+    setAiBusy(true)
+    setAiFeedback('')
+    try {
+      await onSaveAiSettings({ ...aiSettings, apiKey: apiKey || undefined })
+      setApiKey('')
+      setAiFeedback('Connection settings saved securely.')
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to save the AI connection.')
+    } finally { setAiBusy(false) }
+  }
+
+  const testAi = async () => {
+    setAiBusy(true)
+    setAiFeedback('')
+    try {
+      if (apiKey) await onSaveAiSettings({ ...aiSettings, apiKey })
+      else await onSaveAiSettings(aiSettings)
+      setApiKey('')
+      await onTestAiConnection()
+      setAiFeedback('OpenAI connection verified.')
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'OpenAI connection failed.')
+    } finally { setAiBusy(false) }
+  }
+
+  const chatGPTModel = chatGPTStatus.models?.find((model) => model.id === chatGPTStatus.selectedModel) ?? chatGPTStatus.models?.find((model) => model.isDefault) ?? chatGPTStatus.models?.[0]
+  const chatGPTEffort = chatGPTModel?.efforts.includes(chatGPTStatus.selectedEffort ?? '') ? chatGPTStatus.selectedEffort ?? '' : chatGPTModel?.defaultEffort ?? chatGPTModel?.efforts[0] ?? ''
+  const chooseProvider = (provider: ApiProvider) => setAiSettings((current) => ({ ...current, provider, model: aiStatus.providers[provider].model }))
+
+  const menu = (id: SettingsSection, label: string, detail: string, icon: React.ReactNode) => <button aria-current={activeSection === id ? 'page' : undefined} className={activeSection === id ? 'is-active' : ''} onClick={() => setActiveSection(id)} type="button">{icon}<span><strong>{label}</strong><small>{detail}</small></span></button>
+
   return <Modal ariaLabelledby="settings-title" className="settings-modal" onClose={onClose}>
-      <header className="settings-heading">
-        <span><Settings size={19} /></span>
-        <div><small>WORKSPACE</small><h2 id="settings-title">Settings</h2><p>Appearance, DataHub MCP, pipeline tools and version history.</p></div>
-        <button aria-label="Close settings" className="settings-close" onClick={onClose} type="button"><X size={18} /></button>
-      </header>
+    <header className="settings-heading">
+      <span><Settings size={19} /></span>
+      <div><small>WORKSPACE</small><h2 id="settings-title">Settings</h2><p>Connections, examples, appearance and safe graph history.</p></div>
+      <button aria-label="Close settings" className="settings-close" onClick={onClose} type="button"><X size={18} /></button>
+    </header>
 
-      <div className="settings-body">
-        <nav aria-label="Settings sections" className="settings-sidebar">
-          <small>SETTINGS MENU</small>
-          <button aria-current={activeSection === 'appearance' ? 'page' : undefined} className={activeSection === 'appearance' ? 'is-active' : ''} onClick={() => setActiveSection('appearance')} type="button"><Palette size={17} /><span><strong>Appearance</strong><small>Theme and interface</small></span></button>
-          <button aria-current={activeSection === 'datahub' ? 'page' : undefined} className={activeSection === 'datahub' ? 'is-active' : ''} onClick={() => setActiveSection('datahub')} type="button"><Database size={17} /><span><strong>DataHub MCP</strong><small>Agent context server</small></span></button>
-          <button aria-current={activeSection === 'pipeline' ? 'page' : undefined} className={activeSection === 'pipeline' ? 'is-active' : ''} onClick={() => setActiveSection('pipeline')} type="button"><Network size={17} /><span><strong>Pipeline</strong><small>Layout and validation</small></span></button>
-          <button aria-current={activeSection === 'versions' ? 'page' : undefined} className={activeSection === 'versions' ? 'is-active' : ''} onClick={() => setActiveSection('versions')} type="button"><History size={17} /><span><strong>Versions</strong><small>Safe graph checkpoints</small></span></button>
-          <div className="settings-sidebar-status"><span className={connectionMode} /><div><strong>Agent context</strong><small>{connectionMode === 'connected' ? `MCP ${mcpTransport}` : mcpTransport === 'demo' ? 'Local demo mode' : `MCP ${mcpTransport} ready`}</small></div></div>
-        </nav>
+    <div className="settings-body">
+      <nav aria-label="Settings sections" className="settings-sidebar">
+        <small>SETTINGS MENU</small>
+        {menu('appearance', 'Appearance', 'Theme and interface', <Palette size={17} />)}
+        {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
+        {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
+        {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
+        {menu('pipeline', 'Pipeline', 'Layout and validation', <Network size={17} />)}
+        {menu('versions', 'Versions', 'Safe graph checkpoints', <History size={17} />)}
+        <div className="settings-sidebar-status"><span className={aiStatus.connected ? 'connected' : 'demo'} /><div><strong>Agent model</strong><small>{aiStatus.connected ? aiStatus.settings.model : 'Not connected'}</small></div></div>
+      </nav>
 
-        <div className="settings-content">
-          {activeSection === 'appearance' && <article className="settings-page">
-            <div className="settings-page-heading"><small>APPEARANCE</small><h3>Choose your workspace theme</h3><p>The card palette stays consistent; only surfaces and contrast are adjusted.</p></div>
-            <section className="settings-section settings-appearance">
-              <div className="settings-section-title"><span>Color mode</span><small>Local to this device</small></div>
-              <div aria-label="Color theme" className="theme-switch" role="group">
-                <button aria-pressed={theme === 'light'} className={theme === 'light' ? 'is-active' : ''} onClick={() => onThemeChange('light')} type="button"><Sun size={20} /><span><strong>Light</strong><small>Clear and bright workspace</small></span></button>
-                <button aria-pressed={theme === 'dark'} className={theme === 'dark' ? 'is-active' : ''} onClick={() => onThemeChange('dark')} type="button"><Moon size={20} /><span><strong>Dark</strong><small>Soft slate workspace</small></span></button>
-              </div>
-            </section>
-          </article>}
+      <div className="settings-content">
+        {activeSection === 'appearance' && <article className="settings-page">
+          <div className="settings-page-heading"><small>APPEARANCE</small><h3>Choose your workspace theme</h3><p>Card identities stay distinct in both light and dark modes.</p></div>
+          <section className="settings-section settings-appearance">
+            <div className="settings-section-title"><span>Color mode</span><small>Local to this device</small></div>
+            <div aria-label="Color theme" className="theme-switch" role="group">
+              <button aria-pressed={theme === 'light'} className={theme === 'light' ? 'is-active' : ''} onClick={() => onThemeChange('light')} type="button"><Sun size={20} /><span><strong>Light</strong><small>Clear and bright workspace</small></span></button>
+              <button aria-pressed={theme === 'dark'} className={theme === 'dark' ? 'is-active' : ''} onClick={() => onThemeChange('dark')} type="button"><Moon size={20} /><span><strong>Dark</strong><small>Distinct colored cards on slate</small></span></button>
+            </div>
+          </section>
+        </article>}
 
-          {activeSection === 'datahub' && <article className="settings-page">
-            <div className="settings-page-heading"><small>DATAHUB MCP</small><h3>Agent context server</h3><p>Give agents trusted schema, ownership and lineage context through the Model Context Protocol.</p></div>
-            <section className="settings-section">
-              <div className="settings-section-title"><span>MCP connection</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div>
-              <div className="settings-setting-row">
-                <div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div>
-                <div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : mcpTransport === 'demo' ? 'demo mode' : 'ready'}</strong><p>{mcpMessage}</p></div>
-                <ActionButton onClick={onSyncDataHub} variant="ghost">{connectionMode === 'connected' ? 'Sync now' : 'Connect'}</ActionButton>
-              </div>
-            </section>
-          </article>}
+        {activeSection === 'ai' && <article className="settings-page">
+          <div className="settings-page-heading"><small>AI CONNECTION</small><h3>Connect the real pipeline agent</h3><p>Without a provider connection, DATA LAB never generates a simulated proposal.</p></div>
+          <section className="settings-section chatgpt-connection-panel">
+            <div className="settings-section-title"><span><UserRound size={15} /> ChatGPT account</span><small>{chatGPTStatus.connected ? 'Connected' : 'Optional'}</small></div>
+            {chatGPTStatus.connected ? <>
+              <div className="chatgpt-account-status"><CheckCircle2 size={19} /><div><strong>{chatGPTStatus.email ?? 'ChatGPT account connected'}</strong><small>{chatGPTStatus.planType ? `${chatGPTStatus.planType} plan` : 'Codex account session'} · no API key required</small></div></div>
+              {chatGPTModel && <div className="ai-option-grid"><label className="settings-field"><span>ChatGPT model</span><select onChange={(event) => { const model = chatGPTStatus.models?.find((item) => item.id === event.target.value); if (model) void onConfigureChatGPT({ model: model.id, effort: model.defaultEffort ?? model.efforts[0] ?? '' }) }} value={chatGPTModel.id}>{chatGPTStatus.models?.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label className="settings-field"><span>Reasoning</span><select disabled={!chatGPTModel.efforts.length} onChange={(event) => void onConfigureChatGPT({ model: chatGPTModel.id, effort: event.target.value })} value={chatGPTEffort}>{chatGPTModel.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label></div>}
+              <div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogOut size={14} />} onClick={() => void onDisconnectChatGPT()} variant="ghost">Disconnect ChatGPT</ActionButton></div>
+            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions"><ActionButton disabled={aiBusy || chatGPTStatus.available === false} icon={<LogIn size={14} />} onClick={() => void onConnectChatGPT()} variant="primary">Continue with ChatGPT</ActionButton></div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error}</p>}</>}
+          </section>
+          <section className="settings-section ai-connection-panel">
+            <div className="settings-section-title"><span>API providers</span><small>{aiStatus.providers[aiSettings.provider].connected ? `Connected · ${aiStatus.providers[aiSettings.provider].credentialSource}` : 'Not connected'}</small></div>
+            <div className="model-grid provider-grid" role="radiogroup" aria-label="API provider">{([['openai', 'OpenAI', 'Responses API'], ['anthropic', 'Claude', 'Anthropic Messages'], ['moonshot', 'Kimi', 'Moonshot API']] as const).map(([provider, label, detail]) => <button aria-checked={aiSettings.provider === provider} className={aiSettings.provider === provider ? 'is-active' : ''} key={provider} onClick={() => chooseProvider(provider)} role="radio" type="button"><strong>{label}</strong><small>{detail}</small><code>{aiStatus.providers[provider].connected ? 'connected' : 'API key'}</code></button>)}</div>
+            <label className="settings-field"><span><KeyRound size={14} /> {aiSettings.provider === 'anthropic' ? 'Anthropic' : aiSettings.provider === 'moonshot' ? 'Moonshot' : 'OpenAI'} API key</span><input autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder={aiStatus.providers[aiSettings.provider].connected ? 'Saved securely · enter only to replace' : 'Paste key locally…'} type="password" value={apiKey} /><small>The key stays encrypted in Electron secure storage and is never exposed back to React.</small></label>
+            <label className="settings-field"><span>Model ID</span><input onChange={(event) => setAiSettings((current) => ({ ...current, model: event.target.value }))} placeholder="Model returned by this provider" type="text" value={aiSettings.model} /><small>“Test connection” validates the key and provider model catalog.</small></label>
+            <div className="ai-option-grid">
+              <label className="settings-field"><span>Reasoning quality</span><select onChange={(event) => setAiSettings((current) => ({ ...current, reasoningEffort: event.target.value as AiSettings['reasoningEffort'] }))} value={aiSettings.reasoningEffort}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
+              <label className="settings-field"><span>Answer detail</span><select onChange={(event) => setAiSettings((current) => ({ ...current, verbosity: event.target.value as AiSettings['verbosity'] }))} value={aiSettings.verbosity}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+              <label className="settings-field"><span>Service speed</span><select onChange={(event) => setAiSettings((current) => ({ ...current, serviceTier: event.target.value as AiSettings['serviceTier'] }))} value={aiSettings.serviceTier}><option value="auto">Auto</option><option value="priority">Priority (if enabled)</option></select></label>
+            </div>
+            <div className="ai-connection-actions"><ActionButton disabled={aiBusy} onClick={saveAi} variant="ghost">Save settings</ActionButton><ActionButton disabled={aiBusy} onClick={testAi} variant="primary">{aiBusy ? 'Checking…' : 'Test connection'}</ActionButton></div>
+            {aiFeedback && <p className="settings-feedback">{aiFeedback}</p>}
+          </section>
+          <p className="settings-note">Choose either a ChatGPT account or an API provider. If ChatGPT is connected, DATA LAB uses that account first; disconnect it to use the selected API provider.</p>
+        </article>}
 
-          {activeSection === 'pipeline' && <article className="settings-page">
-            <div className="settings-page-heading"><small>PIPELINE</small><h3>Graph tools and validation</h3><p>Maintain a readable topology and verify every rule atomically.</p></div>
-            <section className="settings-section">
-              <div className="settings-section-title"><span>Pipeline tools</span><small>Safe workspace actions</small></div>
-              <div className="settings-tools">
-                <button onClick={onAutoLayout} type="button"><span><Network size={18} /></span><div><strong>Auto layout</strong><small>Recalculate topology-aware XY placement.</small></div></button>
-                <button onClick={onValidate} type="button"><span><Play size={18} /></span><div><strong>Run validation</strong><small>{findingCount} findings · {errorCount} blocking.</small></div><em className={errorCount ? 'has-errors' : 'is-clear'}>{errorCount ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}</em></button>
-              </div>
-            </section>
-          </article>}
+        {activeSection === 'datahub' && <article className="settings-page">
+          <div className="settings-page-heading"><small>DATAHUB MCP</small><h3>Agent context server</h3><p>Give the model trusted schema, ownership and lineage context through MCP.</p></div>
+          <section className="settings-section"><div className="settings-section-title"><span>MCP connection</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div><div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton onClick={onSyncDataHub} variant="ghost">{connectionMode === 'connected' ? 'Sync now' : 'Connect'}</ActionButton></div></section>
+        </article>}
 
-          {activeSection === 'versions' && <article className="settings-page">
-            <div className="settings-page-heading settings-heading-with-action"><div><small>VERSIONS</small><h3>Pipeline checkpoints</h3><p>Agent changes are committed only after atomic validation succeeds.</p></div><ActionButton icon={<Save size={15} />} onClick={onSaveVersion} variant="primary">Save checkpoint</ActionButton></div>
-            <section className="settings-section version-list">
-              <div className="settings-section-title"><span>Version history</span><small>{versions.length} saved</small></div>
-              <ol>{[...versions].reverse().map((version, index) => <li key={version.id}>
-                <span className={`version-origin origin-${version.origin}`}>{version.origin}</span>
-                <div><strong>{version.label}</strong><small>{new Date(version.createdAt).toLocaleString()} · {version.blockingIssues ? `${version.blockingIssues} blocking` : 'atomic checks passed'}</small></div>
-                <button disabled={index === 0} onClick={() => onRestoreVersion(version.id)} title={index === 0 ? 'Current version' : `Restore ${version.label}`} type="button"><RotateCcw size={14} />{index === 0 ? 'Current' : 'Restore'}</button>
-              </li>)}</ol>
-            </section>
-          </article>}
-        </div>
+        {activeSection === 'presets' && <article className="settings-page">
+          <div className="settings-page-heading"><small>EXAMPLES</small><h3>Choose a starting canvas</h3><p>DATA LAB always opens empty. Examples are loaded only when you request them.</p></div>
+          <section className="settings-section preset-grid">
+            <button onClick={() => onLoadPreset('empty')} type="button"><LayoutTemplate size={21} /><strong>Empty canvas</strong><small>Clear the workspace and build from your own DataHub source.</small></button>
+            <button onClick={() => onLoadPreset('customer-activation')} type="button"><Database size={21} /><strong>Customer activation</strong><small>Load the ecommerce governance example for exploration.</small></button>
+          </section>
+        </article>}
+
+        {activeSection === 'pipeline' && <article className="settings-page">
+          <div className="settings-page-heading"><small>PIPELINE</small><h3>Graph tools and validation</h3><p>Maintain a readable topology and verify every rule atomically.</p></div>
+          <section className="settings-section"><div className="settings-section-title"><span>Pipeline tools</span><small>Safe workspace actions</small></div><div className="settings-tools"><button onClick={onAutoLayout} type="button"><span><Network size={18} /></span><div><strong>Auto layout</strong><small>Recalculate topology-aware XY placement.</small></div></button><button onClick={onValidate} type="button"><span><Play size={18} /></span><div><strong>Run validation</strong><small>{findingCount} findings · {errorCount} blocking.</small></div><em className={errorCount ? 'has-errors' : 'is-clear'}>{errorCount ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}</em></button></div></section>
+        </article>}
+
+        {activeSection === 'versions' && <article className="settings-page">
+          <div className="settings-page-heading settings-heading-with-action"><div><small>VERSIONS</small><h3>Pipeline checkpoints</h3><p>Recent versions are supplied to the connected model so it proposes incremental changes.</p></div><ActionButton icon={<Save size={15} />} onClick={onSaveVersion} variant="primary">Save checkpoint</ActionButton></div>
+          <VersionBrowser onRestore={onRestoreVersion} versions={versions} />
+        </article>}
       </div>
+    </div>
   </Modal>
 }
