@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { getDataHubMcpConfigurationStatus, resolveEvidenceTtlMs, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { getDataHubMcpConfigurationStatus, resolveEvidenceTtlMs, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -35,6 +35,17 @@ afterEach(() => {
 })
 
 describe('DataHub MCP connection settings', () => {
+  it('falls back only to the bounded read-only allowlist when tool discovery is slow', async () => {
+    const names = await resolveReadableToolNames(async () => { throw new Error('tool discovery timed out') })
+    expect([...names].sort()).toEqual(['get_entities', 'get_lineage', 'list_schema_fields', 'search'])
+    expect(names.has('save_document')).toBe(false)
+  })
+
+  it('uses the discovered tool catalog when it is available', async () => {
+    const names = await resolveReadableToolNames(async () => ({ tools: [{ name: 'search' }, { name: 'custom_read' }] }))
+    expect([...names]).toEqual(['search', 'custom_read'])
+  })
+
   it('supports bounded per-evidence cache TTL configuration', () => {
     expect(resolveEvidenceTtlMs({
       DATAHUB_CACHE_ENTITY_TTL_MS: '10000',
