@@ -8,10 +8,11 @@ import type { SettingsSection } from './components/shared/SettingsModal'
 import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
 import { layoutPipeline } from './domain/layout'
-import { applyProposal, cardLabels, initialEdges, initialNodes, loadPipelinePreset, newCard, type AgentProposal, type CardKind, type PipelineNode, type PipelinePresetId } from './domain/pipeline'
-import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from './domain/versioning'
+import { cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
 import { validatePipeline } from './validation'
 import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
+import { useDataHubConnection } from './hooks/useDataHubConnection'
+import { usePipelineVersions } from './hooks/usePipelineVersions'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
@@ -21,22 +22,19 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [selectedId, setSelectedId] = useState('')
   const [proposal, setProposal] = useState<AgentProposal>()
-  const [pendingVersionId, setPendingVersionId] = useState<string>()
   const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
-  const [connectionMode, setConnectionMode] = useState<'demo' | 'connected'>('demo')
-  const [mcpTransport, setMcpTransport] = useState<'demo' | 'http' | 'stdio'>('demo')
-  const [mcpMessage, setMcpMessage] = useState('Local demo context')
   const [agentRunning, setAgentRunning] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [libraryOpen, setLibraryOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
-  const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
+  const { connectionMode, mcpMessage, mcpTransport, recordAudit, syncDataHub } = useDataHubConnection(setActivity)
+  const { approveProposal, loadPreset, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const flowInstance = useRef<{ screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -51,15 +49,6 @@ export default function App() {
 
   useEffect(() => {
     window.localStorage.removeItem('data-lab-versions')
-  }, [])
-
-  useEffect(() => {
-    if (!window.dataLab) return
-    void window.dataLab.getDataHubMcpStatus().then((status) => {
-      setConnectionMode(status.mode)
-      setMcpTransport(status.transport)
-      setMcpMessage(status.message)
-    }).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -116,21 +105,6 @@ export default function App() {
     setNodes((current) => current.map((node) => node.id === selectedId ? { ...node, data: { ...node.data, ...patch } } : node))
   }
 
-  const recordPendingReview = (nextProposal: AgentProposal) => {
-    const preview = applyProposal(nodes, edges, nextProposal)
-    const previewIssues = validatePipeline(preview.nodes, preview.edges)
-    const version = createPipelineVersion(preview.nodes, preview.edges, `Review · ${nextProposal.title}`, 'agent', previewIssues)
-    version.status = 'pending-review'
-    version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale}`
-    setPendingVersionId(version.id)
-    setVersions((current) => {
-      const nextVersions = appendPipelineVersion(current, version)
-      if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes, edges, versions: nextVersions })
-      return nextVersions
-    })
-    return version.id
-  }
-
   const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.') => {
     setContextMenu(undefined)
     setProposal(undefined)
@@ -163,9 +137,7 @@ export default function App() {
         if (agentRunId.current !== runId) return
         const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
         datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
-        setConnectionMode('connected')
-        setMcpTransport(audit.transport)
-        setMcpMessage(`MCP ${audit.transport} · ${successfulReads}/${audit.reads.length} reads completed`)
+        recordAudit(audit.transport, successfulReads, audit.reads.length)
       } else {
         datahubEvidence = ['No DataHub URN is bound to a Data Source card. Treat evidence as incomplete.']
       }
@@ -240,104 +212,6 @@ export default function App() {
     setActivity(`${node?.data.label ?? 'Card'} deleted · ${attachedEdges} attached edge${attachedEdges === 1 ? '' : 's'} removed`)
   }
 
-  const approveProposal = () => {
-    if (!proposal) return
-    const next = applyProposal(nodes, edges, proposal)
-    const nextIssues = validatePipeline(next.nodes, next.edges)
-    const blocking = nextIssues.filter((issue) => issue.severity === 'error')
-    if (blocking.length) {
-      setActivity(`Transaction rejected · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed · graph unchanged`)
-      return
-    }
-    const layouted = layoutPipeline(next.nodes, next.edges)
-    const version = createPipelineVersion(layouted, next.edges, proposal.title, 'agent', nextIssues)
-    setNodes(layouted)
-    setEdges(next.edges)
-    setVersions((current) => {
-      const nextVersions = commitPendingVersion(current, pendingVersionId, version)
-      if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes: layouted, edges: next.edges, versions: nextVersions })
-      return nextVersions
-    })
-    setSelectedId(proposal.updatedNodes[0]?.nodeId ?? proposal.addedNodes[0]?.id ?? '')
-    setProposal(undefined)
-    setPendingVersionId(undefined)
-    setActivity('Change approved · atomic checks passed · revision committed')
-  }
-
-  const rejectProposal = () => {
-    if (pendingVersionId) setVersions((current) => {
-      const nextVersions = rejectPendingVersion(current, pendingVersionId)
-      if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes, edges, versions: nextVersions })
-      return nextVersions
-    })
-    setPendingVersionId(undefined)
-    setProposal(undefined)
-    setActivity('Agent proposal rejected · revision marked rejected · active branch unchanged')
-  }
-
-  const saveManualVersion = () => {
-    const currentIssues = validatePipeline(nodes, edges)
-    const blocking = currentIssues.filter((issue) => issue.severity === 'error')
-    if (blocking.length) {
-      setActivity(`Version not saved · fix ${blocking.length} blocking atomic check${blocking.length === 1 ? '' : 's'} first`)
-      return
-    }
-    const version = createPipelineVersion(nodes, edges, `Manual checkpoint ${versions.length + 1}`, 'manual', currentIssues)
-    setVersions((current) => {
-      const nextVersions = appendPipelineVersion(current, version)
-      if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes, edges, versions: nextVersions })
-      return nextVersions
-    })
-    setActivity(`Version saved · ${version.label}`)
-  }
-
-  const restoreVersion = (versionId: string) => {
-    const version = versions.find((candidate) => candidate.id === versionId)
-    if (!version || (version.status ?? 'committed') !== 'committed') return
-    const restored = restorePipelineVersion(version)
-    setNodes(restored.nodes)
-    setEdges(restored.edges)
-    setProposal(undefined)
-    setPendingVersionId(undefined)
-    setSelectedId(restored.nodes[0]?.id ?? '')
-    setActivity(`Version restored · ${version.label}`)
-    if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes: restored.nodes, edges: restored.edges, versions })
-  }
-
-  const loadPreset = (presetId: PipelinePresetId) => {
-    const preset = loadPipelinePreset(presetId)
-    setNodes(preset.nodes)
-    setEdges(preset.edges)
-    setProjectTitle(preset.title)
-    setSelectedId(preset.nodes[0]?.id ?? '')
-    setProposal(undefined)
-    setPendingVersionId(undefined)
-    setActivity(presetId === 'empty' ? 'Empty workspace ready' : `${preset.title} example loaded · ${preset.nodes.length} cards · not saved`)
-    setSettingsOpen(false)
-  }
-
-  const syncDataHub = async () => {
-    if (!window.dataLab) {
-      setActivity('Web demo mode · launch Electron with DATAHUB_GMS_URL to connect DataHub')
-      return
-    }
-    try {
-      const status = await window.dataLab.connectDataHubMcp()
-      setConnectionMode(status.mode)
-      setMcpTransport(status.transport)
-      setMcpMessage(status.message)
-      if (status.mode !== 'connected') {
-        setActivity(status.message)
-        return
-      }
-      setActivity(`${status.message} · ready for agent audits`)
-    } catch (error) {
-      setConnectionMode('demo')
-      setMcpMessage(error instanceof Error ? error.message : 'unknown error')
-      setActivity(`DataHub MCP connection failed · ${error instanceof Error ? error.message : 'unknown error'}`)
-    }
-  }
-
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
     <AppHeader agentRunning={agentRunning} cardCount={nodes.length} onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} onRun={() => void auditWithAgent()} projectTitle={projectTitle} />
 
@@ -356,7 +230,7 @@ export default function App() {
       onConfigureChatGPT={configureChatGPT}
       onConnectChatGPT={connectChatGPT}
       onDisconnectChatGPT={disconnectChatGPT}
-      onLoadPreset={loadPreset}
+      onLoadPreset={(presetId) => { loadPreset(presetId); setSettingsOpen(false) }}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
       onSaveAiSettings={saveAiConnection}
       onSelectActiveAiSource={selectActiveAgentSource}
