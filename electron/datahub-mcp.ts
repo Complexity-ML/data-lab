@@ -24,6 +24,7 @@ export interface DataHubMcpPublicSettings {
   tokenConfigured: boolean
   tokenSource: 'encrypted' | 'environment' | 'none'
   encryptionAvailable: boolean
+  writebackEnabled: boolean
 }
 
 export interface DataHubMcpRead {
@@ -60,6 +61,7 @@ const settingKeys = {
   transport: 'datahub-mcp-transport',
   url: 'datahub-mcp-url',
   token: 'datahub-mcp-token',
+  writeback: 'datahub-mcp-writeback',
 } as const
 
 function validateDatasetUrn(urn: string) {
@@ -83,12 +85,14 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
   const selectedTransport = transport ?? (environmentHttpUrl ? 'http' : 'stdio')
   const url = storedUrl || (selectedTransport === 'http' ? environmentHttpUrl : environmentGmsUrl) || ''
   const token = storedToken || environmentToken
+  const writebackEnabled = loadAppSetting(userData, settingKeys.writeback) === 'true'
   const settings: DataHubMcpPublicSettings = {
     transport: selectedTransport,
     url,
     tokenConfigured: Boolean(token),
     tokenSource: storedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    writebackEnabled,
   }
 
   if (selectedTransport === 'http' && url) {
@@ -132,7 +136,7 @@ function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transp
         ...getDefaultEnvironment(),
         DATAHUB_GMS_URL: config.url!,
         ...(config.token ? { DATAHUB_GMS_TOKEN: config.token } : {}),
-        TOOLS_IS_MUTATION_ENABLED: 'false',
+        TOOLS_IS_MUTATION_ENABLED: config.settings.writebackEnabled ? 'true' : 'false',
       },
       stderr: 'pipe',
     }),
@@ -199,6 +203,7 @@ export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubM
   const userData = app.getPath('userData')
   saveAppSetting(userData, settingKeys.transport, transport)
   saveAppSetting(userData, settingKeys.url, url)
+  saveAppSetting(userData, settingKeys.writeback, value.writebackEnabled === true ? 'true' : 'false')
   if (value.clearToken === true) saveAppSetting(userData, settingKeys.token, '')
   else if (token) saveAppSetting(userData, settingKeys.token, safeStorage.encryptString(token).toString('base64'))
   await closeDataHubMcp()
@@ -312,6 +317,27 @@ export async function inspectDataHubAsset(urn: string, force = false): Promise<{
 export function invalidateDataHubContext(urn?: string) {
   for (const key of contextCache.keys()) if (!urn || key.includes(urn)) contextCache.delete(key)
   return { invalidated: true }
+}
+
+export async function writeDataHubDecision(payload: unknown): Promise<{ written: true; tool: 'save_document'; summary: string }> {
+  const config = configuration()
+  if (!config.settings.writebackEnabled) throw new Error('DataHub write-back is disabled in Settings')
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid DataHub write-back request')
+  const value = payload as Record<string, unknown>
+  const revisionId = typeof value.revisionId === 'string' ? value.revisionId.trim().slice(0, 180) : ''
+  const title = typeof value.title === 'string' ? value.title.trim().slice(0, 180) : ''
+  const rationale = typeof value.rationale === 'string' ? value.rationale.trim().slice(0, 4_000) : ''
+  const author = typeof value.author === 'string' ? value.author.trim().slice(0, 180) : 'DATA LAB operator'
+  const relatedAssets = Array.isArray(value.relatedAssets) ? value.relatedAssets.filter((item): item is string => typeof item === 'string' && item.startsWith('urn:li:')).slice(0, 20) : []
+  if (!revisionId || !title || !rationale) throw new Error('Revision ID, title and rationale are required for DataHub write-back')
+  const client = await connectClient()
+  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP mutation discovery')
+  const tool = listed.tools.find((candidate) => candidate.name === 'save_document')
+  if (!tool || tool.annotations?.readOnlyHint !== false) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
+  const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
+  const result = await withTimeout(client.callTool({ name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }), 20_000, 'save_document')
+  if (result.isError) throw new Error(summarizeResult(result))
+  return { written: true, tool: 'save_document', summary: summarizeResult(result) }
 }
 
 export async function auditDataHubWithMcp(urn: string, force = false): Promise<DataHubMcpAudit> {

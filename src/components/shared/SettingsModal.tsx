@@ -19,6 +19,7 @@ interface SettingsModalProps {
     tokenConfigured: boolean
     tokenSource: 'encrypted' | 'environment' | 'none'
     encryptionAvailable: boolean
+    writebackEnabled: boolean
   }
   errorCount: number
   findingCount: number
@@ -34,7 +35,7 @@ interface SettingsModalProps {
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
-  onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }) => Promise<unknown>
+  onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
   onSyncDataHub: () => Promise<void>
   onTestAiConnection: () => Promise<void>
   onValidate: () => void
@@ -55,6 +56,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [dataHubBusy, setDataHubBusy] = useState(false)
   const [dataHubFeedback, setDataHubFeedback] = useState('')
   const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
+  const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
@@ -62,13 +64,14 @@ export function SettingsModal(props: SettingsModalProps) {
 
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
   useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
+  useEffect(() => { setDataHubWriteback(dataHubSettings.writebackEnabled) }, [dataHubSettings.writebackEnabled])
 
   const saveAndConnectDataHub = async () => {
     setDataHubBusy(true)
     setDataHubFeedback('')
     try {
       const token = dataHubTokenRef.current?.value.trim()
-      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', token: token || undefined })
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', token: token || undefined, writebackEnabled: dataHubWriteback })
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
       await onSyncDataHub()
       setDataHubFeedback('DataHub connection saved securely and MCP tools discovered.')
@@ -81,7 +84,7 @@ export function SettingsModal(props: SettingsModalProps) {
     setDataHubBusy(true)
     setDataHubFeedback('')
     try {
-      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() || dataHubSettings.url, clearToken: true })
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() || dataHubSettings.url, clearToken: true, writebackEnabled: dataHubWriteback })
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
       setDataHubFeedback(dataHubSettings.tokenSource === 'environment' ? 'The app token was cleared. An environment token may remain active.' : 'The encrypted DataHub token was removed.')
     } catch (error) {
@@ -279,6 +282,7 @@ export function SettingsModal(props: SettingsModalProps) {
               <label className="settings-field"><span>{dataHubTransport === 'stdio' ? 'DataHub GMS URL' : 'MCP server URL'}</span><input defaultValue={dataHubSettings.url} key={`datahub-url-${dataHubSettings.url}`} placeholder={dataHubTransport === 'stdio' ? 'http://localhost:8080' : 'https://mcp.example.com/mcp'} ref={dataHubUrlRef} type="url" /><small>Only HTTP or HTTPS endpoints are accepted.</small></label>
             </div>
             <label className="settings-field"><span>Personal access token <em>optional for local OSS</em></span><input autoComplete="off" placeholder={dataHubSettings.tokenConfigured ? 'Token configured · enter a new value to rotate' : 'Leave empty for an unauthenticated local quickstart'} ref={dataHubTokenRef} type="password" /><small>{dataHubSettings.tokenSource === 'encrypted' ? 'Stored with the operating system secure credential service.' : dataHubSettings.tokenSource === 'environment' ? 'Loaded from the launch environment; never exposed to the renderer.' : dataHubTransport === 'stdio' ? 'Your current quickstart has token authentication disabled, so this field can stay empty.' : dataHubSettings.encryptionAvailable ? 'Hosted endpoints generally require a token; it will be encrypted before SQLite persistence.' : 'Secure credential storage is unavailable; DATA LAB will refuse to save a token.'}</small></label>
+            <label className="datahub-writeback-toggle"><span><strong>Approved DataHub write-back</strong><small>Disabled by default. When enabled, only the explicitly advertised <code>save_document</code> mutation can run after a human approves its exact preview.</small></span><input checked={dataHubWriteback} onChange={(event) => setDataHubWriteback(event.target.checked)} type="checkbox" /></label>
             <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy || !dataHubSettings.tokenConfigured} onClick={() => void removeDataHubToken()} variant="ghost">Remove saved token</ActionButton><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveAndConnectDataHub()} variant="primary">{dataHubBusy ? 'Connecting…' : 'Save & connect'}</ActionButton></div>
             {dataHubFeedback && <p aria-live="polite" className="settings-feedback">{dataHubFeedback}</p>}
           </section>

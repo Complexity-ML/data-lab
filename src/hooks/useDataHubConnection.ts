@@ -8,9 +8,10 @@ export type DataHubConnectionSettings = {
   tokenConfigured: boolean
   tokenSource: 'encrypted' | 'environment' | 'none'
   encryptionAvailable: boolean
+  writebackEnabled: boolean
 }
 
-const disconnectedSettings: DataHubConnectionSettings = { transport: 'stdio', url: '', tokenConfigured: false, tokenSource: 'none', encryptionAvailable: false }
+const disconnectedSettings: DataHubConnectionSettings = { transport: 'stdio', url: '', tokenConfigured: false, tokenSource: 'none', encryptionAvailable: false, writebackEnabled: false }
 
 export function useDataHubConnection(setActivity: (message: string) => void) {
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('demo')
@@ -52,7 +53,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     }
   }
 
-  const saveSettings = async (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }) => {
+  const saveSettings = async (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => {
     if (!window.dataLab) throw new Error('DataHub settings require the Electron application')
     const status = await window.dataLab.saveDataHubMcpSettings(payload)
     applyStatus(status)
@@ -74,5 +75,10 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     return window.dataLab.invalidateDataHubContext(urn)
   }
 
-  return { connectionMode, inspectAsset, invalidateContext, mcpMessage, mcpTransport, recordAudit, saveSettings, searchAssets, settings, syncDataHub }
+  const writeDecision = async (payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }) => {
+    if (!window.dataLab) throw new Error('DataHub write-back requires the Electron application')
+    return window.dataLab.writeDataHubDecision(payload)
+  }
+
+  return { connectionMode, inspectAsset, invalidateContext, mcpMessage, mcpTransport, recordAudit, saveSettings, searchAssets, settings, syncDataHub, writeDecision }
 }

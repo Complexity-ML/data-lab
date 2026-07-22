@@ -31,6 +31,7 @@ interface DataHubMcpStatus {
     tokenConfigured: boolean
     tokenSource: 'encrypted' | 'environment' | 'none'
     encryptionAvailable: boolean
+    writebackEnabled: boolean
   }
 }
 
@@ -58,11 +59,12 @@ declare global {
       loadDatasetContext(urn: string): Promise<DataHubDatasetContext>
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
-      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }): Promise<DataHubMcpStatus>
+      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string, force?: boolean): Promise<DataHubMcpAudit>
       searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]>
       inspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
       invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
+      writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'save_document'; summary: string }>
       notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string }): Promise<{ shown: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>

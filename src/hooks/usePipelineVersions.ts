@@ -43,13 +43,13 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
   }
 
   const approveProposal = () => {
-    if (!proposal) return
+    if (!proposal) return false
     const next = applyProposal(nodes, edges, proposal)
     const nextIssues = validatePipeline(next.nodes, next.edges)
     const blocking = nextIssues.filter((issue) => issue.severity === 'error')
     if (blocking.length) {
       setActivity(`Transaction rejected · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed · graph unchanged`)
-      return
+      return false
     }
     const layouted = layoutPipeline(next.nodes, next.edges)
     const version = createPipelineVersion(layouted, next.edges, proposal.title, 'agent', nextIssues)
@@ -65,6 +65,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     setProposal(undefined)
     setPendingVersionId(undefined)
     setActivity('Change approved · atomic checks passed · revision committed')
+    return true
   }
 
   const rejectProposal = () => {
@@ -118,5 +119,5 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     setActivity(presetId === 'empty' ? 'Empty workspace ready' : `${preset.title} example loaded · ${preset.nodes.length} cards · not saved`)
   }
 
-  return { approveProposal, loadPreset, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
+  return { approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
 }

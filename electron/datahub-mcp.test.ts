@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { getDataHubMcpConfigurationStatus, saveDataHubMcpSettings } from './datahub-mcp.js'
+import { getDataHubMcpConfigurationStatus, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -46,6 +46,24 @@ describe('DataHub MCP connection settings', () => {
     })
     expect(JSON.stringify(status)).not.toContain('datahub-private-token')
     expect(readFileSync(join(directory, 'data-lab.sqlite')).toString('utf8')).not.toContain('datahub-private-token')
+  })
+
+  it('keeps governed write-back disabled by default and persists explicit opt-in', async () => {
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    expect(getDataHubMcpConfigurationStatus().settings.writebackEnabled).toBe(false)
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', writebackEnabled: true })
+    expect(getDataHubMcpConfigurationStatus().settings.writebackEnabled).toBe(true)
+  })
+
+  it('rejects write-back before contacting MCP unless a human enabled it in Settings', async () => {
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    await expect(writeDataHubDecision({
+      revisionId: 'revision-1',
+      title: 'Approved schema correction',
+      rationale: 'The reviewed schema contract requires the corrected field.',
+      author: 'DATA LAB operator',
+      relatedAssets: ['urn:li:dataset:(urn:li:dataPlatform:snowflake,customers,PROD)'],
+    })).rejects.toThrow('write-back is disabled')
   })
 
   it('rotates and clears the saved token independently from the endpoint', async () => {

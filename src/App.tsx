@@ -34,8 +34,8 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
-  const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub } = useDataHubConnection(setActivity)
-  const { approveProposal, loadPreset, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
+  const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
+  const { approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const flowInstance = useRef<{ screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -182,7 +182,7 @@ export default function App() {
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
-      const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
+      const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
@@ -225,7 +225,7 @@ export default function App() {
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
-      const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
+      const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
@@ -250,6 +250,30 @@ export default function App() {
     if (selectedId === nodeId) setSelectedId('')
     setContextMenu(undefined)
     setActivity(`${node?.data.label ?? 'Card'} deleted · ${attachedEdges} attached edge${attachedEdges === 1 ? '' : 's'} removed`)
+  }
+
+  const approveAgentProposal = async (writebackRequested: boolean) => {
+    const currentProposal = proposal
+    const revisionId = pendingVersionId
+    const relatedAssets = [...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]
+    if (!currentProposal || !approveProposal() || !writebackRequested) return
+    if (!revisionId) {
+      setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
+      return
+    }
+    try {
+      setActivity('Revision committed locally · writing the explicitly approved Decision to DataHub…')
+      const result = await writeDataHubDecision({
+        revisionId,
+        title: currentProposal.title,
+        rationale: currentProposal.rationale,
+        author: 'DATA LAB operator',
+        relatedAssets,
+      })
+      setActivity(`Revision committed locally · DataHub write-back succeeded · ${result.summary}`)
+    } catch (error) {
+      setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
+    }
   }
 
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
@@ -312,7 +336,15 @@ export default function App() {
       />
 
       <aside aria-hidden={!inspectorOpen} className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`}>
-        {proposal ? <ReviewPanel proposal={proposal} onApply={approveProposal} onClose={() => setInspectorOpen(false)} onDiscard={rejectProposal} /> : <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} />}
+        {proposal ? <ReviewPanel
+          proposal={proposal}
+          relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
+          revisionId={pendingVersionId}
+          writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled}
+          onApply={(writebackRequested) => void approveAgentProposal(writebackRequested)}
+          onClose={() => setInspectorOpen(false)}
+          onDiscard={rejectProposal}
+        /> : <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} />}
       </aside>
     </section>
 
