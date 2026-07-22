@@ -27,12 +27,16 @@ interface SettingsModalProps {
   mcpTransport: 'demo' | 'http' | 'stdio'
   initialSection?: SettingsSection
   onAutoLayout: () => void
+  onApprovePendingReview: (versionId: string) => void
   onClose: () => void
   onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
   onConnectChatGPT: () => Promise<void>
   onDisconnectChatGPT: () => Promise<void>
+  onEmergencyStop: () => void
   onLoadPreset: (preset: PipelinePresetId) => void
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
+  onRejectPendingReview: (versionId: string) => void
+  onRemindHumanReview: (version: VersionSummary) => void
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
@@ -42,13 +46,14 @@ interface SettingsModalProps {
   onThemeChange: (theme: 'light' | 'dark') => void
   onRestoreVersion: (versionId: string) => void
   onSaveVersion: () => void
+  projectTitle: string
   selectedVersionId?: string
   theme: 'light' | 'dark'
   versions: VersionSummary[]
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRefreshAiModelCatalog, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
+  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onEmergencyStop, onLoadPreset, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -303,7 +308,7 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'versions' && <article className="settings-page">
           <div className="settings-page-heading settings-heading-with-action"><div><small>VERSIONS</small><h3>Pipeline checkpoints</h3><p>Recent versions are supplied to the connected model so it proposes incremental changes.</p></div><ActionButton icon={<Save size={15} />} onClick={onSaveVersion} variant="primary">Save checkpoint</ActionButton></div>
-          <VersionBrowser onRestore={onRestoreVersion} selectedVersionId={selectedVersionId} versions={versions} />
+          <VersionBrowser onApprove={onApprovePendingReview} onEmergencyStop={onEmergencyStop} onReject={onRejectPendingReview} onRemind={onRemindHumanReview} onRestore={onRestoreVersion} pipelineTitle={projectTitle} selectedVersionId={selectedVersionId} versions={versions} />
         </article>}
       </div>
     </div>

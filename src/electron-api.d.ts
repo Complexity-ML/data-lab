@@ -65,7 +65,7 @@ declare global {
       inspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
       invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
       writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'save_document'; summary: string }>
-      notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string }): Promise<{ shown: boolean }>
+      notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string; remind?: boolean }): Promise<{ shown: boolean; deduplicated?: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>
       testAiConnection(): Promise<AiStatus & { availableModels: string[] }>

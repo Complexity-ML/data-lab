@@ -79,6 +79,37 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     setActivity('Agent proposal rejected · revision marked rejected · active branch unchanged')
   }
 
+  const approvePendingVersion = (versionId: string) => {
+    const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
+    if (!version) { setActivity('Review is no longer pending · no graph change applied'); return false }
+    if (version.blockingIssues > 0) { setActivity(`Review cannot be approved · ${version.blockingIssues} atomic check${version.blockingIssues === 1 ? '' : 's'} failed`); return false }
+    const layouted = layoutPipeline(version.nodes, version.edges)
+    setNodes(layouted)
+    setEdges(version.edges)
+    setVersions((current) => {
+      const nextVersions = current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, status: 'committed' as const } : candidate)
+      persist(nextVersions, layouted, version.edges)
+      return nextVersions
+    })
+    if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
+    setSelectedId(layouted[0]?.id ?? '')
+    setActivity(`Human Review approved · ${version.label} committed atomically`)
+    return true
+  }
+
+  const rejectPendingVersionById = (versionId: string) => {
+    const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
+    if (!version) { setActivity('Review is no longer pending'); return false }
+    setVersions((current) => {
+      const nextVersions = rejectPendingVersion(current, versionId)
+      persist(nextVersions)
+      return nextVersions
+    })
+    if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
+    setActivity(`Human Review rejected · ${version.label} remains visible in history · active graph unchanged`)
+    return true
+  }
+
   const saveManualVersion = () => {
     const currentIssues = validatePipeline(nodes, edges)
     const blocking = currentIssues.filter((issue) => issue.severity === 'error')
@@ -119,5 +150,5 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     setActivity(presetId === 'empty' ? 'Empty workspace ready' : `${preset.title} example loaded · ${preset.nodes.length} cards · not saved`)
   }
 
-  return { approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
+  return { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
 }
