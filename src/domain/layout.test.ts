@@ -27,4 +27,21 @@ describe('pipeline XY layout', () => {
     expect(path).toContain(' C ')
     expect(path).toContain('310 140')
   })
+
+  it('keeps elastic cables cubic while endpoints move between frames', () => {
+    const frames = [
+      { sourceX: 10, sourceY: 20, targetX: 310, targetY: 140 },
+      { sourceX: 34, sourceY: 52, targetX: 278, targetY: 196 },
+      { sourceX: 82, sourceY: 104, targetX: 220, targetY: 76 },
+    ]
+    const paths = frames.map(({ sourceX, sourceY, targetX, targetY }) => {
+      const path = elasticHorizontalPath(sourceX, sourceY, targetX, targetY)
+      expect(path).toMatch(new RegExp(`^M ${sourceX} ${sourceY} L .+ C [-\\d.]+ [-\\d.]+, [-\\d.]+ [-\\d.]+, [-\\d.]+ [-\\d.]+ L ${targetX} ${targetY}$`))
+      expect(path.match(/ C /g)).toHaveLength(1)
+      expect(path).not.toMatch(/ [HV] /)
+      return path
+    })
+
+    expect(new Set(paths).size).toBe(frames.length)
+  })
 })
