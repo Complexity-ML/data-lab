@@ -50,7 +50,11 @@ let activeClient: Client | undefined
 let activeTransport: ActiveTransport | undefined
 let activeMode: Exclude<DataHubMcpTransport, 'demo'> | undefined
 let connectionPromise: Promise<Client> | undefined
+type ToolCatalog = Awaited<ReturnType<Client['listTools']>>
+let toolCatalog: ToolCatalog | undefined
+let toolDiscoveryPromise: Promise<ToolCatalog> | undefined
 const contextCache = new Map<string, { result: unknown; capturedAt: number; expiresAt: number }>()
+const knownReadTools = new Set(['search', 'get_entities', 'list_schema_fields', 'get_lineage'])
 const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_entities: 5 * 60_000,
   list_schema_fields: 2 * 60_000,
@@ -194,10 +198,39 @@ async function connectClient(): Promise<Client> {
   return connectionPromise
 }
 
+async function discoverTools(client: Client, label = 'DataHub MCP tool discovery'): Promise<ToolCatalog> {
+  if (toolCatalog) return toolCatalog
+  if (!toolDiscoveryPromise) {
+    const pending = client.listTools().then((catalog) => {
+      toolCatalog = catalog
+      return catalog
+    })
+    toolDiscoveryPromise = pending
+    void pending.finally(() => { if (toolDiscoveryPromise === pending) toolDiscoveryPromise = undefined }).catch(() => undefined)
+  }
+  return withTimeout(toolDiscoveryPromise, 12_000, label)
+}
+
+export async function resolveReadableToolNames(discovery: () => Promise<{ tools: { name: string }[] }>): Promise<Set<string>> {
+  try {
+    const catalog = await discovery()
+    return new Set(catalog.tools.map((tool) => tool.name))
+  } catch {
+    // Read calls have their own timeouts and return bounded error evidence. A slow
+    // listTools response must not block known read-only DataHub operations.
+    return new Set(knownReadTools)
+  }
+}
+
+async function discoverReadableToolNames(client: Client): Promise<Set<string>> {
+  return resolveReadableToolNames(() => discoverTools(client))
+}
+
 export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
   const config = configuration()
   if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], settings: config.settings }
-  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? 'DataHub MCP connected' : config.message, toolCount: 0, tools: [], settings: config.settings }
+  const tools = toolCatalog?.tools.map((tool) => tool.name).sort() ?? []
+  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? `DataHub MCP connected${tools.length ? ` · ${tools.length} tools available` : ''}` : config.message, toolCount: tools.length, tools, settings: config.settings }
 }
 
 export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubMcpStatus> {
@@ -227,7 +260,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
   const config = configuration()
   if (config.mode === 'demo') return getDataHubMcpConfigurationStatus()
   const client = await connectClient()
-  const tools = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
+  const tools = await discoverTools(client)
   const names = tools.tools.map((tool) => tool.name).sort()
   return {
     mode: 'connected',
@@ -288,8 +321,7 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
   const clean = query.trim().slice(0, 180)
   if (clean.length < 2) throw new Error('Enter at least two characters to search DataHub')
   const client = await connectClient()
-  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
-  const available = new Set(listed.tools.map((tool) => tool.name))
+  const available = await discoverReadableToolNames(client)
   if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
   const structuredQuery = clean === '*' || clean.startsWith('/q ') ? clean : `/q ${clean.replace(/\s+/g, '+')}`
   const searchResult = await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search')
@@ -308,8 +340,7 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
 export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
   validateDatasetUrn(urn)
   const client = await connectClient()
-  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
-  const available = new Set(listed.tools.map((tool) => tool.name))
+  const available = await discoverReadableToolNames(client)
   const [entity, schema, upstream, downstream] = await Promise.all([
     readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force }),
     readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force }),
@@ -347,7 +378,7 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
   const relatedAssets = Array.isArray(value.relatedAssets) ? value.relatedAssets.filter((item): item is string => typeof item === 'string' && item.startsWith('urn:li:')).slice(0, 20) : []
   if (!revisionId || !title || !rationale) throw new Error('Revision ID, title and rationale are required for DataHub write-back')
   const client = await connectClient()
-  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP mutation discovery')
+  const listed = await discoverTools(client, 'DataHub MCP mutation discovery')
   const tool = listed.tools.find((candidate) => candidate.name === 'save_document')
   if (!tool || tool.annotations?.readOnlyHint !== false) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
   const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
@@ -359,8 +390,7 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
 export async function auditDataHubWithMcp(urn: string, force = false): Promise<DataHubMcpAudit> {
   validateDatasetUrn(urn)
   const client = await connectClient()
-  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
-  const available = new Set(listed.tools.map((tool) => tool.name))
+  const available = await discoverReadableToolNames(client)
   const calls: { name: DataHubMcpRead['name']; arguments: Record<string, unknown> }[] = [
     { name: 'get_entities', arguments: { urns: [urn] } },
     { name: 'list_schema_fields', arguments: { urn } },
@@ -384,6 +414,8 @@ export async function closeDataHubMcp() {
   activeTransport = undefined
   activeMode = undefined
   connectionPromise = undefined
+  toolCatalog = undefined
+  toolDiscoveryPromise = undefined
   contextCache.clear()
   if (client) await client.close().catch(() => undefined)
   else if (transport) await transport.close().catch(() => undefined)
