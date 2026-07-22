@@ -33,7 +33,7 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
-  const { connectionMode, mcpMessage, mcpTransport, recordAudit, syncDataHub } = useDataHubConnection(setActivity)
+  const { connectionMode, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, settings: dataHubSettings, syncDataHub } = useDataHubConnection(setActivity)
   const { approveProposal, loadPreset, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
@@ -220,6 +220,7 @@ export default function App() {
       aiStatus={aiStatus}
       chatGPTStatus={chatGPTStatus}
       connectionMode={connectionMode}
+      dataHubSettings={dataHubSettings}
       errorCount={errors.length}
       findingCount={issues.length}
       initialSection={settingsSection}
@@ -233,6 +234,7 @@ export default function App() {
       onLoadPreset={(presetId) => { loadPreset(presetId); setSettingsOpen(false) }}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
       onSaveAiSettings={saveAiConnection}
+      onSaveDataHubSettings={saveDataHubSettings}
       onSelectActiveAiSource={selectActiveAgentSource}
       onSyncDataHub={syncDataHub}
       onTestAiConnection={testAiConnection}

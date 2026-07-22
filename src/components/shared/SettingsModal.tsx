@@ -13,6 +13,13 @@ interface SettingsModalProps {
   aiStatus: AiStatus
   chatGPTStatus: ChatGPTSessionStatus
   connectionMode: 'demo' | 'connected'
+  dataHubSettings: {
+    transport: 'http' | 'stdio'
+    url: string
+    tokenConfigured: boolean
+    tokenSource: 'encrypted' | 'environment' | 'none'
+    encryptionAvailable: boolean
+  }
   errorCount: number
   findingCount: number
   mcpMessage: string
@@ -27,7 +34,8 @@ interface SettingsModalProps {
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
-  onSyncDataHub: () => void
+  onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }) => Promise<unknown>
+  onSyncDataHub: () => Promise<void>
   onTestAiConnection: () => Promise<void>
   onValidate: () => void
   onThemeChange: (theme: 'light' | 'dark') => void
@@ -39,15 +47,47 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRefreshAiModelCatalog, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
+  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRefreshAiModelCatalog, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiFeedback, setAiFeedback] = useState('')
+  const [dataHubBusy, setDataHubBusy] = useState(false)
+  const [dataHubFeedback, setDataHubFeedback] = useState('')
+  const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
+  const dataHubUrlRef = useRef<HTMLInputElement>(null)
+  const dataHubTokenRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
+  useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
+
+  const saveAndConnectDataHub = async () => {
+    setDataHubBusy(true)
+    setDataHubFeedback('')
+    try {
+      const token = dataHubTokenRef.current?.value.trim()
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', token: token || undefined })
+      if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
+      await onSyncDataHub()
+      setDataHubFeedback('DataHub connection saved securely and MCP tools discovered.')
+    } catch (error) {
+      setDataHubFeedback(error instanceof Error ? error.message : 'Unable to connect DataHub MCP.')
+    } finally { setDataHubBusy(false) }
+  }
+
+  const removeDataHubToken = async () => {
+    setDataHubBusy(true)
+    setDataHubFeedback('')
+    try {
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() || dataHubSettings.url, clearToken: true })
+      if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
+      setDataHubFeedback(dataHubSettings.tokenSource === 'environment' ? 'The app token was cleared. An environment token may remain active.' : 'The encrypted DataHub token was removed.')
+    } catch (error) {
+      setDataHubFeedback(error instanceof Error ? error.message : 'Unable to remove the DataHub token.')
+    } finally { setDataHubBusy(false) }
+  }
 
   const draftAiSettings = (): AiSettings => ({
     ...aiSettings,
@@ -231,7 +271,17 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'datahub' && <article className="settings-page">
           <div className="settings-page-heading"><small>DATAHUB MCP</small><h3>Agent context server</h3><p>Give the model trusted schema, ownership and lineage context through MCP.</p></div>
-          <section className="settings-section"><div className="settings-section-title"><span>MCP connection</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div><div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton onClick={onSyncDataHub} variant="ghost">{connectionMode === 'connected' ? 'Sync now' : 'Connect'}</ActionButton></div></section>
+          <section className="settings-section">
+            <div className="settings-section-title"><span>MCP connection</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div>
+            <div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton disabled={dataHubBusy || connectionMode !== 'connected'} onClick={() => void onSyncDataHub()} variant="ghost">Sync now</ActionButton></div>
+            <div className="ai-option-grid">
+              <label className="settings-field"><span>Transport</span><select onChange={(event) => setDataHubTransport(event.target.value as 'http' | 'stdio')} value={dataHubTransport}><option value="stdio">Local stdio (DataHub OSS)</option><option value="http">Streamable HTTP MCP</option></select><small>{dataHubTransport === 'stdio' ? 'Launches mcp-server-datahub locally through uvx.' : 'Connects to an already hosted MCP endpoint.'}</small></label>
+              <label className="settings-field"><span>{dataHubTransport === 'stdio' ? 'DataHub GMS URL' : 'MCP server URL'}</span><input defaultValue={dataHubSettings.url} key={`datahub-url-${dataHubSettings.url}`} placeholder={dataHubTransport === 'stdio' ? 'http://localhost:8080' : 'https://mcp.example.com/mcp'} ref={dataHubUrlRef} type="url" /><small>Only HTTP or HTTPS endpoints are accepted.</small></label>
+            </div>
+            <label className="settings-field"><span>Personal access token</span><input autoComplete="off" placeholder={dataHubSettings.tokenConfigured ? 'Token configured · enter a new value to rotate' : 'Paste a DataHub token'} ref={dataHubTokenRef} type="password" /><small>{dataHubSettings.tokenSource === 'encrypted' ? 'Stored with the operating system secure credential service.' : dataHubSettings.tokenSource === 'environment' ? 'Loaded from the launch environment; never exposed to the renderer.' : dataHubSettings.encryptionAvailable ? 'The token will be encrypted before SQLite persistence.' : 'Secure credential storage is unavailable; DATA LAB will refuse to save a token.'}</small></label>
+            <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy || !dataHubSettings.tokenConfigured} onClick={() => void removeDataHubToken()} variant="ghost">Remove saved token</ActionButton><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveAndConnectDataHub()} variant="primary">{dataHubBusy ? 'Connecting…' : 'Save & connect'}</ActionButton></div>
+            {dataHubFeedback && <p aria-live="polite" className="settings-feedback">{dataHubFeedback}</p>}
+          </section>
         </article>}
 
         {activeSection === 'presets' && <article className="settings-page">

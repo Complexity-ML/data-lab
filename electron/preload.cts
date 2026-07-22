@@ -4,6 +4,7 @@ const statusChannel = 'data-lab:datahub-status'
 const datasetChannel = 'data-lab:datahub-dataset'
 const mcpStatusChannel = 'data-lab:datahub-mcp-status'
 const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
+const mcpSettingsSaveChannel = 'data-lab:datahub-mcp-settings-save'
 const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
@@ -33,6 +34,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   loadDatasetContext: (urn: string) => ipcRenderer.invoke(datasetChannel, { urn }),
   getDataHubMcpStatus: () => ipcRenderer.invoke(mcpStatusChannel),
   connectDataHubMcp: () => ipcRenderer.invoke(mcpConnectChannel),
+  saveDataHubMcpSettings: (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }) => ipcRenderer.invoke(mcpSettingsSaveChannel, payload),
   auditDataHubWithMcp: (urn: string) => ipcRenderer.invoke(mcpAuditChannel, { urn }),
   notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),

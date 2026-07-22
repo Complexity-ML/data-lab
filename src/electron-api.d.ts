@@ -24,6 +24,13 @@ interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  settings: {
+    transport: 'http' | 'stdio'
+    url: string
+    tokenConfigured: boolean
+    tokenSource: 'encrypted' | 'environment' | 'none'
+    encryptionAvailable: boolean
+  }
 }
 
 interface DataHubMcpAudit {
@@ -46,6 +53,7 @@ declare global {
       loadDatasetContext(urn: string): Promise<DataHubDatasetContext>
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
+      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
       notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string }): Promise<{ shown: boolean }>
       getAiStatus(): Promise<AiStatus>

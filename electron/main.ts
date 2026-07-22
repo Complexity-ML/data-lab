@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Notification, shell, type BrowserWindowCon
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
-import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus } from './datahub-mcp.js'
+import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, saveDataHubMcpSettings } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
@@ -13,6 +13,7 @@ const statusChannel = 'data-lab:datahub-status'
 const datasetChannel = 'data-lab:datahub-dataset'
 const mcpStatusChannel = 'data-lab:datahub-mcp-status'
 const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
+const mcpSettingsSaveChannel = 'data-lab:datahub-mcp-settings-save'
 const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
@@ -132,6 +133,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(mcpStatusChannel, () => getDataHubMcpConfigurationStatus())
   ipcMain.handle(mcpConnectChannel, () => connectDataHubMcp())
+  ipcMain.handle(mcpSettingsSaveChannel, (_event, payload: unknown) => saveDataHubMcpSettings(payload))
   ipcMain.handle(mcpAuditChannel, (_event, payload: { urn?: unknown }) => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub MCP audit request')
     return auditDataHubWithMcp(payload.urn)

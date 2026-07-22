@@ -1,6 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { app, safeStorage } from 'electron'
+import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 
 export type DataHubMcpTransport = 'demo' | 'http' | 'stdio'
 
@@ -11,6 +13,15 @@ export interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  settings: DataHubMcpPublicSettings
+}
+
+export interface DataHubMcpPublicSettings {
+  transport: 'http' | 'stdio'
+  url: string
+  tokenConfigured: boolean
+  tokenSource: 'encrypted' | 'environment' | 'none'
+  encryptionAvailable: boolean
 }
 
 export interface DataHubMcpRead {
@@ -33,31 +44,59 @@ let activeTransport: ActiveTransport | undefined
 let activeMode: Exclude<DataHubMcpTransport, 'demo'> | undefined
 let connectionPromise: Promise<Client> | undefined
 
+const settingKeys = {
+  transport: 'datahub-mcp-transport',
+  url: 'datahub-mcp-url',
+  token: 'datahub-mcp-token',
+} as const
+
 function validateDatasetUrn(urn: string) {
   if (!urn.startsWith('urn:li:dataset:') || urn.length > 2_000) throw new Error('A valid DataHub dataset URN is required')
 }
 
-function configuration(): { mode: DataHubMcpTransport; message: string; url?: string; token?: string } {
-  const url = process.env.DATAHUB_MCP_URL?.trim()
-  const token = (process.env.DATAHUB_MCP_TOKEN ?? process.env.DATAHUB_GMS_TOKEN)?.trim()
-  if (url) {
-    const parsed = new URL(url)
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DATAHUB_MCP_URL must use http or https')
-    return { mode: 'http', message: `Remote MCP configured at ${parsed.origin}`, url, token }
+function decryptStoredToken(encrypted: string | null): string | undefined {
+  if (!encrypted || !safeStorage.isEncryptionAvailable()) return undefined
+  try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')).trim() || undefined } catch { return undefined }
+}
+
+function configuration(): { mode: DataHubMcpTransport; message: string; url?: string; token?: string; settings: DataHubMcpPublicSettings } {
+  const userData = app.getPath('userData')
+  const storedTransport = loadAppSetting(userData, settingKeys.transport)
+  const storedUrl = loadAppSetting(userData, settingKeys.url)?.trim()
+  const storedToken = decryptStoredToken(loadAppSetting(userData, settingKeys.token))
+  const transport = storedTransport === 'stdio' || storedTransport === 'http' ? storedTransport : undefined
+  const environmentHttpUrl = process.env.DATAHUB_MCP_URL?.trim()
+  const environmentGmsUrl = process.env.DATAHUB_GMS_URL?.trim()
+  const environmentToken = (process.env.DATAHUB_MCP_TOKEN ?? process.env.DATAHUB_GMS_TOKEN)?.trim()
+  const selectedTransport = transport ?? (environmentHttpUrl ? 'http' : 'stdio')
+  const url = storedUrl || (selectedTransport === 'http' ? environmentHttpUrl : environmentGmsUrl) || ''
+  const token = storedToken || environmentToken
+  const settings: DataHubMcpPublicSettings = {
+    transport: selectedTransport,
+    url,
+    tokenConfigured: Boolean(token),
+    tokenSource: storedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
   }
 
-  const gmsUrl = process.env.DATAHUB_GMS_URL?.trim()
-  const gmsToken = process.env.DATAHUB_GMS_TOKEN?.trim()
-  if (gmsUrl && gmsToken) return {
+  if (selectedTransport === 'http' && url) {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DATAHUB_MCP_URL must use http or https')
+    return { mode: 'http', message: `Remote MCP configured at ${parsed.origin}`, url, token, settings }
+  }
+
+  if (selectedTransport === 'stdio' && url && token) return {
     mode: 'stdio',
     message: 'Local DataHub MCP is ready to launch through uvx',
-    url: gmsUrl,
-    token: gmsToken,
+    url,
+    token,
+    settings,
   }
 
   return {
     mode: 'demo',
-    message: 'Demo context active. Configure DATAHUB_MCP_URL or DATAHUB_GMS_URL + DATAHUB_GMS_TOKEN.',
+    message: selectedTransport === 'stdio' && url ? 'A DataHub personal access token is required for local stdio.' : 'Configure the DataHub connection below, then connect.',
+    settings,
   }
 }
 
@@ -128,8 +167,30 @@ async function connectClient(): Promise<Client> {
 
 export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
   const config = configuration()
-  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [] }
-  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? 'DataHub MCP connected' : config.message, toolCount: 0, tools: [] }
+  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], settings: config.settings }
+  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? 'DataHub MCP connected' : config.message, toolCount: 0, tools: [], settings: config.settings }
+}
+
+export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubMcpStatus> {
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid DataHub connection settings')
+  const value = payload as Record<string, unknown>
+  const transport = value.transport === 'http' || value.transport === 'stdio' ? value.transport : undefined
+  const url = typeof value.url === 'string' ? value.url.trim().replace(/\/$/, '') : ''
+  const token = typeof value.token === 'string' ? value.token.trim() : ''
+  if (!transport) throw new Error('Choose HTTP or local stdio transport')
+  if (!url || url.length > 2_000) throw new Error('A DataHub URL is required')
+  const parsed = new URL(url)
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DataHub URL must use http or https')
+  if (token.length > 1_000) throw new Error('DataHub token is too long')
+  if (token && !safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this device')
+
+  const userData = app.getPath('userData')
+  saveAppSetting(userData, settingKeys.transport, transport)
+  saveAppSetting(userData, settingKeys.url, url)
+  if (value.clearToken === true) saveAppSetting(userData, settingKeys.token, '')
+  else if (token) saveAppSetting(userData, settingKeys.token, safeStorage.encryptString(token).toString('base64'))
+  await closeDataHubMcp()
+  return getDataHubMcpConfigurationStatus()
 }
 
 export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
@@ -145,6 +206,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
     serverVersion: client.getServerVersion()?.version,
     toolCount: names.length,
     tools: names,
+    settings: config.settings,
   }
 }
 
