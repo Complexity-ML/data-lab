@@ -1,6 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { app, safeStorage } from 'electron'
+import { parseAssetContext, parseSearchResults, readStructuredToolResult, type DataHubAssetSummary } from './datahub-context.js'
+import { loadAppSetting, saveAppSetting } from './workspace-db.js'
+export type { DataHubAssetSummary } from './datahub-context.js'
 
 export type DataHubMcpTransport = 'demo' | 'http' | 'stdio'
 
@@ -11,12 +15,25 @@ export interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  settings: DataHubMcpPublicSettings
+}
+
+export interface DataHubMcpPublicSettings {
+  transport: 'http' | 'stdio'
+  url: string
+  tokenConfigured: boolean
+  tokenSource: 'encrypted' | 'environment' | 'none'
+  encryptionAvailable: boolean
 }
 
 export interface DataHubMcpRead {
   name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
   status: 'ok' | 'unavailable' | 'error'
   summary: string
+  capturedAt: string
+  expiresAt: string
+  cached: boolean
+  stale: boolean
 }
 
 export interface DataHubMcpAudit {
@@ -32,32 +49,66 @@ let activeClient: Client | undefined
 let activeTransport: ActiveTransport | undefined
 let activeMode: Exclude<DataHubMcpTransport, 'demo'> | undefined
 let connectionPromise: Promise<Client> | undefined
+const contextCache = new Map<string, { result: unknown; capturedAt: number; expiresAt: number }>()
+const evidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
+  get_entities: 5 * 60_000,
+  list_schema_fields: 2 * 60_000,
+  get_lineage: 90_000,
+}
+
+const settingKeys = {
+  transport: 'datahub-mcp-transport',
+  url: 'datahub-mcp-url',
+  token: 'datahub-mcp-token',
+} as const
 
 function validateDatasetUrn(urn: string) {
   if (!urn.startsWith('urn:li:dataset:') || urn.length > 2_000) throw new Error('A valid DataHub dataset URN is required')
 }
 
-function configuration(): { mode: DataHubMcpTransport; message: string; url?: string; token?: string } {
-  const url = process.env.DATAHUB_MCP_URL?.trim()
-  const token = (process.env.DATAHUB_MCP_TOKEN ?? process.env.DATAHUB_GMS_TOKEN)?.trim()
-  if (url) {
-    const parsed = new URL(url)
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DATAHUB_MCP_URL must use http or https')
-    return { mode: 'http', message: `Remote MCP configured at ${parsed.origin}`, url, token }
+function decryptStoredToken(encrypted: string | null): string | undefined {
+  if (!encrypted || !safeStorage.isEncryptionAvailable()) return undefined
+  try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')).trim() || undefined } catch { return undefined }
+}
+
+function configuration(): { mode: DataHubMcpTransport; message: string; url?: string; token?: string; settings: DataHubMcpPublicSettings } {
+  const userData = app.getPath('userData')
+  const storedTransport = loadAppSetting(userData, settingKeys.transport)
+  const storedUrl = loadAppSetting(userData, settingKeys.url)?.trim()
+  const storedToken = decryptStoredToken(loadAppSetting(userData, settingKeys.token))
+  const transport = storedTransport === 'stdio' || storedTransport === 'http' ? storedTransport : undefined
+  const environmentHttpUrl = process.env.DATAHUB_MCP_URL?.trim()
+  const environmentGmsUrl = process.env.DATAHUB_GMS_URL?.trim()
+  const environmentToken = (process.env.DATAHUB_MCP_TOKEN ?? process.env.DATAHUB_GMS_TOKEN)?.trim()
+  const selectedTransport = transport ?? (environmentHttpUrl ? 'http' : 'stdio')
+  const url = storedUrl || (selectedTransport === 'http' ? environmentHttpUrl : environmentGmsUrl) || ''
+  const token = storedToken || environmentToken
+  const settings: DataHubMcpPublicSettings = {
+    transport: selectedTransport,
+    url,
+    tokenConfigured: Boolean(token),
+    tokenSource: storedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
   }
 
-  const gmsUrl = process.env.DATAHUB_GMS_URL?.trim()
-  const gmsToken = process.env.DATAHUB_GMS_TOKEN?.trim()
-  if (gmsUrl && gmsToken) return {
+  if (selectedTransport === 'http' && url) {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DATAHUB_MCP_URL must use http or https')
+    return { mode: 'http', message: `Remote MCP configured at ${parsed.origin}`, url, token, settings }
+  }
+
+  if (selectedTransport === 'stdio' && url) return {
     mode: 'stdio',
-    message: 'Local DataHub MCP is ready to launch through uvx',
-    url: gmsUrl,
-    token: gmsToken,
+    message: token ? 'Local DataHub MCP is ready with token authentication' : 'Local DataHub OSS MCP is ready without token authentication',
+    url,
+    token,
+    settings,
   }
 
   return {
     mode: 'demo',
-    message: 'Demo context active. Configure DATAHUB_MCP_URL or DATAHUB_GMS_URL + DATAHUB_GMS_TOKEN.',
+    message: 'Configure the DataHub connection below, then connect.',
+    settings,
   }
 }
 
@@ -80,7 +131,7 @@ function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transp
       env: {
         ...getDefaultEnvironment(),
         DATAHUB_GMS_URL: config.url!,
-        DATAHUB_GMS_TOKEN: config.token!,
+        ...(config.token ? { DATAHUB_GMS_TOKEN: config.token } : {}),
         TOOLS_IS_MUTATION_ENABLED: 'false',
       },
       stderr: 'pipe',
@@ -128,8 +179,30 @@ async function connectClient(): Promise<Client> {
 
 export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
   const config = configuration()
-  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [] }
-  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? 'DataHub MCP connected' : config.message, toolCount: 0, tools: [] }
+  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], settings: config.settings }
+  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? 'DataHub MCP connected' : config.message, toolCount: 0, tools: [], settings: config.settings }
+}
+
+export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubMcpStatus> {
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid DataHub connection settings')
+  const value = payload as Record<string, unknown>
+  const transport = value.transport === 'http' || value.transport === 'stdio' ? value.transport : undefined
+  const url = typeof value.url === 'string' ? value.url.trim().replace(/\/$/, '') : ''
+  const token = typeof value.token === 'string' ? value.token.trim() : ''
+  if (!transport) throw new Error('Choose HTTP or local stdio transport')
+  if (!url || url.length > 2_000) throw new Error('A DataHub URL is required')
+  const parsed = new URL(url)
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('DataHub URL must use http or https')
+  if (token.length > 1_000) throw new Error('DataHub token is too long')
+  if (token && !safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this device')
+
+  const userData = app.getPath('userData')
+  saveAppSetting(userData, settingKeys.transport, transport)
+  saveAppSetting(userData, settingKeys.url, url)
+  if (value.clearToken === true) saveAppSetting(userData, settingKeys.token, '')
+  else if (token) saveAppSetting(userData, settingKeys.token, safeStorage.encryptString(token).toString('base64'))
+  await closeDataHubMcp()
+  return getDataHubMcpConfigurationStatus()
 }
 
 export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
@@ -145,6 +218,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
     serverVersion: client.getServerVersion()?.version,
     toolCount: names.length,
     tools: names,
+    settings: config.settings,
   }
 }
 
@@ -160,7 +234,87 @@ function summarizeResult(result: unknown): string {
   return compact.length > 320 ? `${compact.slice(0, 317)}…` : compact
 }
 
-export async function auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit> {
+async function readCachedTool(options: { client: Client; available: Set<string>; urn: string; name: DataHubMcpRead['name']; arguments: Record<string, unknown>; force?: boolean }) {
+  const { client, available, name, urn } = options
+  const now = Date.now()
+  const cacheKey = `${name}:${JSON.stringify(options.arguments)}`
+  const cached = contextCache.get(cacheKey)
+  if (!options.force && cached && cached.expiresAt > now) return {
+    result: cached.result,
+    evidence: { name, status: 'ok' as const, summary: summarizeResult(cached.result), capturedAt: new Date(cached.capturedAt).toISOString(), expiresAt: new Date(cached.expiresAt).toISOString(), cached: true, stale: false },
+  }
+  const capturedAt = new Date(now).toISOString()
+  if (!available.has(name)) return {
+    result: undefined,
+    evidence: { name, status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+  }
+  try {
+    const result = await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name)
+    const status = result.isError ? 'error' as const : 'ok' as const
+    const expiresAt = now + evidenceTtlMs[name]
+    if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
+    return {
+      result,
+      evidence: { name, status, summary: summarizeResult(result), capturedAt, expiresAt: new Date(expiresAt).toISOString(), cached: false, stale: status !== 'ok' },
+    }
+  } catch (error) {
+    return {
+      result: undefined,
+      evidence: { name, status: 'error' as const, summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+    }
+  }
+}
+
+export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
+  const clean = query.trim().slice(0, 180)
+  if (clean.length < 2) throw new Error('Enter at least two characters to search DataHub')
+  const client = await connectClient()
+  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
+  const available = new Set(listed.tools.map((tool) => tool.name))
+  if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
+  const structuredQuery = clean === '*' || clean.startsWith('/q ') ? clean : `/q ${clean.replace(/\s+/g, '+')}`
+  const searchResult = await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search')
+  if (searchResult.isError) throw new Error(summarizeResult(searchResult))
+  const matches = parseSearchResults(readStructuredToolResult(searchResult))
+  if (!matches.length) return []
+  const details = available.has('get_entities')
+    ? await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities')
+    : undefined
+  const entityPayload = details && !details.isError ? readStructuredToolResult(details) : undefined
+  return matches.map((match) => parseAssetContext({ urn: match.urn, name: match.name, entityPayload }))
+}
+
+export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
+  validateDatasetUrn(urn)
+  const client = await connectClient()
+  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
+  const available = new Set(listed.tools.map((tool) => tool.name))
+  const [entity, schema, upstream, downstream] = await Promise.all([
+    readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force }),
+    readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'upstream', max_hops: 3, count: 30 }, force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3, count: 30 }, force }),
+  ])
+  const evidence = [entity.evidence, schema.evidence, upstream.evidence, downstream.evidence]
+  const successful = evidence.filter((item) => item.status === 'ok').sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))[0]
+  const asset = parseAssetContext({
+    urn,
+    entityPayload: readStructuredToolResult(entity.result),
+    schemaPayload: readStructuredToolResult(schema.result),
+    upstreamPayload: readStructuredToolResult(upstream.result),
+    downstreamPayload: readStructuredToolResult(downstream.result),
+    capturedAt: successful?.capturedAt,
+    expiresAt: successful?.expiresAt,
+  })
+  return { asset, evidence }
+}
+
+export function invalidateDataHubContext(urn?: string) {
+  for (const key of contextCache.keys()) if (!urn || key.includes(urn)) contextCache.delete(key)
+  return { invalidated: true }
+}
+
+export async function auditDataHubWithMcp(urn: string, force = false): Promise<DataHubMcpAudit> {
   validateDatasetUrn(urn)
   const client = await connectClient()
   const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
@@ -171,15 +325,7 @@ export async function auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
     { name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3 } },
   ]
 
-  const reads = await Promise.all(calls.map(async (call): Promise<DataHubMcpRead> => {
-    if (!available.has(call.name)) return { name: call.name, status: 'unavailable', summary: 'Tool is not exposed by this MCP server.' }
-    try {
-      const result = await withTimeout(client.callTool({ name: call.name, arguments: call.arguments }), 20_000, call.name)
-      return { name: call.name, status: result.isError ? 'error' : 'ok', summary: summarizeResult(result) }
-    } catch (error) {
-      return { name: call.name, status: 'error', summary: error instanceof Error ? error.message : 'Unknown MCP error' }
-    }
-  }))
+  const reads = await Promise.all(calls.map(async (call) => (await readCachedTool({ client, available, urn, name: call.name, arguments: call.arguments, force })).evidence))
 
   return {
     urn,
@@ -196,6 +342,7 @@ export async function closeDataHubMcp() {
   activeTransport = undefined
   activeMode = undefined
   connectionPromise = undefined
+  contextCache.clear()
   if (client) await client.close().catch(() => undefined)
   else if (transport) await transport.close().catch(() => undefined)
 }

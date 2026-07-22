@@ -10,7 +10,28 @@ describe('atomic pipeline validation', () => {
       'acyclic-lineage',
       'card-contracts',
       'sensitive-data-path',
+      'datahub-governance',
     ])
+  })
+
+  it('blocks stale sensitive evidence and missing DataHub ownership without calling it healthy', () => {
+    const source = {
+      ...newCard('source', 0),
+      id: 'governed-source',
+      data: {
+        ...newCard('source', 0).data,
+        datahubUrn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,customers,PROD)',
+        datahubTags: ['PII'],
+        datahubQuality: 'unavailable' as const,
+        datahubFreshness: { capturedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-01-01T00:01:00.000Z', stale: true },
+      },
+    }
+    const findings = validatePipeline([source], [])
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'missing-owner-governed-source', severity: 'error' }),
+      expect.objectContaining({ id: 'metadata-stale-governed-source', severity: 'error' }),
+      expect.objectContaining({ id: 'quality-unavailable-governed-source', severity: 'warning' }),
+    ]))
   })
 
   it('rejects an empty pipeline instead of reporting a false success', () => {

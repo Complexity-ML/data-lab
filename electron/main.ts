@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Notification, shell, type BrowserWindowCon
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
-import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus } from './datahub-mcp.js'
+import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, saveDataHubMcpSettings, searchDataHubAssets } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
@@ -13,7 +13,11 @@ const statusChannel = 'data-lab:datahub-status'
 const datasetChannel = 'data-lab:datahub-dataset'
 const mcpStatusChannel = 'data-lab:datahub-mcp-status'
 const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
+const mcpSettingsSaveChannel = 'data-lab:datahub-mcp-settings-save'
 const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
+const mcpSearchChannel = 'data-lab:datahub-mcp-search'
+const mcpInspectChannel = 'data-lab:datahub-mcp-inspect'
+const mcpInvalidateChannel = 'data-lab:datahub-mcp-invalidate'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
 const windowStateChangedChannel = 'data-lab:window-state-changed'
@@ -132,10 +136,20 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(mcpStatusChannel, () => getDataHubMcpConfigurationStatus())
   ipcMain.handle(mcpConnectChannel, () => connectDataHubMcp())
-  ipcMain.handle(mcpAuditChannel, (_event, payload: { urn?: unknown }) => {
+  ipcMain.handle(mcpSettingsSaveChannel, (_event, payload: unknown) => saveDataHubMcpSettings(payload))
+  ipcMain.handle(mcpAuditChannel, (_event, payload: { urn?: unknown; force?: unknown }) => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub MCP audit request')
-    return auditDataHubWithMcp(payload.urn)
+    return auditDataHubWithMcp(payload.urn, payload.force === true)
   })
+  ipcMain.handle(mcpSearchChannel, (_event, payload: { query?: unknown }) => {
+    if (typeof payload?.query !== 'string') throw new Error('Invalid DataHub search request')
+    return searchDataHubAssets(payload.query)
+  })
+  ipcMain.handle(mcpInspectChannel, (_event, payload: { urn?: unknown; force?: unknown }) => {
+    if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub inspection request')
+    return inspectDataHubAsset(payload.urn, payload.force === true)
+  })
+  ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
   ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }) => notifyHumanReview(payload))
   ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
   ipcMain.handle(aiStatusChannel, () => getAiStatus())

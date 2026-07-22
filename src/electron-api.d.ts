@@ -1,5 +1,6 @@
 import type { SchemaField } from './domain/pipeline'
 import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
+import type { DataHubAssetSummary } from './domain/datahub'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -24,6 +25,13 @@ interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  settings: {
+    transport: 'http' | 'stdio'
+    url: string
+    tokenConfigured: boolean
+    tokenSource: 'encrypted' | 'environment' | 'none'
+    encryptionAvailable: boolean
+  }
 }
 
 interface DataHubMcpAudit {
@@ -34,6 +42,10 @@ interface DataHubMcpAudit {
     name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
     status: 'ok' | 'unavailable' | 'error'
     summary: string
+    capturedAt: string
+    expiresAt: string
+    cached: boolean
+    stale: boolean
   }[]
 }
 
@@ -46,7 +58,11 @@ declare global {
       loadDatasetContext(urn: string): Promise<DataHubDatasetContext>
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
-      auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
+      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }): Promise<DataHubMcpStatus>
+      auditDataHubWithMcp(urn: string, force?: boolean): Promise<DataHubMcpAudit>
+      searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]>
+      inspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
+      invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
       notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string }): Promise<{ shown: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>

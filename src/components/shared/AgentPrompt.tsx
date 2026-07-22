@@ -14,6 +14,7 @@ interface AgentPromptProps {
 export function AgentPrompt({ activity, busy, connected, context, onOpenSettings, onStop, onSubmit }: AgentPromptProps) {
   const [value, setValue] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [connectionNotice, setConnectionNotice] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useLayoutEffect(() => {
@@ -29,9 +30,10 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
     const request = value.trim()
     if (!request || busy) return
     if (!connected) {
-      onOpenSettings()
+      setConnectionNotice('Connect an AI source before sending. Your prompt is preserved.')
       return
     }
+    setConnectionNotice('')
     onSubmit(request)
     setValue('')
     setDetailsOpen(true)
@@ -55,7 +57,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
       <textarea
         aria-label="What should the DATA LAB agent do?"
         disabled={busy}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => { setValue(event.target.value); if (connectionNotice) setConnectionNotice('') }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
           event.preventDefault()
@@ -66,7 +68,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
         rows={1}
         value={value}
       />
-      <div className="data-agent-prompt-context"><span><Sparkles size={11} />DATA LAB agent</span><small>{connected ? `${context.model} · Review only · ${context.mcp}` : 'No simulated action · connection required'}</small></div>
+      <div className="data-agent-prompt-context"><span><Sparkles size={11} />DATA LAB agent</span><small aria-live="polite">{connectionNotice || (connected ? `${context.model} · Review only · ${context.mcp}` : 'No simulated action · connection required')}</small>{!connected && <button className="data-agent-connect" onClick={onOpenSettings} type="button">Connect</button>}</div>
       <div className="data-agent-actions">
         {busy
           ? <button aria-label="Emergency stop agent" className="data-agent-send is-stop" onClick={onStop} title="Stop the current agent run immediately" type="button"><Square size={13} /></button>

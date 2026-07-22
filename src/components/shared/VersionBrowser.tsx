@@ -1,6 +1,7 @@
-import { AlertTriangle, CheckCircle2, Clock3, GitBranch, RotateCcw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Database, GitBranch, RotateCcw, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { resolveVersionSelection } from '../../domain/versioning'
+import type { DataHubEvidence } from '../../domain/datahub'
 import { ActionButton } from './ActionButton'
 
 export interface VersionSummary {
@@ -11,6 +12,7 @@ export interface VersionSummary {
   blockingIssues: number
   status?: 'committed' | 'pending-review' | 'rejected'
   description?: string
+  evidence?: DataHubEvidence[]
 }
 
 export function VersionBrowser({ onRestore, selectedVersionId, versions }: { onRestore(versionId: string): void; selectedVersionId?: string; versions: VersionSummary[] }) {
@@ -33,6 +35,7 @@ export function VersionBrowser({ onRestore, selectedVersionId, versions }: { onR
       <h4>{selected.label}</h4>
       <p>{selected.description ?? 'Manual pipeline checkpoint. No agent comment was attached to this revision.'}</p>
       <dl><div><dt>Origin</dt><dd>{selected.origin}</dd></div><div><dt>Atomic validation</dt><dd className={selected.blockingIssues ? 'has-errors' : ''}>{selected.blockingIssues ? <><AlertTriangle size={13} />{selected.blockingIssues} blocking issue(s)</> : <><CheckCircle2 size={13} />Checks passed</>}</dd></div><div><dt>Branch state</dt><dd>{status === 'pending-review' ? 'Paused until the named human decides' : status === 'rejected' ? 'Stopped — active graph was not changed' : 'Committed and restorable'}</dd></div></dl>
+      <section className="version-evidence"><h5><Database size={13} />DataHub evidence provenance</h5>{selected.evidence?.length ? <ol>{selected.evidence.map((item, index) => <li className={item.stale || item.status !== 'ok' ? 'is-stale' : ''} key={`${item.tool}-${item.urn}-${index}`}><span><strong>{item.tool}</strong><em>{item.cached ? 'cache' : 'live'} · {item.status}</em></span><code>{item.urn}</code><p>{item.summary}</p><small>Captured {new Date(item.capturedAt).toLocaleString()} · {item.stale ? 'stale/unavailable' : `valid until ${new Date(item.expiresAt).toLocaleTimeString()}`}</small></li>)}</ol> : <p>No DataHub evidence was attached to this revision.</p>}</section>
       <div className="version-browser-actions"><ActionButton disabled={status !== 'committed'} icon={<RotateCcw size={14} />} onClick={() => onRestore(selected.id)} variant="primary">{status === 'pending-review' ? 'Waiting for Human Review' : status === 'rejected' ? 'Revision rejected' : 'Restore this version'}</ActionButton></div>
     </article>
   </div>

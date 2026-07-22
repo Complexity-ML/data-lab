@@ -4,7 +4,11 @@ const statusChannel = 'data-lab:datahub-status'
 const datasetChannel = 'data-lab:datahub-dataset'
 const mcpStatusChannel = 'data-lab:datahub-mcp-status'
 const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
+const mcpSettingsSaveChannel = 'data-lab:datahub-mcp-settings-save'
 const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
+const mcpSearchChannel = 'data-lab:datahub-mcp-search'
+const mcpInspectChannel = 'data-lab:datahub-mcp-inspect'
+const mcpInvalidateChannel = 'data-lab:datahub-mcp-invalidate'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
 const windowStateChangedChannel = 'data-lab:window-state-changed'
@@ -33,7 +37,11 @@ contextBridge.exposeInMainWorld('dataLab', {
   loadDatasetContext: (urn: string) => ipcRenderer.invoke(datasetChannel, { urn }),
   getDataHubMcpStatus: () => ipcRenderer.invoke(mcpStatusChannel),
   connectDataHubMcp: () => ipcRenderer.invoke(mcpConnectChannel),
-  auditDataHubWithMcp: (urn: string) => ipcRenderer.invoke(mcpAuditChannel, { urn }),
+  saveDataHubMcpSettings: (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean }) => ipcRenderer.invoke(mcpSettingsSaveChannel, payload),
+  auditDataHubWithMcp: (urn: string, force = false) => ipcRenderer.invoke(mcpAuditChannel, { urn, force }),
+  searchDataHubAssets: (query: string) => ipcRenderer.invoke(mcpSearchChannel, { query }),
+  inspectDataHubAsset: (urn: string, force = false) => ipcRenderer.invoke(mcpInspectChannel, { urn, force }),
+  invalidateDataHubContext: (urn?: string) => ipcRenderer.invoke(mcpInvalidateChannel, { urn }),
   notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),
   saveAiSettings: (payload: unknown) => ipcRenderer.invoke(aiSaveChannel, payload),

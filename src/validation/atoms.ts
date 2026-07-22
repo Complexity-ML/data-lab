@@ -90,3 +90,21 @@ export const sensitiveDataAtom: ValidationAtom = {
     return source && activation && !protectedPath ? [issue(this.id, { id: 'pii-activation', severity: 'error', nodeId: activation.id, title: 'PII reaches activation unmasked', detail: 'DataHub classifies email as PII, but no masking transform exists on the activation path.' })] : []
   },
 }
+
+export const dataHubGovernanceAtom: ValidationAtom = {
+  id: 'datahub-governance',
+  label: 'DataHub governance signals',
+  run({ nodes }) {
+    return nodes.flatMap((node) => {
+      if (!node.data.datahubUrn) return []
+      const findings: ValidationIssue[] = []
+      const sensitive = node.data.datahubTags?.some((tag) => /pii|sensitive|gdpr|personal/i.test(tag))
+        || node.data.schema.some((field) => field.tags?.some((tag) => /pii|sensitive|gdpr|personal/i.test(tag)))
+      if (!node.data.owner.trim() || node.data.owner === 'Unassigned') findings.push(issue(this.id, { id: `missing-owner-${node.id}`, severity: 'error', nodeId: node.id, title: 'DataHub ownership is missing', detail: 'Publishing is blocked because the bound asset has no accountable owner.' }))
+      if (node.data.datahubQuality === 'failing') findings.push(issue(this.id, { id: `quality-failing-${node.id}`, severity: 'error', nodeId: node.id, title: 'DataHub quality checks are failing', detail: 'Publishing is blocked until failing DataHub assertions are resolved or explicitly reviewed.' }))
+      if (node.data.datahubQuality === 'unavailable') findings.push(issue(this.id, { id: `quality-unavailable-${node.id}`, severity: 'warning', nodeId: node.id, title: 'Data quality metadata is unavailable', detail: 'Unavailable quality metadata is not treated as a healthy signal.' }))
+      if (node.data.datahubFreshness?.stale) findings.push(issue(this.id, { id: `metadata-stale-${node.id}`, severity: sensitive ? 'error' : 'warning', nodeId: node.id, title: 'DataHub evidence is stale', detail: sensitive ? 'Sensitive-data evidence expired, so the agent cannot proceed until MCP context is refreshed.' : 'Refresh DataHub context before relying on this metadata.' }))
+      return findings
+    })
+  },
+}

@@ -1,6 +1,7 @@
 import type { Edge } from '@xyflow/react'
 import type { PipelineNode } from './pipeline'
 import type { ValidationIssue } from '../validation'
+import type { DataHubEvidence } from './datahub'
 
 export interface PipelineVersion {
   id: string
@@ -12,6 +13,7 @@ export interface PipelineVersion {
   blockingIssues: number
   status?: 'committed' | 'pending-review' | 'rejected'
   description?: string
+  evidence?: DataHubEvidence[]
 }
 
 function copyGraph<T>(value: T): T {
@@ -38,7 +40,7 @@ export function appendPipelineVersion(versions: PipelineVersion[], version: Pipe
 export function commitPendingVersion(versions: PipelineVersion[], pendingVersionId: string | undefined, committed: PipelineVersion): PipelineVersion[] {
   if (!pendingVersionId) return appendPipelineVersion(versions, committed)
   return versions.map((candidate) => candidate.id === pendingVersionId
-    ? { ...committed, id: candidate.id, createdAt: candidate.createdAt, description: candidate.description, status: 'committed' }
+    ? { ...committed, id: candidate.id, createdAt: candidate.createdAt, description: candidate.description, evidence: candidate.evidence, status: 'committed' }
     : candidate)
 }
 
