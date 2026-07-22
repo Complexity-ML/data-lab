@@ -1,0 +1,62 @@
+{
+  "name": "labo-data",
+  "productName": "LABO DATA",
+  "description": "A human-reviewed, DataHub-aware visual pipeline builder for data teams.",
+  "author": "LABO DATA",
+  "license": "Apache-2.0",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "electron:dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "electron:start": "npm run build && npm run build:electron && electron .",
+    "package:mac:dir": "npm run build && npm run build:electron && electron-builder --mac dir --publish never",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "ai.labo.data",
+    "productName": "LABO DATA",
+    "artifactName": "LABO-DATA-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "identity": "-",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dir"
+      ]
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xyflow/react": "^12.11.2",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.0",
+    "electron": "^39.2.0",
+    "electron-builder": "^26.0.0",
+    "sass": "^1.94.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.0",
+    "vitest": "^4.0.0",
+    "wait-on": "^9.0.0"
+  }
+}

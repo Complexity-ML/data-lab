@@ -1,0 +1,104 @@
+import type { Edge } from '@xyflow/react'
+import type { AgentRunTraceStep, CardKind, PipelineNode } from './pipeline'
+
+export interface CardRoleContract {
+  role: string
+  mission: string
+  input: string
+  output: string
+  allowedTools: string[]
+}
+
+export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
+  source: {
+    role: 'Catalog loader',
+    mission: 'Resolve the governed dataset and expose a trusted schema envelope.',
+    input: 'DataHub dataset URN',
+    output: 'DatasetContext',
+    allowedTools: ['get_entities', 'list_schema_fields'],
+  },
+  analysis: {
+    role: 'Context analyst',
+    mission: 'Inspect metadata, classifications and downstream impact before deciding.',
+    input: 'DatasetContext',
+    output: 'AnalysisFindings',
+    allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
+  },
+  split: {
+    role: 'Policy router',
+    mission: 'Choose the governed branch from an explicit, inspectable rule.',
+    input: 'AnalysisFindings',
+    output: 'ApprovedBranch | QuarantineBranch',
+    allowedTools: [],
+  },
+  decision: {
+    role: 'Decision agent',
+    mission: 'Choose the smallest supported correction or request a human when confidence is insufficient.',
+    input: 'ApprovedBranch + AnalysisFindings',
+    output: 'ReviewedChangeProposal',
+    allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
+  },
+  transform: {
+    role: 'Schema transformer',
+    mission: 'Apply a deterministic transformation while preserving the declared contract.',
+    input: 'TypedRows',
+    output: 'TransformedRows',
+    allowedTools: [],
+  },
+  review: {
+    role: 'Human approval gate',
+    mission: 'Pause autonomous execution until a named human approves the complete diff.',
+    input: 'ReviewedChangeProposal',
+    output: 'ApprovedChange | RejectedChange',
+    allowedTools: [],
+  },
+  validation: {
+    role: 'Atomic validator',
+    mission: 'Run every independent contract and stop on any blocking finding.',
+    input: 'TransformedRows + GovernancePolicy',
+    output: 'ValidationResult',
+    allowedTools: [],
+  },
+  output: {
+    role: 'Governed publisher',
+    mission: 'Publish only a fully validated artifact and its lineage.',
+    input: 'ValidatedRows',
+    output: 'PublishedAsset',
+    allowedTools: [],
+  },
+}
+
+function edgePriority(edge: Edge) {
+  if (edge.sourceHandle === 'approved') return 0
+  if (edge.sourceHandle === 'quarantine') return 2
+  return 1
+}
+
+export function planPrimaryAgentRoute(nodes: PipelineNode[], edges: Edge[]): PipelineNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const incoming = new Set(edges.map((edge) => edge.target))
+  const sources = nodes
+    .filter((node) => node.data.kind === 'source' || !incoming.has(node.id))
+    .sort((left, right) => left.position.x - right.position.x || left.position.y - right.position.y)
+  const route: PipelineNode[] = []
+  const visited = new Set<string>()
+  let current: PipelineNode | undefined = sources[0]
+
+  while (current && !visited.has(current.id)) {
+    route.push(current)
+    visited.add(current.id)
+    const currentId: string = current.id
+    const nextEdge: Edge | undefined = edges
+      .filter((edge) => edge.source === currentId && byId.has(edge.target))
+      .sort((left, right) => edgePriority(left) - edgePriority(right)
+        || (byId.get(left.target)?.position.x ?? 0) - (byId.get(right.target)?.position.x ?? 0)
+        || (byId.get(left.target)?.position.y ?? 0) - (byId.get(right.target)?.position.y ?? 0))[0]
+    current = nextEdge ? byId.get(nextEdge.target) : undefined
+  }
+
+  return route
+}
+
+export function traceStep(node: PipelineNode, state: AgentRunTraceStep['state'], summary: string): AgentRunTraceStep {
+  return { nodeId: node.id, label: node.data.label, role: cardRoleContracts[node.data.kind].role, state, summary }
+}
