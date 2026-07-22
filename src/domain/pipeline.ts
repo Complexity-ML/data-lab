@@ -28,6 +28,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
   rule?: string
   agentAdded?: boolean
+  pinned?: boolean
   runState?: 'idle' | 'running' | 'completed' | 'waiting' | 'failed' | 'stopped'
   runSequence?: number
 }

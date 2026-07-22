@@ -31,7 +31,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     const previewIssues = validatePipeline(preview.nodes, preview.edges)
     const version = createPipelineVersion(preview.nodes, preview.edges, `Review · ${nextProposal.title}`, 'agent', previewIssues)
     version.status = 'pending-review'
-    version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale}`
+    version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale} Incremental diff: +${nextProposal.addedNodes.length} cards, ~${nextProposal.updatedNodes.length} cards, +${nextProposal.addedEdges.length} edges, -${nextProposal.removedEdgeIds.length} edges.`
     version.evidence = nextProposal.evidence
     setPendingVersionId(version.id)
     setVersions((current) => {

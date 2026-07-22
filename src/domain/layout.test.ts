@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { elasticHorizontalPath } from '../components/shared/ElasticEdge'
 import { layoutPipeline } from './layout'
-import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
+import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from './pipeline'
 
 describe('pipeline XY layout', () => {
   it('places every lineage edge from left to right', () => {
@@ -43,5 +43,25 @@ describe('pipeline XY layout', () => {
     })
 
     expect(new Set(paths).size).toBe(frames.length)
+  })
+
+  it('preserves pinned manual card positions while arranging the surrounding graph', () => {
+    const pinned = initialNodes.map((node) => node.id === 'region-split' ? { ...node, position: { x: 777, y: 555 }, data: { ...node.data, pinned: true } } : node)
+    const arranged = layoutPipeline(pinned, initialEdges)
+    expect(arranged.find((node) => node.id === 'region-split')?.position).toEqual({ x: 777, y: 555 })
+    expect(arranged.find((node) => node.id === 'customers-source')?.position).not.toEqual(initialNodes.find((node) => node.id === 'customers-source')?.position)
+  })
+
+  it('orders adjacent layers to remove avoidable crossed cables', () => {
+    const topLeft = { ...newCard('source', 0), id: 'top-left', position: { x: 0, y: 0 } }
+    const bottomLeft = { ...newCard('source', 1), id: 'bottom-left', position: { x: 0, y: 300 } }
+    const topRight = { ...newCard('output', 2), id: 'top-right', position: { x: 300, y: 0 } }
+    const bottomRight = { ...newCard('output', 3), id: 'bottom-right', position: { x: 300, y: 300 } }
+    const edges = [{ id: 'cross-a', source: 'top-left', target: 'bottom-right' }, { id: 'cross-b', source: 'bottom-left', target: 'top-right' }]
+    const arranged = layoutPipeline([topLeft, bottomLeft, topRight, bottomRight], edges)
+    const positions = new Map(arranged.map((node) => [node.id, node.position]))
+    const sourceOrder = positions.get('top-left')!.y - positions.get('bottom-left')!.y
+    const targetOrder = positions.get('bottom-right')!.y - positions.get('top-right')!.y
+    expect(sourceOrder * targetOrder).toBeGreaterThanOrEqual(0)
   })
 })

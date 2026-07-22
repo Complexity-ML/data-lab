@@ -38,6 +38,7 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
       <label>Card name<input value={selected.data.label} onChange={(event) => onUpdate({ label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={selected.data.description} onChange={(event) => onUpdate({ description: event.target.value })} /></label>
       <label>Owner<input value={selected.data.owner} onChange={(event) => onUpdate({ owner: event.target.value })} /></label>
+      <label className="inspector-check"><input checked={Boolean(selected.data.pinned)} onChange={(event) => onUpdate({ pinned: event.target.checked })} type="checkbox" /><span><strong>Pin manual position</strong><small>Auto-layout will route around this card without moving it.</small></span></label>
       {selected.data.rule !== undefined && <label>Rule<textarea className="code-input" rows={3} value={selected.data.rule} onChange={(event) => onUpdate({ rule: event.target.value })} /></label>}
       {selected.data.datahubUrn && <section className="bound-datahub-source"><small>BOUND DATAHUB URN</small><code>{selected.data.datahubUrn}</code><span>{selected.data.datahubPlatform ?? 'unknown platform'} · {selected.data.datahubEnvironment ?? 'unknown environment'}</span></section>}
       {selected.data.kind !== 'source' && selected.data.datahubUrn !== undefined && <label>DataHub URN<textarea className="code-input" rows={3} value={selected.data.datahubUrn} onChange={(event) => onUpdate({ datahubUrn: event.target.value })} /></label>}

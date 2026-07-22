@@ -284,6 +284,8 @@ button { color: inherit; }
 .pipeline-card.run-waiting { border-color: #fb7185; box-shadow: 0 0 0 4px rgb(244 63 94 / 12%), 0 12px 30px rgb(15 23 42 / 11%); }
 .pipeline-card.run-failed { border-color: #ef4444; box-shadow: 0 0 0 4px rgb(239 68 68 / 12%), 0 12px 30px rgb(15 23 42 / 11%); }
 .pipeline-card.run-stopped { opacity: .72; }
+.react-flow__node { transition: transform 320ms cubic-bezier(.22, 1, .36, 1); }
+.react-flow__node.dragging { transition: none; }
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 .healthy-icon { margin-left: auto; color: #22c55e; }
 .pipeline-card > strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -444,6 +446,11 @@ button { color: inherit; }
 .role-contract dl > div:last-child { border-bottom: 0; }
 .role-contract dt { color: var(--faint); font-size: 7px; font-weight: 750; text-transform: uppercase; }
 .role-contract dd { overflow-wrap: anywhere; margin: 0; color: var(--text); font: 7.5px ui-monospace, monospace; }
+.inspector-check { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 8px !important; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.inspector-check input { flex: 0 0 auto; width: 15px !important; height: 15px; margin: 1px 0 0; accent-color: var(--accent); }
+.inspector-check span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.inspector-check strong { font-size: 8.5px; }
+.inspector-check small { color: var(--muted); font-size: 7px; line-height: 1.4; }
 .run-trace ol { display: flex; flex-direction: column; gap: 5px; }
 .run-trace li { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 7px; margin: 0; }
 .run-trace li > span { display: grid; place-items: center; width: 18px; height: 18px; color: #15803d; border-radius: 50%; background: #dcfce7; font-size: 7px; font-weight: 800; }
