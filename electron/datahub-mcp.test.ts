@@ -61,4 +61,13 @@ describe('DataHub MCP connection settings', () => {
     electronState.encryptionAvailable = false
     await expect(saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', token: 'unsafe-token' })).rejects.toThrow('Secure credential storage is unavailable')
   })
+
+  it('allows an unauthenticated local OSS quickstart while keeping hosted credentials optional', async () => {
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    expect(getDataHubMcpConfigurationStatus()).toMatchObject({
+      transport: 'stdio',
+      settings: { tokenConfigured: false, tokenSource: 'none' },
+      message: 'Local DataHub OSS MCP is ready without token authentication',
+    })
+  })
 })

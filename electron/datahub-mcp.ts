@@ -28,6 +28,10 @@ export interface DataHubMcpRead {
   name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
   status: 'ok' | 'unavailable' | 'error'
   summary: string
+  capturedAt: string
+  expiresAt: string
+  cached: boolean
+  stale: boolean
 }
 
 export interface DataHubMcpAudit {
@@ -37,12 +41,34 @@ export interface DataHubMcpAudit {
   reads: DataHubMcpRead[]
 }
 
+export interface DataHubAssetSummary {
+  urn: string
+  name: string
+  platform: string
+  environment: string
+  description: string
+  owners: string[]
+  domain?: string
+  tags: string[]
+  fields: { name: string; type: 'string' | 'number' | 'boolean' | 'timestamp'; tags?: string[] }[]
+  qualityStatus: 'healthy' | 'failing' | 'unavailable'
+  upstream: { urn: string; name: string; sensitive: boolean }[]
+  downstream: { urn: string; name: string; sensitive: boolean }[]
+  freshness: { capturedAt: string; expiresAt: string; stale: boolean }
+}
+
 type ActiveTransport = StdioClientTransport | StreamableHTTPClientTransport
 
 let activeClient: Client | undefined
 let activeTransport: ActiveTransport | undefined
 let activeMode: Exclude<DataHubMcpTransport, 'demo'> | undefined
 let connectionPromise: Promise<Client> | undefined
+const contextCache = new Map<string, { result: unknown; capturedAt: number; expiresAt: number }>()
+const evidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
+  get_entities: 5 * 60_000,
+  list_schema_fields: 2 * 60_000,
+  get_lineage: 90_000,
+}
 
 const settingKeys = {
   transport: 'datahub-mcp-transport',
@@ -85,9 +111,9 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
     return { mode: 'http', message: `Remote MCP configured at ${parsed.origin}`, url, token, settings }
   }
 
-  if (selectedTransport === 'stdio' && url && token) return {
+  if (selectedTransport === 'stdio' && url) return {
     mode: 'stdio',
-    message: 'Local DataHub MCP is ready to launch through uvx',
+    message: token ? 'Local DataHub MCP is ready with token authentication' : 'Local DataHub OSS MCP is ready without token authentication',
     url,
     token,
     settings,
@@ -95,7 +121,7 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
 
   return {
     mode: 'demo',
-    message: selectedTransport === 'stdio' && url ? 'A DataHub personal access token is required for local stdio.' : 'Configure the DataHub connection below, then connect.',
+    message: 'Configure the DataHub connection below, then connect.',
     settings,
   }
 }
@@ -119,7 +145,7 @@ function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transp
       env: {
         ...getDefaultEnvironment(),
         DATAHUB_GMS_URL: config.url!,
-        DATAHUB_GMS_TOKEN: config.token!,
+        ...(config.token ? { DATAHUB_GMS_TOKEN: config.token } : {}),
         TOOLS_IS_MUTATION_ENABLED: 'false',
       },
       stderr: 'pipe',
@@ -234,12 +260,15 @@ export async function auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
   ]
 
   const reads = await Promise.all(calls.map(async (call): Promise<DataHubMcpRead> => {
-    if (!available.has(call.name)) return { name: call.name, status: 'unavailable', summary: 'Tool is not exposed by this MCP server.' }
+    const capturedAt = new Date().toISOString()
+    const expiresAt = new Date(Date.now() + evidenceTtlMs[call.name]).toISOString()
+    if (!available.has(call.name)) return { name: call.name, status: 'unavailable', summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true }
     try {
       const result = await withTimeout(client.callTool({ name: call.name, arguments: call.arguments }), 20_000, call.name)
-      return { name: call.name, status: result.isError ? 'error' : 'ok', summary: summarizeResult(result) }
+      const status = result.isError ? 'error' as const : 'ok' as const
+      return { name: call.name, status, summary: summarizeResult(result), capturedAt, expiresAt, cached: false, stale: status !== 'ok' }
     } catch (error) {
-      return { name: call.name, status: 'error', summary: error instanceof Error ? error.message : 'Unknown MCP error' }
+      return { name: call.name, status: 'error', summary: error instanceof Error ? error.message : 'Unknown MCP error', capturedAt, expiresAt: capturedAt, cached: false, stale: true }
     }
   }))
 

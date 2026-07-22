@@ -32,6 +32,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     const version = createPipelineVersion(preview.nodes, preview.edges, `Review · ${nextProposal.title}`, 'agent', previewIssues)
     version.status = 'pending-review'
     version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale}`
+    version.evidence = nextProposal.evidence
     setPendingVersionId(version.id)
     setVersions((current) => {
       const nextVersions = appendPipelineVersion(current, version)
@@ -52,6 +53,7 @@ export function usePipelineVersions({ edges, nodes, projectTitle, proposal, setA
     }
     const layouted = layoutPipeline(next.nodes, next.edges)
     const version = createPipelineVersion(layouted, next.edges, proposal.title, 'agent', nextIssues)
+    version.evidence = proposal.evidence
     setNodes(layouted)
     setEdges(next.edges)
     setVersions((current) => {
