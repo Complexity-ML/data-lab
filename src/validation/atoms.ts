@@ -96,6 +96,7 @@ export const cardContractsAtom: ValidationAtom = {
   label: 'Atomic card contracts',
   run(context) {
     return context.nodes.flatMap((node) => {
+      if (node.data.kind === 'profile') return []
       const findings: ValidationIssue[] = []
       if (node.data.kind !== 'source' && !context.edges.some((edge) => edge.target === node.id)) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
       if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id)) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))

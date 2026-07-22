@@ -27,5 +27,6 @@ describe('incremental agent version context', () => {
       },
     })
     expect(request.guardrails).toContain('Prefer an incremental change over rebuilding without evidence')
+    expect(request.guardrails).toContain('Reuse a fresh Data Profile instead of repeating dataset normalization or mental reconstruction')
   })
 })

@@ -61,7 +61,7 @@ export interface AiProposalResponse {
   usage?: unknown
 }
 
-const kinds = new Set<CardKind>(['source', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
@@ -174,8 +174,42 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
 }
 
 export function compactGraph(nodes: PipelineNode[], edges: Edge[]) {
+  const freshProfileByUrn = new Map(nodes.flatMap((node) => {
+    const profile = node.data.profile
+    const expiresAt = profile ? Date.parse(profile.expiresAt) : Number.NaN
+    return node.data.kind === 'profile' && profile && !profile.stale && Number.isFinite(expiresAt) && expiresAt > Date.now()
+      ? [[profile.sourceUrn, node.id] as const]
+      : []
+  }))
   return {
-    nodes: nodes.map((node) => ({ id: node.id, kind: node.data.kind, label: node.data.label, description: node.data.description, owner: node.data.owner, rule: node.data.rule, datahubUrn: node.data.datahubUrn, schema: node.data.schema })),
+    nodes: nodes.map((node) => {
+      const profileRef = node.data.kind === 'source' && node.data.datahubUrn ? freshProfileByUrn.get(node.data.datahubUrn) : undefined
+      return {
+        id: node.id,
+        kind: node.data.kind,
+        label: node.data.label,
+        description: node.data.description,
+        owner: node.data.owner,
+        rule: node.data.rule,
+        datahubUrn: node.data.datahubUrn,
+        schema: node.data.kind === 'profile' || profileRef ? [] : node.data.schema,
+        profileRef,
+        profile: node.data.profile ? {
+          sourceUrn: node.data.profile.sourceUrn,
+          capturedAt: node.data.profile.capturedAt,
+          expiresAt: node.data.profile.expiresAt,
+          stale: node.data.profile.stale,
+          quality: node.data.profile.quality,
+          fieldCount: node.data.profile.fieldCount,
+          profiledFields: node.data.profile.profiledFields,
+          sensitiveFieldCount: node.data.profile.sensitiveFieldCount,
+          upstreamCount: node.data.profile.upstreamCount,
+          downstreamCount: node.data.profile.downstreamCount,
+          anomalies: node.data.profile.anomalies,
+          tokenEstimate: node.data.profile.tokenEstimate,
+        } : undefined,
+      }
+    }),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle })),
   }
 }

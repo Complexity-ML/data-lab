@@ -1,9 +1,10 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { BrainCircuit, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { BrainCircuit, ChartColumn, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
   source: Database,
+  profile: ChartColumn,
   analysis: BrainCircuit,
   split: GitBranch,
   decision: Dices,
@@ -18,9 +19,10 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
+  const isProfile = data.kind === 'profile'
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
-    {!isSource && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
+    {!isSource && !isProfile && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
     <header>
       <span className="card-icon"><Icon size={16} /></span>
       <span className="card-kind">{data.kind}</span>
@@ -34,12 +36,18 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
     </header>
     <strong>{data.label}</strong>
     <p>{data.description}</p>
+    {data.profile && <div className="profile-summary" aria-label="Compact data profile">
+      <span><strong>{data.profile.fieldCount}</strong> fields</span>
+      <span><strong>{data.profile.sensitiveFieldCount}</strong> sensitive</span>
+      <span><strong>{data.profile.anomalies.length}</strong> signals</span>
+      <span><strong>~{data.profile.tokenEstimate}</strong> tokens</span>
+    </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>
       <span>{data.owner}</span>
       {data.datahubUrn && <span className="datahub-badge">DataHub</span>}
     </footer>
-    {!isOutput && !isSplit && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
+    {!isOutput && !isSplit && !isProfile && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
     {isSplit && <>
       <Handle className="pipeline-handle split-approved" id="approved" position={Position.Right} type="source" />
       <Handle className="pipeline-handle split-quarantine" id="quarantine" position={Position.Right} type="source" />
