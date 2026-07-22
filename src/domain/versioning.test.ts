@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
-import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, readPipelineVersions, rejectPendingVersion, resolveVersionSelection, restorePipelineVersion } from './versioning'
+import { appendPipelineVersion, buildVersionProvenanceExport, commitPendingVersion, createPipelineVersion, readPipelineVersions, rejectPendingVersion, resolveVersionSelection, restorePipelineVersion } from './versioning'
 
 describe('pipeline versioning', () => {
   it('creates an isolated graph snapshot', () => {
@@ -35,5 +35,14 @@ describe('pipeline versioning', () => {
     const pending = { ...createPipelineVersion(initialNodes, initialEdges, 'Review', 'agent', []), status: 'pending-review' as const }
     expect(resolveVersionSelection([committed, pending], committed.id)).toBe(committed.id)
     expect(resolveVersionSelection([committed, pending], 'missing')).toBe(pending.id)
+  })
+
+  it('exports exact evidence provenance without credential-shaped values or graph data', () => {
+    const version = createPipelineVersion(initialNodes, initialEdges, 'Governed revision', 'agent', [])
+    version.evidence = [{ tool: 'get_entities', urn: 'urn:li:dataset:test', capturedAt: '2026-07-22T20:00:00.000Z', expiresAt: '2026-07-22T20:05:00.000Z', status: 'ok', summary: 'owner=Growth token=private-token', cached: false, stale: false }]
+    const exported = buildVersionProvenanceExport(version)
+    expect(exported.evidence[0].summary).toBe('owner=Growth token=[REDACTED]')
+    expect(JSON.stringify(exported)).not.toContain('private-token')
+    expect(exported.revision).not.toHaveProperty('nodes')
   })
 })

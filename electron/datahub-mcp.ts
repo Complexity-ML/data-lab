@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { app, safeStorage } from 'electron'
-import { parseAssetContext, parseSearchResults, readStructuredToolResult, type DataHubAssetSummary } from './datahub-context.js'
+import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 export type { DataHubAssetSummary } from './datahub-context.js'
 
@@ -51,10 +51,23 @@ let activeTransport: ActiveTransport | undefined
 let activeMode: Exclude<DataHubMcpTransport, 'demo'> | undefined
 let connectionPromise: Promise<Client> | undefined
 const contextCache = new Map<string, { result: unknown; capturedAt: number; expiresAt: number }>()
-const evidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
+const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_entities: 5 * 60_000,
   list_schema_fields: 2 * 60_000,
   get_lineage: 90_000,
+}
+
+function boundedTtl(value: string | undefined, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.min(60 * 60_000, Math.max(5_000, Math.round(parsed))) : fallback
+}
+
+export function resolveEvidenceTtlMs(environment: NodeJS.ProcessEnv = process.env): Record<DataHubMcpRead['name'], number> {
+  return {
+    get_entities: boundedTtl(environment.DATAHUB_CACHE_ENTITY_TTL_MS, defaultEvidenceTtlMs.get_entities),
+    list_schema_fields: boundedTtl(environment.DATAHUB_CACHE_SCHEMA_TTL_MS, defaultEvidenceTtlMs.list_schema_fields),
+    get_lineage: boundedTtl(environment.DATAHUB_CACHE_LINEAGE_TTL_MS, defaultEvidenceTtlMs.get_lineage),
+  }
 }
 
 const settingKeys = {
@@ -236,7 +249,8 @@ function summarizeResult(result: unknown): string {
     .map((item) => item.text)
     .join(' ')
   const compact = (structured || text || (value.isError ? 'MCP tool returned an error' : 'Context received')).replace(/\s+/g, ' ').trim()
-  return compact.length > 320 ? `${compact.slice(0, 317)}…` : compact
+  const sanitized = sanitizeEvidenceSummary(compact)
+  return sanitized.length > 320 ? `${sanitized.slice(0, 317)}…` : sanitized
 }
 
 async function readCachedTool(options: { client: Client; available: Set<string>; urn: string; name: DataHubMcpRead['name']; arguments: Record<string, unknown>; force?: boolean }) {
@@ -256,7 +270,7 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
   try {
     const result = await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name)
     const status = result.isError ? 'error' as const : 'ok' as const
-    const expiresAt = now + evidenceTtlMs[name]
+    const expiresAt = now + resolveEvidenceTtlMs()[name]
     if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
     return {
       result,

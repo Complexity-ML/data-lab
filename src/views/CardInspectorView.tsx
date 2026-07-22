@@ -1,4 +1,5 @@
 import { AlertCircle, CheckCircle2, PanelRightClose, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
 import type { DataHubAssetSummary } from '../domain/datahub'
@@ -11,6 +12,7 @@ interface CardInspectorViewProps {
   issues: ValidationIssue[]
   errorCount: number
   dataHubConnected: boolean
+  workbenchAssets: Record<string, { nodeId: string; label: string }>
   onBindDataHubSource(asset: DataHubAssetSummary): void
   onInspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary }>
   onOpenDataHubSettings(): void
@@ -21,8 +23,12 @@ interface CardInspectorViewProps {
   onUpdate(patch: Partial<PipelineNode['data']>): void
 }
 
-export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBindDataHubSource, onClose, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, selected }: CardInspectorViewProps) {
+export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBindDataHubSource, onClose, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, selected, workbenchAssets }: CardInspectorViewProps) {
+  const [lineageExpanded, setLineageExpanded] = useState(false)
+  useEffect(() => setLineageExpanded(false), [selected?.id])
   const role = selected ? cardRoleContracts[selected.data.kind] : undefined
+  const lineage = useMemo(() => [...(selected?.data.datahubUpstream ?? []), ...(selected?.data.datahubDownstream ?? [])], [selected?.data.datahubDownstream, selected?.data.datahubUpstream])
+  const visibleLineage = lineage.slice(0, lineageExpanded ? 30 : 12)
   return <>
     <PanelHeader action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
     {selected ? <div className="inspector-form">
@@ -36,7 +42,13 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
       {selected.data.datahubUrn && <section className="bound-datahub-source"><small>BOUND DATAHUB URN</small><code>{selected.data.datahubUrn}</code><span>{selected.data.datahubPlatform ?? 'unknown platform'} · {selected.data.datahubEnvironment ?? 'unknown environment'}</span></section>}
       {selected.data.kind !== 'source' && selected.data.datahubUrn !== undefined && <label>DataHub URN<textarea className="code-input" rows={3} value={selected.data.datahubUrn} onChange={(event) => onUpdate({ datahubUrn: event.target.value })} /></label>}
       {selected.data.datahubUrn && <section className="datahub-governance-signals"><h3>Governance signals</h3><dl><div><dt>Domain</dt><dd>{selected.data.datahubDomain ?? 'Unavailable'}</dd></div><div><dt>Quality</dt><dd>{selected.data.datahubQuality ?? 'Unavailable'}</dd></div><div><dt>Ownership</dt><dd>{selected.data.owner === 'Unassigned' ? 'Missing · blocks publication' : selected.data.owner}</dd></div></dl><div>{selected.data.datahubTags?.length ? selected.data.datahubTags.map((tag) => <span key={tag}>{tag}</span>) : <small>Tags unavailable</small>}</div></section>}
-      {selected.data.datahubUrn && <section className="datahub-lineage-impact"><h3>Lineage impact</h3><div><span>↑ {selected.data.datahubUpstream?.length ?? 0} upstream</span><span>↓ {selected.data.datahubDownstream?.length ?? 0} downstream</span></div>{[...(selected.data.datahubUpstream ?? []), ...(selected.data.datahubDownstream ?? [])].slice(0, 12).map((asset) => <p className={asset.sensitive ? 'is-sensitive' : ''} key={`${asset.urn}-${asset.name}`}><code>{asset.name}</code><small>{asset.sensitive ? 'Sensitive external path' : 'External DataHub asset'}</small></p>)}</section>}
+      {selected.data.datahubUrn && <section className="datahub-lineage-impact"><h3>Lineage impact</h3><div><span>↑ {selected.data.datahubUpstream?.length ?? 0} upstream</span><span>↓ {selected.data.datahubDownstream?.length ?? 0} downstream</span></div>{visibleLineage.map((asset) => {
+        const workbench = workbenchAssets[asset.urn]
+        const className = `${asset.sensitive ? 'is-sensitive ' : ''}${workbench ? 'is-workbench' : 'is-external'}`.trim()
+        return workbench
+          ? <button className={className} key={`${asset.urn}-${asset.name}`} onClick={() => onSelectNode(workbench.nodeId)} type="button"><code>{asset.name}</code><small>Workbench card · {workbench.label}</small></button>
+          : <p className={className} key={`${asset.urn}-${asset.name}`}><code>{asset.name}</code><small>{asset.sensitive ? 'Sensitive external path' : 'External DataHub asset'}</small></p>
+      })}{lineage.length > 12 && <button className="lineage-expand" onClick={() => setLineageExpanded((current) => !current)} type="button">{lineageExpanded ? 'Show first 12' : `Show ${Math.min(lineage.length, 30) - 12} more`}</button>}{lineage.length > 30 && <small className="lineage-bound">Expansion is bounded to 30 assets. Refine the lineage query for a narrower impact radius.</small>}</section>}
       {selected.data.schema.length > 0 && <section className="schema-list"><h3>Schema · {selected.data.schema.length} fields</h3>{selected.data.schema.map((field) => <div key={field.name}><code>{field.name}</code><span>{field.type}</span>{field.tags?.map((tag) => <em key={tag}>{tag}</em>)}</div>)}</section>}
     </div> : <p className="empty-copy">Select a card to inspect its metadata.</p>}
 

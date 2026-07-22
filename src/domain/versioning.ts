@@ -16,8 +16,28 @@ export interface PipelineVersion {
   evidence?: DataHubEvidence[]
 }
 
+export interface PipelineVersionProvenanceExport {
+  revision: Pick<PipelineVersion, 'id' | 'label' | 'createdAt' | 'origin' | 'status' | 'description'>
+  evidence: DataHubEvidence[]
+}
+
 function copyGraph<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function sanitizeExportSummary(value: string) {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/((?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*["']?)[^\s,"'}&]+/gi, '$1[REDACTED]')
+    .replace(/([?&](?:api[_-]?key|access[_-]?token|token|secret|password)=)[^&#\s]+/gi, '$1[REDACTED]')
+}
+
+export function buildVersionProvenanceExport(version: PipelineVersion): PipelineVersionProvenanceExport {
+  const { id, label, createdAt, origin, status, description } = version
+  return {
+    revision: { id, label, createdAt, origin, status, description },
+    evidence: (version.evidence ?? []).map((item) => ({ ...item, summary: sanitizeExportSummary(item.summary) })),
+  }
 }
 
 export function createPipelineVersion(nodes: PipelineNode[], edges: Edge[], label: string, origin: PipelineVersion['origin'], issues: ValidationIssue[]): PipelineVersion {

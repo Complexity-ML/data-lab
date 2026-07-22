@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssetContext, parseSearchResults, readStructuredToolResult } from './datahub-context.js'
+import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeEvidenceSummary } from './datahub-context.js'
 
 const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.customers,PROD)'
 
@@ -7,6 +7,13 @@ describe('DataHub MCP context normalization', () => {
   it('reads structured and text MCP content without relying on renderer parsing', () => {
     expect(readStructuredToolResult({ structuredContent: { total: 1 } })).toEqual({ total: 1 })
     expect(readStructuredToolResult({ content: [{ type: 'text', text: '{"total":2}' }] })).toEqual({ total: 2 })
+  })
+
+  it('redacts credential-shaped values before evidence reaches revision history', () => {
+    const summary = sanitizeEvidenceSummary('Authorization: Bearer secret.jwt.value token=private-token&password=hunter2')
+    expect(summary).toBe('Authorization: Bearer [REDACTED] token=[REDACTED]&password=[REDACTED]')
+    expect(summary).not.toContain('private-token')
+    expect(summary).not.toContain('hunter2')
   })
 
   it('keeps only unique dataset search results', () => {

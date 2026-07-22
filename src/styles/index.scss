@@ -355,10 +355,16 @@ button { color: inherit; }
 .datahub-governance-signals > div { display: flex; flex-wrap: wrap; gap: 4px; }
 .datahub-governance-signals > div span { padding: 2px 5px; color: #7c3aed; border-radius: 4px; background: #f3e8ff; font-size: 6px; font-weight: 750; }
 .datahub-lineage-impact > div { display: flex; gap: 6px; margin-bottom: 6px; color: var(--muted); font-size: 7px; }
-.datahub-lineage-impact p { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin: 0; padding: 5px 0; border-top: 1px solid var(--line); }
+.datahub-lineage-impact p,
+.datahub-lineage-impact > button:not(.lineage-expand) { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 5px; margin: 0; padding: 5px 0; color: inherit; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; }
+.datahub-lineage-impact > button:not(.lineage-expand) { cursor: pointer; }
+.datahub-lineage-impact > button:not(.lineage-expand):hover { color: var(--accent); }
 .datahub-lineage-impact code { overflow: hidden; font-size: 6.5px; text-overflow: ellipsis; }
 .datahub-lineage-impact small { flex: 0 0 auto; color: var(--faint); font-size: 5.5px; }
-.datahub-lineage-impact p.is-sensitive small { color: #be123c; font-weight: 750; }
+.datahub-lineage-impact .is-sensitive small { color: #be123c; font-weight: 750; }
+.datahub-lineage-impact .is-workbench small { color: var(--accent); font-weight: 750; }
+.datahub-lineage-impact .lineage-expand { width: 100%; margin-top: 6px; padding: 6px; color: var(--accent); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: 7px; font-weight: 750; cursor: pointer; }
+.datahub-lineage-impact .lineage-bound { display: block; margin-top: 6px; line-height: 1.4; }
 .empty-copy { color: var(--muted); font-size: 10px; }
 
 .validation-list { margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
