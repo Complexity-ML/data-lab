@@ -35,6 +35,28 @@ export function appendPipelineVersion(versions: PipelineVersion[], version: Pipe
   return [...versions, version].slice(-limit)
 }
 
+export function commitPendingVersion(versions: PipelineVersion[], pendingVersionId: string | undefined, committed: PipelineVersion): PipelineVersion[] {
+  if (!pendingVersionId) return appendPipelineVersion(versions, committed)
+  return versions.map((candidate) => candidate.id === pendingVersionId
+    ? { ...committed, id: candidate.id, createdAt: candidate.createdAt, description: candidate.description, status: 'committed' }
+    : candidate)
+}
+
+export function rejectPendingVersion(versions: PipelineVersion[], pendingVersionId: string | undefined): PipelineVersion[] {
+  if (!pendingVersionId) return versions
+  return versions.map((candidate) => candidate.id === pendingVersionId
+    ? { ...candidate, status: 'rejected' }
+    : candidate)
+}
+
+export function resolveVersionSelection(
+  versions: Array<Pick<PipelineVersion, 'id' | 'status'>>,
+  requestedId?: string,
+): string | undefined {
+  if (requestedId && versions.some((version) => version.id === requestedId)) return requestedId
+  return [...versions].reverse().find((version) => version.status === 'pending-review')?.id ?? versions.at(-1)?.id
+}
+
 export function restorePipelineVersion(version: PipelineVersion): { nodes: PipelineNode[]; edges: Edge[] } {
   return { nodes: copyGraph(version.nodes), edges: copyGraph(version.edges) }
 }

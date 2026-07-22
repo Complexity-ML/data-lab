@@ -11,7 +11,7 @@ import type { SettingsSection } from './components/shared/SettingsModal'
 import { compactGraph, materializeAiProposal, type AiSettings, type AiStatus, type ChatGPTSessionStatus } from './domain/ai'
 import { layoutPipeline } from './domain/layout'
 import { applyProposal, cardLabels, initialEdges, initialNodes, loadPipelinePreset, newCard, type AgentProposal, type CardKind, type PipelineNode, type PipelinePresetId } from './domain/pipeline'
-import { appendPipelineVersion, createPipelineVersion, restorePipelineVersion, type PipelineVersion } from './domain/versioning'
+import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from './domain/versioning'
 import { validatePipeline } from './validation'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
@@ -32,6 +32,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState('')
   const [proposal, setProposal] = useState<AgentProposal>()
   const [pendingVersionId, setPendingVersionId] = useState<string>()
+  const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
   const [connectionMode, setConnectionMode] = useState<'demo' | 'connected'>('demo')
   const [mcpTransport, setMcpTransport] = useState<'demo' | 'http' | 'stdio'>('demo')
@@ -95,7 +96,8 @@ export default function App() {
 
   useEffect(() => {
     if (!window.dataLab) return
-    return window.dataLab.onHumanReviewOpened(() => {
+    return window.dataLab.onHumanReviewOpened(({ versionId }) => {
+      setRequestedVersionId(versionId)
       setSettingsSection('versions')
       setSettingsOpen(true)
     })
@@ -139,6 +141,7 @@ export default function App() {
       if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes, edges, versions: nextVersions })
       return nextVersions
     })
+    return version.id
   }
 
   const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.') => {
@@ -206,9 +209,9 @@ export default function App() {
       const nextProposal = materializeAiProposal(response, nodes, edges)
       setProposal(nextProposal)
       setInspectorOpen(true)
-      if (nextProposal.requiresHumanReview) recordPendingReview(nextProposal)
+      const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
-      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary })
+      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
       if (agentRunId.current !== runId) return
       setActivity(`Agent run failed · ${error instanceof Error ? error.message : 'unknown provider error'} · graph unchanged`)
@@ -249,9 +252,9 @@ export default function App() {
       const nextProposal = materializeAiProposal(response, nodes, edges)
       setProposal(nextProposal)
       setInspectorOpen(true)
-      if (nextProposal.requiresHumanReview) recordPendingReview(nextProposal)
+      const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
       setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
-      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary })
+      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
       if (agentRunId.current !== runId) return
       setActivity(`Card analysis failed · ${error instanceof Error ? error.message : 'unknown provider error'} · card unchanged`)
@@ -290,9 +293,7 @@ export default function App() {
     setNodes(layouted)
     setEdges(next.edges)
     setVersions((current) => {
-      const nextVersions = pendingVersionId
-        ? current.map((candidate) => candidate.id === pendingVersionId ? { ...version, id: candidate.id, createdAt: candidate.createdAt, description: candidate.description, status: 'committed' as const } : candidate)
-        : appendPipelineVersion(current, version)
+      const nextVersions = commitPendingVersion(current, pendingVersionId, version)
       if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes: layouted, edges: next.edges, versions: nextVersions })
       return nextVersions
     })
@@ -304,7 +305,7 @@ export default function App() {
 
   const rejectProposal = () => {
     if (pendingVersionId) setVersions((current) => {
-      const nextVersions = current.map((candidate) => candidate.id === pendingVersionId ? { ...candidate, status: 'rejected' as const } : candidate)
+      const nextVersions = rejectPendingVersion(current, pendingVersionId)
       if (window.dataLab) void window.dataLab.saveWorkspace({ projectTitle, nodes, edges, versions: nextVersions })
       return nextVersions
     })
@@ -441,6 +442,7 @@ export default function App() {
       onValidate={() => setActivity(`${errors.length} blocking issue${errors.length === 1 ? '' : 's'} · ${issues.length} total findings`)}
       onRestoreVersion={restoreVersion}
       onSaveVersion={saveManualVersion}
+      selectedVersionId={requestedVersionId}
       theme={theme}
       versions={versions.map(({ id, label, createdAt, origin, blockingIssues, status, description }) => ({ id, label, createdAt, origin, blockingIssues, status, description }))}
     />}

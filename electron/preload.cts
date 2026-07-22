@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   getDataHubMcpStatus: () => ipcRenderer.invoke(mcpStatusChannel),
   connectDataHubMcp: () => ipcRenderer.invoke(mcpConnectChannel),
   auditDataHubWithMcp: (urn: string) => ipcRenderer.invoke(mcpAuditChannel, { urn }),
-  notifyHumanReview: (payload: { cardLabel: string; reason: string }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
+  notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),
   saveAiSettings: (payload: unknown) => ipcRenderer.invoke(aiSaveChannel, payload),
   testAiConnection: () => ipcRenderer.invoke(aiTestChannel),
@@ -45,8 +45,8 @@ contextBridge.exposeInMainWorld('dataLab', {
   cancelChatGPTProposal: () => ipcRenderer.invoke(chatGPTCancelChannel),
   loadWorkspace: () => ipcRenderer.invoke(workspaceLoadChannel),
   saveWorkspace: (payload: unknown) => ipcRenderer.invoke(workspaceSaveChannel, payload),
-  onHumanReviewOpened: (callback: () => void) => {
-    const listener = () => callback()
+  onHumanReviewOpened: (callback: (payload: { versionId?: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { versionId?: string } = {}) => callback(payload)
     ipcRenderer.on(humanReviewOpenedChannel, listener)
     return () => ipcRenderer.removeListener(humanReviewOpenedChannel, listener)
   },

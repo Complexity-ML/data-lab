@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
-import { appendPipelineVersion, createPipelineVersion, readPipelineVersions, restorePipelineVersion } from './versioning'
+import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, readPipelineVersions, rejectPendingVersion, resolveVersionSelection, restorePipelineVersion } from './versioning'
 
 describe('pipeline versioning', () => {
   it('creates an isolated graph snapshot', () => {
@@ -17,5 +17,23 @@ describe('pipeline versioning', () => {
 
   it('rejects malformed persisted history', () => {
     expect(readPipelineVersions('{broken')).toEqual([])
+  })
+
+  it('keeps pending, committed and rejected revisions distinct', () => {
+    const pending = { ...createPipelineVersion(initialNodes, initialEdges, 'Review', 'agent', []), status: 'pending-review' as const, description: 'Upgrade: mask email' }
+    const committed = createPipelineVersion(initialNodes, initialEdges, 'Mask email', 'agent', [])
+    const approved = commitPendingVersion([pending], pending.id, committed)
+    expect(approved[0]).toMatchObject({ id: pending.id, createdAt: pending.createdAt, status: 'committed', description: pending.description })
+
+    const rejected = rejectPendingVersion([pending], pending.id)
+    expect(rejected[0].status).toBe('rejected')
+    expect(pending.status).toBe('pending-review')
+  })
+
+  it('selects the exact notification revision before falling back to pending review', () => {
+    const committed = createPipelineVersion(initialNodes, initialEdges, 'Committed', 'manual', [])
+    const pending = { ...createPipelineVersion(initialNodes, initialEdges, 'Review', 'agent', []), status: 'pending-review' as const }
+    expect(resolveVersionSelection([committed, pending], committed.id)).toBe(committed.id)
+    expect(resolveVersionSelection([committed, pending], 'missing')).toBe(pending.id)
   })
 })

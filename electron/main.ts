@@ -44,9 +44,10 @@ function focusMainWindow() {
   mainWindow.focus()
 }
 
-function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown }): { shown: boolean } {
+function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }): { shown: boolean } {
   const cardLabel = typeof payload?.cardLabel === 'string' ? payload.cardLabel.trim().slice(0, 120) : 'Agent flow'
   const reason = typeof payload?.reason === 'string' ? payload.reason.trim().slice(0, 280) : 'The agent needs a human decision.'
+  const versionId = typeof payload?.versionId === 'string' ? payload.versionId.trim().slice(0, 180) : undefined
   if (!Notification.isSupported()) return { shown: false }
 
   const notification = new Notification({
@@ -55,7 +56,7 @@ function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown }): 
   })
   notification.on('click', () => {
     focusMainWindow()
-    mainWindow?.webContents.send(humanReviewOpenedChannel)
+    mainWindow?.webContents.send(humanReviewOpenedChannel, { versionId })
   })
   notification.show()
   return { shown: true }
@@ -118,7 +119,7 @@ app.whenReady().then(() => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub MCP audit request')
     return auditDataHubWithMcp(payload.urn)
   })
-  ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown }) => notifyHumanReview(payload))
+  ipcMain.handle(humanReviewNotificationChannel, (_event, payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown }) => notifyHumanReview(payload))
   ipcMain.handle(windowStateChannel, (event) => ({ fullscreen: BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false }))
   ipcMain.handle(aiStatusChannel, () => getAiStatus())
   ipcMain.handle(aiSaveChannel, (_event, payload: unknown) => {
