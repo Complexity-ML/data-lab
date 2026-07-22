@@ -1,4 +1,5 @@
 import type { SchemaField } from './domain/pipeline'
+import type { AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -46,6 +47,23 @@ declare global {
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
+      notifyHumanReview(payload: { cardLabel: string; reason: string }): Promise<{ shown: boolean }>
+      getAiStatus(): Promise<AiStatus>
+      saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>
+      testAiConnection(): Promise<AiStatus & { availableModels: string[] }>
+      runAiProposal(payload: unknown): Promise<AiProposalResponse>
+      cancelAiProposal(): Promise<{ cancelled: boolean }>
+      getChatGPTStatus(): Promise<ChatGPTSessionStatus>
+      connectChatGPT(): Promise<ChatGPTSessionStatus>
+      disconnectChatGPT(): Promise<ChatGPTSessionStatus>
+      configureChatGPT(payload: { model: string; effort: string }): Promise<ChatGPTSessionStatus>
+      runChatGPTProposal(payload: unknown): Promise<AiProposalResponse>
+      cancelChatGPTProposal(): Promise<{ cancelled: boolean }>
+      loadWorkspace(): Promise<{ projectTitle?: string; nodes?: import('./domain/pipeline').PipelineNode[]; edges?: import('@xyflow/react').Edge[]; versions?: import('./domain/versioning').PipelineVersion[] } | null>
+      saveWorkspace(payload: { projectTitle: string; nodes: import('./domain/pipeline').PipelineNode[]; edges: import('@xyflow/react').Edge[]; versions: import('./domain/versioning').PipelineVersion[] }): Promise<{ saved: true }>
+      onHumanReviewOpened(callback: () => void): () => void
+      getWindowState(): Promise<{ fullscreen: boolean }>
+      onWindowStateChanged(callback: (state: { fullscreen: boolean }) => void): () => void
     }
   }
 }

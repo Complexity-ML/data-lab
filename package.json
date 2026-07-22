@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openai/codex": "^0.144.6",
     "@xyflow/react": "^12.11.2",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
