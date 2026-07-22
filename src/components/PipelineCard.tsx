@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { BrainCircuit, CheckCircle2, CirclePause, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { BrainCircuit, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
@@ -28,6 +28,8 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
       {data.runState === 'waiting' && <span className="run-badge is-waiting"><CirclePause size={10} /> Review</span>}
+      {data.runState === 'failed' && <span className="run-badge is-failed"><CircleX size={10} /> Failed</span>}
+      {data.runState === 'stopped' && <span className="run-badge is-stopped"><CircleStop size={10} /> Stopped</span>}
       {data.status === 'healthy' && <CheckCircle2 className="healthy-icon" size={14} />}
     </header>
     <strong>{data.label}</strong>

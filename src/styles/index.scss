@@ -277,9 +277,13 @@ button { color: inherit; }
 .run-badge.is-running svg { animation: agent-spin .9s linear infinite; }
 .run-badge.is-complete { color: #15803d; border: 1px solid #bbf7d0; background: #f0fdf4; }
 .run-badge.is-waiting { color: #be123c; border: 1px solid #fecdd3; background: #fff1f2; }
+.run-badge.is-failed { color: #b91c1c; border: 1px solid #fecaca; background: #fef2f2; }
+.run-badge.is-stopped { color: #475569; border: 1px solid #cbd5e1; background: #f8fafc; }
 .pipeline-card.run-running { border-color: #60a5fa; box-shadow: 0 0 0 4px rgb(59 130 246 / 14%), 0 12px 30px rgb(15 23 42 / 11%); }
 .pipeline-card.run-completed { border-top-color: #86efac; }
 .pipeline-card.run-waiting { border-color: #fb7185; box-shadow: 0 0 0 4px rgb(244 63 94 / 12%), 0 12px 30px rgb(15 23 42 / 11%); }
+.pipeline-card.run-failed { border-color: #ef4444; box-shadow: 0 0 0 4px rgb(239 68 68 / 12%), 0 12px 30px rgb(15 23 42 / 11%); }
+.pipeline-card.run-stopped { opacity: .72; }
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 .healthy-icon { margin-left: auto; color: #22c55e; }
 .pipeline-card > strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
