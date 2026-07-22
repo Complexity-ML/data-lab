@@ -2,7 +2,7 @@ import { addEdge, useEdgesState, useNodesState, type Connection } from '@xyflow/
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { AppFooter } from './components/AppFooter'
 import { AppHeader } from './components/AppHeader'
-import { ReviewPanel } from './components/ReviewPanel'
+import { ProposalReviewModal } from './components/ProposalReviewModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
 import { KeyboardShortcutsModal } from './components/shared/KeyboardShortcutsModal'
 import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
@@ -37,6 +37,7 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [selectedId, setSelectedId] = useState('')
   const [proposal, setProposal] = useState<AgentProposal>()
+  const [proposalReviewOpen, setProposalReviewOpen] = useState(false)
   const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
   const [agentRunning, setAgentRunning] = useState(false)
@@ -242,7 +243,7 @@ export default function App() {
       }
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
-      setInspectorOpen(true)
+      setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
@@ -296,7 +297,7 @@ export default function App() {
       }
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
-      setInspectorOpen(true)
+      setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
@@ -413,6 +414,15 @@ export default function App() {
 
     {workspacePersistence.recovery && <WorkspaceRecoveryModal onDiscard={() => void workspacePersistence.resolveRecovery('discard')} onRecover={() => void workspacePersistence.resolveRecovery('recover')} updatedAt={workspacePersistence.recovery.updatedAt} />}
     {shortcutsOpen && <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+    {proposal && proposalReviewOpen && <ProposalReviewModal
+      proposal={proposal}
+      relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
+      revisionId={pendingVersionId}
+      writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled}
+      onApply={(writebackRequested) => { setProposalReviewOpen(false); void approveAgentProposal(writebackRequested) }}
+      onClose={() => setProposalReviewOpen(false)}
+      onDiscard={() => { setProposalReviewOpen(false); rejectProposal() }}
+    />}
 
     {settingsOpen && <Suspense fallback={<div aria-live="polite" className="lazy-modal-loading" role="status">Loading workspace settings…</div>}><SettingsModal
       activeAiSource={activeAiSource}
@@ -489,17 +499,11 @@ export default function App() {
       />
 
       <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
-        {proposal ? <ReviewPanel
-          proposal={proposal}
-          relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
-          revisionId={pendingVersionId}
-          writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled}
-          onApply={(writebackRequested) => void approveAgentProposal(writebackRequested)}
-          onClose={() => setInspectorOpen(false)}
-          onDiscard={rejectProposal}
-        /> : <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />}
+        <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
       </aside>
     </section>
+
+    {proposal && !proposalReviewOpen && <button className="proposal-review-reopen" onClick={() => setProposalReviewOpen(true)} type="button"><span aria-hidden="true">✦</span> Review agent proposal</button>}
 
     <AppFooter activity={activity} agentRunning={agentRunning} connected={active.connected} context={{ ai: active.connected ? `${active.label} ready` : `${active.label} offline`, cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport} connected` : 'MCP offline', model: `${active.label} · ${active.model}` }} onOpenAiSettings={() => { setSettingsSection('ai'); setSettingsOpen(true) }} onStop={stopAgent} onSubmit={(prompt) => void auditWithAgent(prompt)} />
   </main>
