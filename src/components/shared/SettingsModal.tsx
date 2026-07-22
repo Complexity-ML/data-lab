@@ -33,6 +33,8 @@ interface SettingsModalProps {
   onConnectChatGPT: () => Promise<void>
   onDisconnectChatGPT: () => Promise<void>
   onEmergencyStop: () => void
+  onExportPipeline: () => void
+  onImportPipeline: (file: File) => Promise<void>
   onLoadPreset: (preset: PipelinePresetId) => void
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onRejectPendingReview: (versionId: string) => void
@@ -53,7 +55,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onEmergencyStop, onLoadPreset, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions } = props
+  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onEmergencyStop, onExportPipeline, onImportPipeline, onLoadPreset, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -303,7 +305,7 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'pipeline' && <article className="settings-page">
           <div className="settings-page-heading"><small>PIPELINE</small><h3>Graph tools and validation</h3><p>Maintain a readable topology and verify every rule atomically.</p></div>
-          <section className="settings-section"><div className="settings-section-title"><span>Pipeline tools</span><small>Safe workspace actions</small></div><div className="settings-tools"><button onClick={onAutoLayout} type="button"><span><Network size={18} /></span><div><strong>Auto layout</strong><small>Recalculate topology-aware XY placement.</small></div></button><button onClick={onValidate} type="button"><span><Play size={18} /></span><div><strong>Run validation</strong><small>{findingCount} findings · {errorCount} blocking.</small></div><em className={errorCount ? 'has-errors' : 'is-clear'}>{errorCount ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}</em></button></div></section>
+          <section className="settings-section"><div className="settings-section-title"><span>Pipeline tools</span><small>Safe workspace actions</small></div><div className="settings-tools"><button onClick={onAutoLayout} type="button"><span><Network size={18} /></span><div><strong>Auto layout</strong><small>Recalculate topology-aware XY placement.</small></div></button><button onClick={onValidate} type="button"><span><Play size={18} /></span><div><strong>Run validation</strong><small>{findingCount} findings · {errorCount} blocking.</small></div><em className={errorCount ? 'has-errors' : 'is-clear'}>{errorCount ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}</em></button><button onClick={onExportPipeline} type="button"><span><Save size={18} /></span><div><strong>Export JSON</strong><small>Download a versioned, non-secret pipeline artifact.</small></div></button><label className="settings-import-file"><span><LayoutTemplate size={18} /></span><div><strong>Import JSON</strong><small>Validate the complete file before replacing this workspace.</small></div><input accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImportPipeline(file); event.target.value = '' }} type="file" /></label></div></section>
         </article>}
 
         {activeSection === 'versions' && <article className="settings-page">

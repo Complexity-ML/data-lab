@@ -79,11 +79,17 @@ button { color: inherit; }
 .settings-icon.datahub-connected { color: #15803d; background: #dcfce7; }
 .settings-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .settings-tools > button { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 62px; padding: 11px; color: var(--text); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; cursor: pointer; }
+.settings-import-file { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 62px; padding: 11px; color: var(--text); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; cursor: pointer; }
+.settings-import-file input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.settings-import-file > span { display: grid; place-items: center; width: 36px; height: 36px; color: var(--accent); border-radius: 9px; background: var(--accent-soft); }
+.settings-import-file > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.settings-import-file strong { font-size: 10px; }
+.settings-import-file small { color: var(--muted); font-size: 8px; }
 .settings-tools > button > span { display: grid; place-items: center; width: 36px; height: 36px; color: var(--accent); border-radius: 9px; background: var(--accent-soft); }
 .settings-tools em { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; font-style: normal; }
 .settings-tools em.has-errors { color: #b91c1c; background: var(--danger-soft); }
 .settings-tools em.is-clear { color: #15803d; background: #dcfce7; }
-.settings-trigger:hover, .settings-close:hover, .theme-switch > button:hover, .settings-tools > button:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.settings-trigger:hover, .settings-close:hover, .theme-switch > button:hover, .settings-tools > button:hover, .settings-import-file:hover { border-color: var(--line-strong); transform: translateY(-1px); }
 .version-list ol { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .version-list li { display: grid; grid-template-columns: 54px minmax(0, 1fr) 78px; align-items: center; gap: 11px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .version-list li > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }

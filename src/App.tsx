@@ -10,6 +10,7 @@ import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agen
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { layoutPipeline } from './domain/layout'
+import { createPipelineExport, parsePipelineExport } from './domain/pipeline-io'
 import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
 import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
 import { validatePipeline } from './validation'
@@ -273,6 +274,33 @@ export default function App() {
     setActivity(`${node?.data.label ?? 'Card'} deleted · ${attachedEdges} attached edge${attachedEdges === 1 ? '' : 's'} removed`)
   }
 
+  const exportPipelineJson = () => {
+    const artifact = createPipelineExport(projectTitle, nodes, edges, versions)
+    const url = URL.createObjectURL(new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${projectTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'data-lab-pipeline'}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    setActivity(`Pipeline exported · schema v${artifact.schemaVersion} · credentials and local paths excluded`)
+  }
+
+  const importPipelineJson = async (file: File) => {
+    try {
+      const artifact = parsePipelineExport(await file.text())
+      setNodes(artifact.graph.nodes)
+      setEdges(artifact.graph.edges)
+      setVersions(artifact.versions)
+      setProjectTitle(artifact.projectTitle)
+      setSelectedId(artifact.graph.nodes[0]?.id ?? '')
+      setProposal(undefined)
+      if (window.dataLab) await window.dataLab.saveWorkspace({ projectTitle: artifact.projectTitle, nodes: artifact.graph.nodes, edges: artifact.graph.edges, versions: artifact.versions })
+      setActivity(`Pipeline imported after full validation · ${artifact.graph.nodes.length} cards · schema v${artifact.schemaVersion}`)
+    } catch (error) {
+      setActivity(`Import rejected · ${error instanceof Error ? error.message : 'invalid pipeline file'} · active workspace unchanged`)
+    }
+  }
+
   const approveAgentProposal = async (writebackRequested: boolean) => {
     const currentProposal = proposal
     const revisionId = pendingVersionId
@@ -318,6 +346,8 @@ export default function App() {
       onConnectChatGPT={connectChatGPT}
       onDisconnectChatGPT={disconnectChatGPT}
       onEmergencyStop={stopAgent}
+      onExportPipeline={exportPipelineJson}
+      onImportPipeline={importPipelineJson}
       onLoadPreset={(presetId) => { loadPreset(presetId); setSettingsOpen(false) }}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
       onRejectPendingReview={rejectPendingVersionById}
