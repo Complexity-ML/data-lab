@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { getDataHubMcpConfigurationStatus, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { getDataHubMcpConfigurationStatus, resolveEvidenceTtlMs, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -35,6 +35,14 @@ afterEach(() => {
 })
 
 describe('DataHub MCP connection settings', () => {
+  it('supports bounded per-evidence cache TTL configuration', () => {
+    expect(resolveEvidenceTtlMs({
+      DATAHUB_CACHE_ENTITY_TTL_MS: '10000',
+      DATAHUB_CACHE_SCHEMA_TTL_MS: '2500',
+      DATAHUB_CACHE_LINEAGE_TTL_MS: '99999999',
+    })).toEqual({ get_entities: 10_000, list_schema_fields: 5_000, get_lineage: 3_600_000 })
+  })
+
   it('persists endpoint metadata and an encrypted token without exposing the credential', async () => {
     await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080/', token: 'datahub-private-token' })
 
