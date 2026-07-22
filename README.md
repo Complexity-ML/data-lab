@@ -1,12 +1,12 @@
-# LABO DATA
+# DATA LAB
 
-LABO DATA is a human-reviewed visual pipeline studio for the **Build with DataHub: The Agent Hackathon**. It turns DataHub context into editable data-flow cards, lets an agent investigate governance and lineage problems, and requires a clear review before any proposed graph change is applied.
+DATA LAB is a human-reviewed visual pipeline studio for the **Build with DataHub: The Agent Hackathon**. It turns DataHub context into editable data-flow cards, lets an agent investigate governance and lineage problems, and requires a clear review before any proposed graph change is applied.
 
 **Primary challenge track:** Agents That Do Real Work.
 
 ## Why it exists
 
-Most visual pipeline builders let users connect blocks without understanding the real catalog. LABO DATA loads schema, ownership, tags and lineage from DataHub first. Its agent can therefore answer questions such as:
+Most visual pipeline builders let users connect blocks without understanding the real catalog. DATA LAB loads schema, ownership, tags and lineage from DataHub first. Its agent can therefore answer questions such as:
 
 - Is this connection flowing in the right direction?
 - Which downstream outputs will receive a PII field?
@@ -77,7 +77,7 @@ datahub init --username datahub --password datahub
 datahub datapack load showcase-ecommerce
 ```
 
-The DataHub UI is available at `http://localhost:9002`. Create a scoped token for the demo, then launch LABO DATA with the GMS connection owned by Electron's main process:
+The DataHub UI is available at `http://localhost:9002`. Create a scoped token for the demo, then launch DATA LAB with the GMS connection owned by Electron's main process:
 
 ```bash
 DATAHUB_GMS_URL=http://localhost:8080 \
@@ -85,7 +85,7 @@ DATAHUB_GMS_TOKEN=your-scoped-token \
 npm run electron:dev
 ```
 
-LABO DATA then starts the official open-source MCP server through `uvx mcp-server-datahub@latest`. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) first so `uvx` is available. The server runs over stdio and mutation tools are explicitly disabled by the app.
+DATA LAB then starts the official open-source MCP server through `uvx mcp-server-datahub@latest`. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) first so `uvx` is available. The server runs over stdio and mutation tools are explicitly disabled by the app.
 
 For a remote DataHub Cloud MCP server, use Streamable HTTP instead:
 
@@ -113,7 +113,7 @@ The agent workflow is implemented around the DataHub MCP Server:
 
 The MCP documentation distinguishes read-only and mutation tools, and mutation tools must be explicitly enabled. For unattended workflows, DataHub recommends a service account rather than a personal token.
 
-The complementary DataHub Skills provide workflow instructions on top of MCP tools. LABO DATA maps them as follows:
+The complementary DataHub Skills provide workflow instructions on top of MCP tools. DATA LAB maps them as follows:
 
 - `datahub-search`: resolve trusted source datasets.
 - `datahub-lineage`: inspect upstream and downstream impact.

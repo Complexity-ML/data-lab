@@ -38,7 +38,7 @@ interface DataHubMcpAudit {
 
 declare global {
   interface Window {
-    laboData?: {
+    dataLab?: {
       runtime: 'electron'
       platform: 'darwin' | 'win32' | 'linux'
       getDataHubStatus(): Promise<DataHubStatus>

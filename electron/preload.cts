@@ -1,12 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-const statusChannel = 'labo-data:datahub-status'
-const datasetChannel = 'labo-data:datahub-dataset'
-const mcpStatusChannel = 'labo-data:datahub-mcp-status'
-const mcpConnectChannel = 'labo-data:datahub-mcp-connect'
-const mcpAuditChannel = 'labo-data:datahub-mcp-audit'
+const statusChannel = 'data-lab:datahub-status'
+const datasetChannel = 'data-lab:datahub-dataset'
+const mcpStatusChannel = 'data-lab:datahub-mcp-status'
+const mcpConnectChannel = 'data-lab:datahub-mcp-connect'
+const mcpAuditChannel = 'data-lab:datahub-mcp-audit'
 
-contextBridge.exposeInMainWorld('laboData', {
+contextBridge.exposeInMainWorld('dataLab', {
   runtime: 'electron',
   platform: process.platform,
   getDataHubStatus: () => ipcRenderer.invoke(statusChannel),

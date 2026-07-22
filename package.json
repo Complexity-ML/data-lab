@@ -1,8 +1,8 @@
 {
-  "name": "labo-data",
-  "productName": "LABO DATA",
+  "name": "data-lab",
+  "productName": "DATA LAB",
   "description": "A human-reviewed, DataHub-aware visual pipeline builder for data teams.",
-  "author": "LABO DATA",
+  "author": "DATA LAB",
   "license": "Apache-2.0",
   "private": true,
   "version": "0.1.0",
@@ -20,8 +20,8 @@
   },
   "build": {
     "appId": "ai.labo.data",
-    "productName": "LABO DATA",
-    "artifactName": "LABO-DATA-${version}-${arch}.${ext}",
+    "productName": "DATA LAB",
+    "artifactName": "DATA-LAB-${version}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },

@@ -107,7 +107,7 @@ async function connectClient(): Promise<Client> {
   if (connectionPromise) return connectionPromise
 
   connectionPromise = (async () => {
-    const client = new Client({ name: 'labo-data', version: '0.1.0' })
+    const client = new Client({ name: 'data-lab', version: '0.1.0' })
     const configured = createTransport()
     try {
       await withTimeout(client.connect(configured.transport), 30_000, 'DataHub MCP connection')

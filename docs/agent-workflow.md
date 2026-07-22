@@ -1,6 +1,6 @@
 # DataHub agent workflow
 
-LABO DATA treats MCP tools as capabilities and DataHub Skills as the instructions for combining those capabilities safely.
+DATA LAB treats MCP tools as capabilities and DataHub Skills as the instructions for combining those capabilities safely.
 
 ## Audit workflow
 

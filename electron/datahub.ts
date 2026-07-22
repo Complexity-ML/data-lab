@@ -69,7 +69,7 @@ export async function loadDatasetContext(urn: string): Promise<DataHubDatasetCon
   const { url, token } = configuration()
   if (!url || !token) throw new Error('DataHub is not configured')
 
-  const query = `query LaboDataDataset($urn: String!) {
+  const query = `query DataLabDataset($urn: String!) {
     dataset(urn: $urn) {
       urn
       name

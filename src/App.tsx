@@ -21,7 +21,7 @@ const miniMapColors: Record<CardKind, string> = {
 const pause = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration))
 
 export default function App() {
-  const platformClass = window.laboData?.platform ? `platform-${window.laboData.platform}` : 'platform-web'
+  const platformClass = window.dataLab?.platform ? `platform-${window.dataLab.platform}` : 'platform-web'
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineNode>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [selectedId, setSelectedId] = useState('customers-source')
@@ -34,27 +34,27 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [versions, setVersions] = useState<PipelineVersion[]>(() => {
-    const persisted = readPipelineVersions(window.localStorage.getItem('labo-data-versions'))
+    const persisted = readPipelineVersions(window.localStorage.getItem('data-lab-versions'))
     return persisted.length ? persisted : [createPipelineVersion(initialNodes, initialEdges, 'Initial pipeline', 'initial', validatePipeline(initialNodes, initialEdges))]
   })
   const [activity, setActivity] = useState(`Demo catalog loaded · ${initialNodes.length} cards · ${initialEdges.length} lineage edges`)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('labo-data-theme') === 'dark' ? 'dark' : 'light')
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
   const errors = issues.filter((issue) => issue.severity === 'error')
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    window.localStorage.setItem('labo-data-theme', theme)
+    window.localStorage.setItem('data-lab-theme', theme)
   }, [theme])
 
   useEffect(() => {
-    window.localStorage.setItem('labo-data-versions', JSON.stringify(versions))
+    window.localStorage.setItem('data-lab-versions', JSON.stringify(versions))
   }, [versions])
 
   useEffect(() => {
-    if (!window.laboData) return
-    void window.laboData.getDataHubMcpStatus().then((status) => {
+    if (!window.dataLab) return
+    void window.dataLab.getDataHubMcpStatus().then((status) => {
       setConnectionMode(status.mode)
       setMcpTransport(status.transport)
       setMcpMessage(status.message)
@@ -114,10 +114,10 @@ export default function App() {
         setActivity(`Agent role ${index + 1}/${route.length} · ${card.data.label}`)
         await pause(220)
 
-        if (card.data.kind === 'analysis' && window.laboData && source?.data.datahubUrn) {
+        if (card.data.kind === 'analysis' && window.dataLab && source?.data.datahubUrn) {
           setActivity('Context analyst · reading entity, schema and downstream lineage through MCP…')
           try {
-            const audit = await window.laboData.auditDataHubWithMcp(source.data.datahubUrn)
+            const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
             const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
             agentDoubts = audit.reads.some((read) => read.status !== 'ok')
             datahubReads = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
@@ -221,12 +221,12 @@ export default function App() {
   }
 
   const syncDataHub = async () => {
-    if (!window.laboData) {
+    if (!window.dataLab) {
       setActivity('Web demo mode · launch Electron with DATAHUB_GMS_URL to connect DataHub')
       return
     }
     try {
-      const status = await window.laboData.connectDataHubMcp()
+      const status = await window.dataLab.connectDataHubMcp()
       setConnectionMode(status.mode)
       setMcpTransport(status.transport)
       setMcpMessage(status.message)
@@ -244,7 +244,7 @@ export default function App() {
 
   return <main className={`app-shell ${platformClass}`}>
     <header className="topbar">
-      <div className="brand"><span className="brand-mark"><Boxes size={18} /></span><div><strong>LABO DATA</strong><small>Context-aware pipeline studio</small></div></div>
+      <div className="brand"><span className="brand-mark"><Boxes size={18} /></span><div><strong>DATA LAB</strong><small>Context-aware pipeline studio</small></div></div>
       <div className="project-title"><span>Customer activation</span><small>Production draft</small></div>
       <div className="topbar-actions">
         <ActionButton disabled={agentRunning} icon={<Sparkles size={15} />} onClick={auditWithAgent} variant="primary">{agentRunning ? 'Running cards…' : 'Run agent flow'}</ActionButton>
