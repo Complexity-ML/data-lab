@@ -59,5 +59,20 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     return status
   }
 
-  return { connectionMode, mcpMessage, mcpTransport, recordAudit, saveSettings, settings, syncDataHub }
+  const searchAssets = async (query: string) => {
+    if (!window.dataLab) throw new Error('DataHub search requires the Electron application')
+    return window.dataLab.searchDataHubAssets(query)
+  }
+
+  const inspectAsset = async (urn: string, force = false) => {
+    if (!window.dataLab) throw new Error('DataHub inspection requires the Electron application')
+    return window.dataLab.inspectDataHubAsset(urn, force)
+  }
+
+  const invalidateContext = async (urn?: string) => {
+    if (!window.dataLab) return { invalidated: true as const }
+    return window.dataLab.invalidateDataHubContext(urn)
+  }
+
+  return { connectionMode, inspectAsset, invalidateContext, mcpMessage, mcpTransport, recordAudit, saveSettings, searchAssets, settings, syncDataHub }
 }

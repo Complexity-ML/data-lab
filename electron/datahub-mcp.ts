@@ -2,7 +2,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { app, safeStorage } from 'electron'
+import { parseAssetContext, parseSearchResults, readStructuredToolResult, type DataHubAssetSummary } from './datahub-context.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
+export type { DataHubAssetSummary } from './datahub-context.js'
 
 export type DataHubMcpTransport = 'demo' | 'http' | 'stdio'
 
@@ -39,22 +41,6 @@ export interface DataHubMcpAudit {
   transport: Exclude<DataHubMcpTransport, 'demo'>
   serverVersion?: string
   reads: DataHubMcpRead[]
-}
-
-export interface DataHubAssetSummary {
-  urn: string
-  name: string
-  platform: string
-  environment: string
-  description: string
-  owners: string[]
-  domain?: string
-  tags: string[]
-  fields: { name: string; type: 'string' | 'number' | 'boolean' | 'timestamp'; tags?: string[] }[]
-  qualityStatus: 'healthy' | 'failing' | 'unavailable'
-  upstream: { urn: string; name: string; sensitive: boolean }[]
-  downstream: { urn: string; name: string; sensitive: boolean }[]
-  freshness: { capturedAt: string; expiresAt: string; stale: boolean }
 }
 
 type ActiveTransport = StdioClientTransport | StreamableHTTPClientTransport
@@ -248,7 +234,87 @@ function summarizeResult(result: unknown): string {
   return compact.length > 320 ? `${compact.slice(0, 317)}…` : compact
 }
 
-export async function auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit> {
+async function readCachedTool(options: { client: Client; available: Set<string>; urn: string; name: DataHubMcpRead['name']; arguments: Record<string, unknown>; force?: boolean }) {
+  const { client, available, name, urn } = options
+  const now = Date.now()
+  const cacheKey = `${name}:${JSON.stringify(options.arguments)}`
+  const cached = contextCache.get(cacheKey)
+  if (!options.force && cached && cached.expiresAt > now) return {
+    result: cached.result,
+    evidence: { name, status: 'ok' as const, summary: summarizeResult(cached.result), capturedAt: new Date(cached.capturedAt).toISOString(), expiresAt: new Date(cached.expiresAt).toISOString(), cached: true, stale: false },
+  }
+  const capturedAt = new Date(now).toISOString()
+  if (!available.has(name)) return {
+    result: undefined,
+    evidence: { name, status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+  }
+  try {
+    const result = await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name)
+    const status = result.isError ? 'error' as const : 'ok' as const
+    const expiresAt = now + evidenceTtlMs[name]
+    if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
+    return {
+      result,
+      evidence: { name, status, summary: summarizeResult(result), capturedAt, expiresAt: new Date(expiresAt).toISOString(), cached: false, stale: status !== 'ok' },
+    }
+  } catch (error) {
+    return {
+      result: undefined,
+      evidence: { name, status: 'error' as const, summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+    }
+  }
+}
+
+export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
+  const clean = query.trim().slice(0, 180)
+  if (clean.length < 2) throw new Error('Enter at least two characters to search DataHub')
+  const client = await connectClient()
+  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
+  const available = new Set(listed.tools.map((tool) => tool.name))
+  if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
+  const structuredQuery = clean === '*' || clean.startsWith('/q ') ? clean : `/q ${clean.replace(/\s+/g, '+')}`
+  const searchResult = await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search')
+  if (searchResult.isError) throw new Error(summarizeResult(searchResult))
+  const matches = parseSearchResults(readStructuredToolResult(searchResult))
+  if (!matches.length) return []
+  const details = available.has('get_entities')
+    ? await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities')
+    : undefined
+  const entityPayload = details && !details.isError ? readStructuredToolResult(details) : undefined
+  return matches.map((match) => parseAssetContext({ urn: match.urn, name: match.name, entityPayload }))
+}
+
+export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
+  validateDatasetUrn(urn)
+  const client = await connectClient()
+  const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
+  const available = new Set(listed.tools.map((tool) => tool.name))
+  const [entity, schema, upstream, downstream] = await Promise.all([
+    readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force }),
+    readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'upstream', max_hops: 3, count: 30 }, force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3, count: 30 }, force }),
+  ])
+  const evidence = [entity.evidence, schema.evidence, upstream.evidence, downstream.evidence]
+  const successful = evidence.filter((item) => item.status === 'ok').sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))[0]
+  const asset = parseAssetContext({
+    urn,
+    entityPayload: readStructuredToolResult(entity.result),
+    schemaPayload: readStructuredToolResult(schema.result),
+    upstreamPayload: readStructuredToolResult(upstream.result),
+    downstreamPayload: readStructuredToolResult(downstream.result),
+    capturedAt: successful?.capturedAt,
+    expiresAt: successful?.expiresAt,
+  })
+  return { asset, evidence }
+}
+
+export function invalidateDataHubContext(urn?: string) {
+  for (const key of contextCache.keys()) if (!urn || key.includes(urn)) contextCache.delete(key)
+  return { invalidated: true }
+}
+
+export async function auditDataHubWithMcp(urn: string, force = false): Promise<DataHubMcpAudit> {
   validateDatasetUrn(urn)
   const client = await connectClient()
   const listed = await withTimeout(client.listTools(), 12_000, 'DataHub MCP tool discovery')
@@ -259,18 +325,7 @@ export async function auditDataHubWithMcp(urn: string): Promise<DataHubMcpAudit>
     { name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3 } },
   ]
 
-  const reads = await Promise.all(calls.map(async (call): Promise<DataHubMcpRead> => {
-    const capturedAt = new Date().toISOString()
-    const expiresAt = new Date(Date.now() + evidenceTtlMs[call.name]).toISOString()
-    if (!available.has(call.name)) return { name: call.name, status: 'unavailable', summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true }
-    try {
-      const result = await withTimeout(client.callTool({ name: call.name, arguments: call.arguments }), 20_000, call.name)
-      const status = result.isError ? 'error' as const : 'ok' as const
-      return { name: call.name, status, summary: summarizeResult(result), capturedAt, expiresAt, cached: false, stale: status !== 'ok' }
-    } catch (error) {
-      return { name: call.name, status: 'error', summary: error instanceof Error ? error.message : 'Unknown MCP error', capturedAt, expiresAt: capturedAt, cached: false, stale: true }
-    }
-  }))
+  const reads = await Promise.all(calls.map(async (call) => (await readCachedTool({ client, available, urn, name: call.name, arguments: call.arguments, force })).evidence))
 
   return {
     urn,
@@ -287,6 +342,7 @@ export async function closeDataHubMcp() {
   activeTransport = undefined
   activeMode = undefined
   connectionPromise = undefined
+  contextCache.clear()
   if (client) await client.close().catch(() => undefined)
   else if (transport) await transport.close().catch(() => undefined)
 }

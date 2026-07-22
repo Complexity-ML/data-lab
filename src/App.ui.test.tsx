@@ -154,6 +154,29 @@ describe('visual pipeline workspace regressions', () => {
 })
 
 describe('agent prompt regressions', () => {
+  it('does not open Settings when Enter is pressed while disconnected', () => {
+    const openSettings = vi.fn()
+    const submit = vi.fn()
+    render(<AgentPrompt
+      activity="Ready"
+      busy={false}
+      connected={false}
+      context={{ cards: 0, edges: 0, versions: 0, mcp: 'MCP not connected', model: 'OpenAI' }}
+      onOpenSettings={openSettings}
+      onStop={vi.fn()}
+      onSubmit={submit}
+    />)
+
+    const textarea = screen.getByRole('textbox', { name: 'What should the DATA LAB agent do?' })
+    fireEvent.change(textarea, { target: { value: 'Analyze this pipeline' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+
+    expect(openSettings).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    expect((textarea as HTMLTextAreaElement).value).toBe('Analyze this pipeline')
+    expect(screen.getByText('Connect an AI source before sending. Your prompt is preserved.')).toBeTruthy()
+  })
+
   it('caps multi-line growth, keeps scrolling on the textarea and leaves actions outside it', () => {
     render(<AgentPrompt
       activity="Ready"

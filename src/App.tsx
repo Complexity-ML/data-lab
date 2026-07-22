@@ -7,6 +7,7 @@ import { SettingsModal } from './components/shared/SettingsModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
 import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
+import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { layoutPipeline } from './domain/layout'
 import { cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
 import { validatePipeline } from './validation'
@@ -33,7 +34,7 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
-  const { connectionMode, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, settings: dataHubSettings, syncDataHub } = useDataHubConnection(setActivity)
+  const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub } = useDataHubConnection(setActivity)
   const { approveProposal, loadPreset, recordPendingReview, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, projectTitle, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
@@ -105,6 +106,34 @@ export default function App() {
     setNodes((current) => current.map((node) => node.id === selectedId ? { ...node, data: { ...node.data, ...patch } } : node))
   }
 
+  const bindDataHubSource = (asset: DataHubAssetSummary) => {
+    if (!selected || selected.data.kind !== 'source') return
+    const previousUrn = selected.data.datahubUrn
+    setNodes((current) => current.map((node) => node.id === selected.id ? {
+      ...node,
+      data: {
+        ...node.data,
+        datahubUrn: asset.urn,
+        datahubPlatform: asset.platform,
+        datahubEnvironment: asset.environment,
+        datahubDomain: asset.domain,
+        datahubTags: asset.tags,
+        datahubQuality: asset.qualityStatus,
+        datahubFreshness: asset.freshness,
+        datahubUpstream: asset.upstream,
+        datahubDownstream: asset.downstream,
+        label: asset.name,
+        description: asset.description,
+        owner: asset.owners[0] ?? 'Unassigned',
+        schema: asset.fields,
+        status: asset.qualityStatus === 'failing' || asset.owners.length === 0 ? 'warning' : 'healthy',
+      },
+    } : node))
+    if (previousUrn && previousUrn !== asset.urn) void invalidateDataHubContext(previousUrn)
+    void invalidateDataHubContext(asset.urn)
+    setActivity(`${asset.name} bound atomically · ${asset.fields.length} fields · ${asset.downstream.length} downstream assets · fresh MCP read required before agent execution`)
+  }
+
   const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.') => {
     setContextMenu(undefined)
     setProposal(undefined)
@@ -130,6 +159,7 @@ export default function App() {
     setActivity('Agent reading the current graph, atomic findings and version history…')
     const source = nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
     let datahubEvidence: string[] = []
+    let evidenceEntries: DataHubEvidence[] = []
     try {
       if (source?.data.datahubUrn) {
         setActivity('Agent reading trusted schema and lineage through DataHub MCP…')
@@ -137,6 +167,7 @@ export default function App() {
         if (agentRunId.current !== runId) return
         const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
         datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
+        evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
         recordAudit(audit.transport, successfulReads, audit.reads.length)
       } else {
         datahubEvidence = ['No DataHub URN is bound to a Data Source card. Treat evidence as incomplete.']
@@ -148,6 +179,7 @@ export default function App() {
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
       const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
@@ -179,10 +211,18 @@ export default function App() {
     const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.providers[activeAiSource].model
     setActivity(`${activeModel} is reviewing ${selected.data.label} with version context…`)
     try {
-      const requestPayload = buildCardReworkRequest({ edges, focusNodeId: selected.id, issues, nodes, versions })
+      const source = selected.data.datahubUrn ? selected : nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
+      let evidenceEntries: DataHubEvidence[] = []
+      if (source?.data.datahubUrn) {
+        const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
+        if (agentRunId.current !== runId) return
+        evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
+      }
+      const requestPayload = buildCardReworkRequest({ datahubEvidence: evidenceEntries, edges, focusNodeId: selected.id, issues, nodes, versions })
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
       const reviewVersionId = nextProposal.requiresHumanReview ? recordPendingReview(nextProposal) : undefined
@@ -244,7 +284,7 @@ export default function App() {
       onSaveVersion={saveManualVersion}
       selectedVersionId={requestedVersionId}
       theme={theme}
-      versions={versions.map(({ id, label, createdAt, origin, blockingIssues, status, description }) => ({ id, label, createdAt, origin, blockingIssues, status, description }))}
+      versions={versions.map(({ id, label, createdAt, origin, blockingIssues, status, description, evidence }) => ({ id, label, createdAt, origin, blockingIssues, status, description, evidence }))}
     />}
 
     <section className={`workspace${libraryOpen ? '' : ' library-collapsed'}${inspectorOpen ? '' : ' inspector-collapsed'}`}>
@@ -272,7 +312,7 @@ export default function App() {
       />
 
       <aside aria-hidden={!inspectorOpen} className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`}>
-        {proposal ? <ReviewPanel proposal={proposal} onApply={approveProposal} onClose={() => setInspectorOpen(false)} onDiscard={rejectProposal} /> : <CardInspectorView errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onClose={() => setInspectorOpen(false)} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} />}
+        {proposal ? <ReviewPanel proposal={proposal} onApply={approveProposal} onClose={() => setInspectorOpen(false)} onDiscard={rejectProposal} /> : <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} />}
       </aside>
     </section>
 

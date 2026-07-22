@@ -3,6 +3,7 @@ import type { ValidationIssue } from '../validation'
 import { compactGraph } from './ai'
 import type { PipelineNode } from './pipeline'
 import type { PipelineVersion } from './versioning'
+import type { DataHubEvidence } from './datahub'
 
 function versionContext(versions: PipelineVersion[]) {
   return versions.slice(-5).map((version) => ({
@@ -12,6 +13,7 @@ function versionContext(versions: PipelineVersion[]) {
     blockingIssues: version.blockingIssues,
     status: version.status ?? 'committed',
     description: version.description,
+    evidence: version.evidence?.map(({ tool, urn, capturedAt, expiresAt, status, summary, cached, stale }) => ({ tool, urn, capturedAt, expiresAt, status, summary, cached, stale })),
     graph: compactGraph(version.nodes, version.edges),
   }))
 }
@@ -36,13 +38,14 @@ export function buildPipelineAgentRequest(input: AgentContextInput & { datahubEv
   }
 }
 
-export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string }) {
+export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string; datahubEvidence?: DataHubEvidence[] }) {
   return {
     mode: 'card-rework',
     focusNodeId: input.focusNodeId,
     objective: 'Improve the selected card and reconnect the schema only when evidence supports it. Add Human Review if uncertain.',
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues,
+    datahubEvidence: input.datahubEvidence ?? [],
     recentVersions: versionContext(input.versions),
   }
 }
