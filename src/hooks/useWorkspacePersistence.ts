@@ -4,6 +4,7 @@ import type { PipelineNode } from '../domain/pipeline'
 import type { PipelineVersion } from '../domain/versioning'
 import { isWorkspacePayload, type WorkspaceManagerState, type WorkspacePayload, type WorkspaceSaveState } from '../domain/workspace'
 import { notifyError } from '../domain/toasts'
+import { recordDiagnostic } from '../domain/diagnostics'
 
 interface WorkspacePersistenceOptions {
   edges: Edge[]
@@ -92,6 +93,7 @@ export function useWorkspacePersistence(options: WorkspacePersistenceOptions) {
         if (!result.saved) return
         lastSnapshot.current = serialized
         if (latestSnapshot.current === serialized) setSaveState('saved')
+        recordDiagnostic({ category: 'workspace', action: 'draft.autosave', status: 'success', detail: { workspaceId: result.workspaceId } })
         setManager((current) => ({
           ...current,
           activeWorkspace: current.activeWorkspace ? { ...current.activeWorkspace, dirty: true, payload } : current.activeWorkspace,
@@ -187,6 +189,7 @@ export function useWorkspacePersistence(options: WorkspacePersistenceOptions) {
     if (!window.dataLab) return
     const state = await window.dataLab.resolveWorkspaceRecovery(action)
     applyManagerState(state, action === 'recover' ? 'Recovered autosaved draft after the interrupted session' : 'Discarded interrupted draft · restored last committed workspace')
+    recordDiagnostic({ category: 'workspace', action: `recovery.${action}`, status: action === 'recover' ? 'success' : 'info', detail: { workspaceId: state.activeWorkspaceId } })
   }
 
   return {

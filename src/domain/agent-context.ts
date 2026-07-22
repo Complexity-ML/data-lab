@@ -34,24 +34,26 @@ interface AgentContextInput {
   versions: PipelineVersion[]
 }
 
-export function buildPipelineAgentRequest(input: AgentContextInput & { datahubEvidence: string[]; objective: string }) {
+export function buildPipelineAgentRequest(input: AgentContextInput & { datahubEvidence: string[]; objective: string; responseLanguage?: 'English' | 'French' }) {
   return {
     mode: 'pipeline-rewrite',
     objective: input.objective,
+    responseLanguage: input.responseLanguage ?? 'English',
     agentDecisionPolicy: 'Agent Decision may add, edit and reconnect cards. Add a Human Review card only when confidence is insufficient or impact is sensitive.',
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues.map(({ id, severity, title, detail, nodeId }) => ({ id, severity, title, detail, nodeId })),
     datahubEvidence: input.datahubEvidence,
     recentVersions: versionContext(input.versions, input.nodes, input.edges),
-    guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'Use Human Review for uncertainty or sensitive/schema/downstream changes'],
+    guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'Use Human Review for uncertainty or sensitive/schema/downstream changes', `Write human-facing titles, summaries, rationales and reasons in ${input.responseLanguage ?? 'English'}`],
   }
 }
 
-export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string; datahubEvidence?: DataHubEvidence[] }) {
+export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string; datahubEvidence?: DataHubEvidence[]; responseLanguage?: 'English' | 'French' }) {
   return {
     mode: 'card-rework',
     focusNodeId: input.focusNodeId,
     objective: 'Improve the selected card and reconnect the schema only when evidence supports it. Add Human Review if uncertain.',
+    responseLanguage: input.responseLanguage ?? 'English',
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues,
     datahubEvidence: input.datahubEvidence ?? [],

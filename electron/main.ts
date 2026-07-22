@@ -8,6 +8,7 @@ import { ChatGPTAgentSession } from './chatgpt-session.js'
 import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
+import { ensureDiagnosticLog, exportDiagnosticBundle, recordDiagnosticEvent } from './diagnostics.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -47,6 +48,10 @@ const workspaceCommitChannel = 'data-lab:workspace-commit'
 const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
+const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
+const diagnosticsExportChannel = 'data-lab:diagnostics-export'
+const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
+const applicationRestartChannel = 'data-lab:application-restart'
 let mainWindow: BrowserWindow | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
@@ -159,7 +164,7 @@ function createMainWindow() {
     window.on('close', (event) => {
       if (isQuitting) return
       event.preventDefault()
-      app.hide()
+      app.quit()
     })
   }
   window.on('closed', () => {
@@ -235,6 +240,17 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(activeAiSourceChannel, () => ({ source: currentActiveAiSource() }))
   ipcMain.handle(activeAiSourceSaveChannel, (_event, payload: { source?: unknown }) => selectActiveAiSource(payload ?? {}))
+  ipcMain.handle(diagnosticsRecordChannel, (_event, payload: unknown) => recordDiagnosticEvent(app.getPath('userData'), payload))
+  ipcMain.handle(diagnosticsExportChannel, () => exportDiagnosticBundle(app.getPath('userData')))
+  ipcMain.handle(diagnosticsOpenChannel, () => {
+    const path = ensureDiagnosticLog(app.getPath('userData'))
+    shell.showItemInFolder(path)
+    return { opened: true, path }
+  })
+  ipcMain.handle(applicationRestartChannel, () => {
+    setTimeout(() => { app.relaunch(); app.quit() }, 80)
+    return { restarting: true }
+  })
   createMainWindow()
   app.on('activate', () => {
     focusMainWindow()

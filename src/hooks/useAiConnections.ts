@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ChatGPTSessionStatus } from '../domain/ai'
+import { recordDiagnostic } from '../domain/diagnostics'
 
 export const disconnectedAiStatus: AiStatus = { connected: false, credentialSource: 'none', selectedProvider: 'openai', providers: {
   openai: { connected: false, credentialSource: 'none', model: 'gpt-5.6-terra', catalog: [], capabilities: { reasoning: true, verbosity: true, serviceTier: true, deprecated: false }, modelUnavailable: false },
@@ -17,12 +18,23 @@ export function useAiConnections(reportActivity: (message: string) => void) {
   const [aiStatus, setAiStatus] = useState<AiStatus>(disconnectedAiStatus)
   const [chatGPTStatus, setChatGPTStatus] = useState<ChatGPTSessionStatus>(disconnectedChatGPTStatus)
   const [activeAiSource, setActiveAiSource] = useState<ActiveAiSource>('openai')
+  const sourceSelectionEpoch = useRef(0)
 
   useEffect(() => {
     if (!window.dataLab) return
-    void window.dataLab.getAiStatus().then(setAiStatus).catch(() => undefined)
-    void window.dataLab.getChatGPTStatus().then(setChatGPTStatus).catch(() => undefined)
-    void window.dataLab.getActiveAiSource().then(({ source }) => setActiveAiSource(source)).catch(() => undefined)
+    void Promise.all([
+      window.dataLab.getAiStatus().catch(() => disconnectedAiStatus),
+      window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus),
+      window.dataLab.getActiveAiSource().catch(() => ({ source: 'openai' as ActiveAiSource })),
+    ]).then(async ([providerStatus, accountStatus, selection]) => {
+      setAiStatus(providerStatus)
+      setChatGPTStatus(accountStatus)
+      if (sourceSelectionEpoch.current !== 0) return
+      const selectedConnected = selection.source === 'chatgpt' ? accountStatus.connected : providerStatus.providers[selection.source].connected
+      const source: ActiveAiSource = !selectedConnected && accountStatus.connected ? 'chatgpt' : selection.source
+      setActiveAiSource(source)
+      if (source !== selection.source) await window.dataLab?.setActiveAiSource(source).catch(() => undefined)
+    })
   }, [])
 
   const active = useMemo(() => ({
@@ -34,6 +46,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
   const saveAiConnection = async (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => {
     if (!window.dataLab) throw new Error('AI settings require the Electron application')
     const status = await window.dataLab.saveAiSettings(settings)
+    recordDiagnostic({ category: 'provider', action: 'settings.save', status: status.connected ? 'success' : 'warning', detail: { provider: status.selectedProvider, model: status.settings.model, credentialSource: status.credentialSource } })
     setAiStatus(status)
     reportActivity(status.connected ? `${status.settings.model} connection settings saved` : 'AI settings saved · API key still required')
     return status
@@ -42,6 +55,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
   const testAiConnection = async () => {
     if (!window.dataLab) throw new Error('AI connection requires the Electron application')
     const status = await window.dataLab.testAiConnection()
+    recordDiagnostic({ category: 'provider', action: 'connection.test', status: 'success', detail: { provider: status.selectedProvider, model: status.settings.model } })
     setAiStatus(status)
     reportActivity(`${sourceLabel(status.selectedProvider)} connected · ${status.settings.model} ready`)
   }
@@ -49,6 +63,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
   const refreshAiModelCatalog = async (provider: AiSettings['provider']) => {
     if (!window.dataLab) throw new Error('Model discovery requires the Electron application')
     const status = await window.dataLab.refreshAiModelCatalog(provider)
+    recordDiagnostic({ category: 'provider', action: 'catalog.refresh', status: 'success', detail: { provider, modelCount: status.providers[provider].catalog.length } })
     setAiStatus(status)
     reportActivity(`${sourceLabel(provider)} model catalog refreshed · ${status.providers[provider].catalog.length} models`)
     return status
@@ -56,9 +71,15 @@ export function useAiConnections(reportActivity: (message: string) => void) {
 
   const connectChatGPT = async () => {
     if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
+    sourceSelectionEpoch.current += 1
     const status = await window.dataLab.connectChatGPT()
+    recordDiagnostic({ category: 'provider', action: 'chatgpt.connect', status: status.connected ? 'success' : 'warning', detail: { model: status.selectedModel } })
     setChatGPTStatus(status)
-    reportActivity(status.connected ? `ChatGPT connected · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
+    if (status.connected) {
+      const selection = await window.dataLab.setActiveAiSource('chatgpt')
+      setActiveAiSource(selection.source)
+    }
+    reportActivity(status.connected ? `ChatGPT connected and active · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
   }
 
   const disconnectChatGPT = async () => {
@@ -74,6 +95,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
 
   const selectActiveAgentSource = async (source: ActiveAiSource) => {
     if (!window.dataLab) throw new Error('Active agent selection requires the Electron application')
+    sourceSelectionEpoch.current += 1
     const selected = await window.dataLab.setActiveAiSource(source)
     setActiveAiSource(selected.source)
     if (source !== 'chatgpt') setAiStatus(await window.dataLab.getAiStatus())

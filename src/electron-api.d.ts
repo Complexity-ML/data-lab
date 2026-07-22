@@ -2,6 +2,7 @@ import type { SchemaField } from './domain/pipeline'
 import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
 import type { DataHubAssetSummary } from './domain/datahub'
 import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from './domain/workspace'
+import type { DiagnosticBundle, DiagnosticInput } from './domain/diagnostics'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -90,6 +91,10 @@ declare global {
       resolveWorkspaceRecovery(action: 'recover' | 'discard'): Promise<WorkspaceManagerState>
       getActiveAiSource(): Promise<{ source: ActiveAiSource }>
       setActiveAiSource(source: ActiveAiSource): Promise<{ source: ActiveAiSource }>
+      recordDiagnostic(event: DiagnosticInput): Promise<DiagnosticInput & { id: string; timestamp: string }>
+      exportDiagnostics(): Promise<DiagnosticBundle>
+      openDiagnosticLogs(): Promise<{ opened: true; path: string }>
+      restartApplication(): Promise<{ restarting: true }>
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>
       onWindowStateChanged(callback: (state: { fullscreen: boolean }) => void): () => void
