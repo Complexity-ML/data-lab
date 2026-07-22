@@ -1,14 +1,19 @@
 import { app, safeStorage } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { parseAndValidateProposal } from './proposal-contract.js'
 
 export type ApiProvider = 'openai' | 'anthropic' | 'moonshot'
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Verbosity = 'low' | 'medium' | 'high'
 export type ServiceTier = 'auto' | 'priority'
 
+export interface ModelCapabilities { reasoning: boolean; verbosity: boolean; serviceTier: boolean; deprecated: boolean }
+export interface ProviderModelOption { id: string; label: string; capabilities: ModelCapabilities }
+interface ProviderStatus { connected: boolean; credentialSource: 'environment' | 'encrypted' | 'none'; model: string; catalog: ProviderModelOption[]; catalogRefreshedAt?: string; capabilities: ModelCapabilities; modelUnavailable: boolean }
+
 export interface AiSettings { provider: ApiProvider; model: string; reasoningEffort: ReasoningEffort; verbosity: Verbosity; serviceTier: ServiceTier }
-interface ProviderConfig { encryptedKey?: string; model: string }
+interface ProviderConfig { encryptedKey?: string; model: string; catalog?: ProviderModelOption[]; catalogRefreshedAt?: string }
 interface StoredAiConfig { selectedProvider: ApiProvider; providers: Record<ApiProvider, ProviderConfig>; reasoningEffort: ReasoningEffort; verbosity: Verbosity; serviceTier: ServiceTier; encryptedKey?: string }
 
 const providerDefaults: Record<ApiProvider, string> = { openai: 'gpt-5.6-terra', anthropic: 'claude-opus-4-8', moonshot: 'kimi-k3' }
@@ -22,6 +27,26 @@ let activeProposalController: AbortController | undefined
 function configPath() { return join(app.getPath('userData'), 'ai-provider.json') }
 function cleanModel(value: unknown, fallback: string) { return typeof value === 'string' && /^[A-Za-z0-9._:-]{2,120}$/.test(value) ? value : fallback }
 
+export function modelCapabilities(provider: ApiProvider, model: string): ModelCapabilities {
+  const id = model.toLowerCase()
+  const deprecated = /(?:gpt-3(?:\.|-|$)|claude-(?:1|2)(?:\.|-|$)|kimi-(?:v1|legacy))/.test(id)
+  if (provider === 'openai') return { reasoning: /(?:^|[-_.])(gpt-5|o[134])/.test(id), verbosity: /(?:^|[-_.])gpt-5/.test(id), serviceTier: true, deprecated }
+  if (provider === 'anthropic') return { reasoning: false, verbosity: false, serviceTier: false, deprecated }
+  return { reasoning: /(?:^|[-_.])kimi-k[23]/.test(id), verbosity: false, serviceTier: false, deprecated }
+}
+
+function cleanCatalog(value: unknown, provider: ApiProvider): ProviderModelOption[] {
+  if (!Array.isArray(value)) return []
+  const unique = new Set<string>()
+  return value.flatMap((item) => {
+    const source = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const id = cleanModel(source.id, '')
+    if (!id || unique.has(id)) return []
+    unique.add(id)
+    return [{ id, label: typeof source.label === 'string' ? source.label.slice(0, 160) : id, capabilities: modelCapabilities(provider, id) }]
+  }).slice(0, 250)
+}
+
 async function readConfig(): Promise<StoredAiConfig> {
   try {
     const parsed = JSON.parse(await readFile(configPath(), 'utf8')) as Partial<StoredAiConfig>
@@ -30,9 +55,9 @@ async function readConfig(): Promise<StoredAiConfig> {
     return {
       selectedProvider,
       providers: {
-        openai: { model: cleanModel(source.openai?.model, providerDefaults.openai), encryptedKey: source.openai?.encryptedKey ?? parsed.encryptedKey },
-        anthropic: { model: cleanModel(source.anthropic?.model, providerDefaults.anthropic), encryptedKey: source.anthropic?.encryptedKey },
-        moonshot: { model: cleanModel(source.moonshot?.model, providerDefaults.moonshot), encryptedKey: source.moonshot?.encryptedKey },
+        openai: { model: cleanModel(source.openai?.model, providerDefaults.openai), encryptedKey: source.openai?.encryptedKey ?? parsed.encryptedKey, catalog: cleanCatalog(source.openai?.catalog, 'openai'), catalogRefreshedAt: typeof source.openai?.catalogRefreshedAt === 'string' ? source.openai.catalogRefreshedAt : undefined },
+        anthropic: { model: cleanModel(source.anthropic?.model, providerDefaults.anthropic), encryptedKey: source.anthropic?.encryptedKey, catalog: cleanCatalog(source.anthropic?.catalog, 'anthropic'), catalogRefreshedAt: typeof source.anthropic?.catalogRefreshedAt === 'string' ? source.anthropic.catalogRefreshedAt : undefined },
+        moonshot: { model: cleanModel(source.moonshot?.model, providerDefaults.moonshot), encryptedKey: source.moonshot?.encryptedKey, catalog: cleanCatalog(source.moonshot?.catalog, 'moonshot'), catalogRefreshedAt: typeof source.moonshot?.catalogRefreshedAt === 'string' ? source.moonshot.catalogRefreshedAt : undefined },
       },
       reasoningEffort: efforts.has(parsed.reasoningEffort as ReasoningEffort) ? parsed.reasoningEffort as ReasoningEffort : defaults.reasoningEffort,
       verbosity: verbosities.has(parsed.verbosity as Verbosity) ? parsed.verbosity as Verbosity : defaults.verbosity,
@@ -58,9 +83,11 @@ export async function getAiStatus() {
   const config = await readConfig()
   const providerEntries = await Promise.all((['openai', 'anthropic', 'moonshot'] as ApiProvider[]).map(async (provider) => {
     const environment = Boolean(environmentKey(provider))
-    return [provider, { connected: Boolean(await apiKey(provider)), credentialSource: environment ? 'environment' as const : config.providers[provider].encryptedKey ? 'encrypted' as const : 'none' as const, model: config.providers[provider].model }] as const
+    const selected = config.providers[provider]
+    const catalog = selected.catalog ?? []
+    return [provider, { connected: Boolean(await apiKey(provider)), credentialSource: environment ? 'environment' as const : selected.encryptedKey ? 'encrypted' as const : 'none' as const, model: selected.model, catalog, catalogRefreshedAt: selected.catalogRefreshedAt, capabilities: modelCapabilities(provider, selected.model), modelUnavailable: catalog.length > 0 && !catalog.some((model) => model.id === selected.model) }] as const
   }))
-  const providerStatus = Object.fromEntries(providerEntries) as Record<ApiProvider, { connected: boolean; credentialSource: 'environment' | 'encrypted' | 'none'; model: string }>
+  const providerStatus = Object.fromEntries(providerEntries) as unknown as Record<ApiProvider, ProviderStatus>
   return {
     connected: providerStatus[config.selectedProvider].connected,
     credentialSource: providerStatus[config.selectedProvider].credentialSource,
@@ -105,18 +132,34 @@ async function authorizedFetch(provider: ApiProvider, path: string, init: Reques
   const response = await providerRequest(provider, key, path, init)
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    throw new Error(`${provider} returned HTTP ${response.status}${detail ? ` · ${detail.slice(0, 300)}` : ''}`)
+    throw new Error(`${provider} returned HTTP ${response.status}${detail ? ` · ${redactSensitive(detail).slice(0, 300)}` : ''}`)
   }
   return response
 }
 
-export async function testAiConnection() {
-  const status = await getAiStatus()
-  const provider = status.selectedProvider
+export function redactSensitive(value: string) {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk|key|token|secret)-[A-Za-z0-9_-]{8,}\b/gi, '[REDACTED]')
+    .replace(/("?(?:authorization|api[_-]?key|access[_-]?token)"?\s*[:=]\s*")([^"]+)(")/gi, '$1[REDACTED]$3')
+}
+
+export async function refreshAiModelCatalog(payload: { provider?: unknown } = {}) {
+  const current = await readConfig()
+  const provider = providers.has(payload.provider as ApiProvider) ? payload.provider as ApiProvider : current.selectedProvider
   const response = await authorizedFetch(provider, '/models')
-  const body = await response.json() as { data?: { id?: string }[] }
-  const availableModels = (body.data ?? []).map((entry) => entry.id).filter((id): id is string => Boolean(id)).slice(0, 100)
-  return { ...(await getAiStatus()), availableModels }
+  const body = await response.json() as { data?: { id?: string; display_name?: string }[] }
+  const catalog = cleanCatalog((body.data ?? []).map((entry) => ({ id: entry.id, label: entry.display_name ?? entry.id })), provider)
+  if (!catalog.length) throw new Error(`${provider} returned an empty or unsupported model catalog`)
+  current.providers[provider].catalog = catalog
+  current.providers[provider].catalogRefreshedAt = new Date().toISOString()
+  await writeFile(configPath(), JSON.stringify(current), { encoding: 'utf8', mode: 0o600 })
+  return getAiStatus()
+}
+
+export async function testAiConnection() {
+  const status = await refreshAiModelCatalog()
+  return { ...status, availableModels: status.providers[status.selectedProvider].catalog.map((model) => model.id) }
 }
 
 export const proposalSchema = {
@@ -132,40 +175,43 @@ export const proposalSchema = {
 
 const instructions = 'You are the DATA LAB pipeline agent. Use only the supplied graph, validation findings, DataHub MCP evidence, and version history. Compare recent versions and never repeat a rejected revision. Agent Decision may add, update, reconnect, or remove graph elements. Return the smallest evidence-backed graph diff as strict JSON matching the supplied schema; never claim it was executed. Set requires_human_review true only for uncertainty, sensitive-data changes, schema changes, or downstream contract changes. If true, include a review card action. Otherwise do not create Human Review. Return no action when evidence is insufficient.'
 
-function parseJsonResponse(value: string) {
-  const trimmed = value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-  const proposal = JSON.parse(trimmed) as Record<string, unknown>
-  if (!Array.isArray(proposal.actions) || typeof proposal.title !== 'string') throw new Error('The provider returned an invalid DATA LAB proposal contract')
-  return proposal
-}
-
 export async function runAiProposal(payload: unknown) {
   const status = await getAiStatus()
   const settings = status.settings
   const provider = settings.provider
   activeProposalController?.abort()
   const controller = new AbortController()
-  activeProposalController = controller
+    activeProposalController = controller
   try {
     if (provider === 'openai') {
-      const response = await authorizedFetch(provider, '/responses', { method: 'POST', signal: controller.signal, body: JSON.stringify({ model: settings.model, store: false, service_tier: settings.serviceTier, reasoning: { effort: settings.reasoningEffort }, text: { verbosity: settings.verbosity, format: { type: 'json_schema', name: 'data_lab_pipeline_proposal', strict: true, schema: proposalSchema } }, instructions, input: JSON.stringify(payload).slice(0, 80_000) }) })
+      const capabilities = modelCapabilities(provider, settings.model)
+      const responseBody = {
+        model: settings.model,
+        store: false,
+        ...(capabilities.serviceTier ? { service_tier: settings.serviceTier } : {}),
+        ...(capabilities.reasoning ? { reasoning: { effort: settings.reasoningEffort } } : {}),
+        text: { ...(capabilities.verbosity ? { verbosity: settings.verbosity } : {}), format: { type: 'json_schema', name: 'data_lab_pipeline_proposal', strict: true, schema: proposalSchema } },
+        instructions,
+        input: JSON.stringify(payload).slice(0, 80_000),
+      }
+      const response = await authorizedFetch(provider, '/responses', { method: 'POST', signal: controller.signal, body: JSON.stringify(responseBody) })
       const body = await response.json() as { model?: string; output?: { content?: { type?: string; text?: string }[] }[]; usage?: unknown }
       const output = body.output?.flatMap((item) => item.content ?? []).find((item) => item.type === 'output_text')?.text
       if (!output) throw new Error('OpenAI returned no structured proposal')
-      return { proposal: parseJsonResponse(output), model: body.model ?? settings.model, usage: body.usage }
+      return { proposal: parseAndValidateProposal(output, payload), model: body.model ?? settings.model, usage: body.usage }
     }
     if (provider === 'anthropic') {
       const response = await authorizedFetch(provider, '/messages', { method: 'POST', signal: controller.signal, body: JSON.stringify({ model: settings.model, max_tokens: 8_000, system: `${instructions}\nJSON schema:\n${JSON.stringify(proposalSchema)}`, messages: [{ role: 'user', content: JSON.stringify(payload).slice(0, 80_000) }] }) })
       const body = await response.json() as { model?: string; content?: { type?: string; text?: string }[]; usage?: unknown }
       const output = body.content?.find((item) => item.type === 'text')?.text
       if (!output) throw new Error('Claude returned no proposal')
-      return { proposal: parseJsonResponse(output), model: body.model ?? settings.model, usage: body.usage }
+      return { proposal: parseAndValidateProposal(output, payload), model: body.model ?? settings.model, usage: body.usage }
     }
     const response = await authorizedFetch(provider, '/chat/completions', { method: 'POST', signal: controller.signal, body: JSON.stringify({ model: settings.model, messages: [{ role: 'system', content: `${instructions}\nJSON schema:\n${JSON.stringify(proposalSchema)}` }, { role: 'user', content: JSON.stringify(payload).slice(0, 80_000) }] }) })
     const body = await response.json() as { model?: string; choices?: { message?: { content?: string } }[]; usage?: unknown }
     const output = body.choices?.[0]?.message?.content
     if (!output) throw new Error('Kimi returned no proposal')
-    return { proposal: parseJsonResponse(output), model: body.model ?? settings.model, usage: body.usage }
+    return { proposal: parseAndValidateProposal(output, payload), model: body.model ?? settings.model, usage: body.usage }
   } finally { if (activeProposalController === controller) activeProposalController = undefined }
 }
 

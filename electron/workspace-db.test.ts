@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeWorkspaceDatabase, loadSavedWorkspace, saveWorkspace } from './workspace-db.js'
+import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
 
 let testDirectory: string | undefined
 
@@ -30,5 +30,15 @@ describe('SQLite workspace persistence', () => {
     expect(saveWorkspace(testDirectory, payload)).toEqual({ saved: true })
     closeWorkspaceDatabase()
     expect(loadSavedWorkspace(testDirectory)).toEqual(payload)
+  })
+
+  it('persists application settings independently from the active workspace', () => {
+    testDirectory = mkdtempSync(join(tmpdir(), 'data-lab-settings-'))
+    saveAppSetting(testDirectory, 'active-ai-provider', 'anthropic')
+    saveWorkspace(testDirectory, { projectTitle: 'Independent graph' })
+    closeWorkspaceDatabase()
+
+    expect(loadAppSetting(testDirectory, 'active-ai-provider')).toBe('anthropic')
+    expect(loadSavedWorkspace(testDirectory)).toEqual({ projectTitle: 'Independent graph' })
   })
 })

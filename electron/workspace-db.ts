@@ -13,6 +13,11 @@ function db(userDataDirectory: string) {
       payload TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `)
   return database
 }
@@ -31,6 +36,20 @@ export function saveWorkspace(userDataDirectory: string, payload: unknown) {
     ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
   `).run(serialized, new Date().toISOString())
   return { saved: true }
+}
+
+export function loadAppSetting(userDataDirectory: string, key: string): string | null {
+  if (!/^[a-z0-9-]{1,80}$/.test(key)) throw new Error('Invalid application setting key')
+  const row = db(userDataDirectory).prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value?: unknown } | undefined
+  return typeof row?.value === 'string' ? row.value : null
+}
+
+export function saveAppSetting(userDataDirectory: string, key: string, value: string) {
+  if (!/^[a-z0-9-]{1,80}$/.test(key) || value.length > 4_000) throw new Error('Invalid application setting')
+  db(userDataDirectory).prepare(`
+    INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(key, value, new Date().toISOString())
 }
 
 export function closeWorkspaceDatabase() { database?.close(); database = undefined }

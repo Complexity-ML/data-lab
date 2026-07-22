@@ -2,10 +2,13 @@ import type { Edge } from '@xyflow/react'
 import type { AgentProposal, CardKind, PipelineNode, PipelineNodeData } from './pipeline'
 
 export type ApiProvider = 'openai' | 'anthropic' | 'moonshot'
+export type ActiveAiSource = 'chatgpt' | ApiProvider
 export type AiModel = string
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Verbosity = 'low' | 'medium' | 'high'
 export type ServiceTier = 'auto' | 'priority'
+export interface ModelCapabilities { reasoning: boolean; verbosity: boolean; serviceTier: boolean; deprecated: boolean }
+export interface ProviderModelOption { id: string; label: string; capabilities: ModelCapabilities }
 
 export interface AiSettings {
   provider: ApiProvider
@@ -19,7 +22,7 @@ export interface AiStatus {
   connected: boolean
   credentialSource: 'environment' | 'encrypted' | 'none'
   selectedProvider: ApiProvider
-  providers: Record<ApiProvider, { connected: boolean; credentialSource: 'environment' | 'encrypted' | 'none'; model: string }>
+  providers: Record<ApiProvider, { connected: boolean; credentialSource: 'environment' | 'encrypted' | 'none'; model: string; catalog: ProviderModelOption[]; catalogRefreshedAt?: string; capabilities: ModelCapabilities; modelUnavailable: boolean }>
   encryptionAvailable: boolean
   settings: AiSettings
 }

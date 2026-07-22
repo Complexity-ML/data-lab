@@ -3,9 +3,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus } from './datahub-mcp.js'
-import { cancelAiProposal, getAiStatus, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
+import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { closeWorkspaceDatabase, loadSavedWorkspace, saveWorkspace } from './workspace-db.js'
+import { closeWorkspaceDatabase, loadAppSetting, loadSavedWorkspace, saveAppSetting, saveWorkspace } from './workspace-db.js'
+import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -19,6 +20,7 @@ const windowStateChangedChannel = 'data-lab:window-state-changed'
 const aiStatusChannel = 'data-lab:ai-status'
 const aiSaveChannel = 'data-lab:ai-save'
 const aiTestChannel = 'data-lab:ai-test'
+const aiCatalogRefreshChannel = 'data-lab:ai-catalog-refresh'
 const aiProposalChannel = 'data-lab:ai-proposal'
 const aiCancelChannel = 'data-lab:ai-cancel'
 const humanReviewOpenedChannel = 'data-lab:human-review-opened'
@@ -30,9 +32,24 @@ const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
 const chatGPTCancelChannel = 'data-lab:chatgpt-cancel'
 const workspaceLoadChannel = 'data-lab:workspace-load'
 const workspaceSaveChannel = 'data-lab:workspace-save'
+const activeAiSourceChannel = 'data-lab:active-ai-source'
+const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 let mainWindow: BrowserWindow | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
+
+function currentActiveAiSource(): ActiveAiSource {
+  const saved = loadAppSetting(app.getPath('userData'), 'active-ai-provider')
+  return parseActiveAiSource(saved) ?? 'openai'
+}
+
+async function selectActiveAiSource(payload: { source?: unknown }) {
+  const [apiStatus, chatGPTStatus] = await Promise.all([getAiStatus(), chatGPT?.status()])
+  const source = requireSelectableAiSource(payload?.source, { chatgpt: Boolean(chatGPTStatus?.connected), openai: apiStatus.providers.openai.connected, anthropic: apiStatus.providers.anthropic.connected, moonshot: apiStatus.providers.moonshot.connected })
+  if (source !== 'chatgpt') await saveAiSettings({ provider: source })
+  saveAppSetting(app.getPath('userData'), 'active-ai-provider', source)
+  return { source }
+}
 
 function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -127,6 +144,7 @@ app.whenReady().then(() => {
     return saveAiSettings(payload)
   })
   ipcMain.handle(aiTestChannel, () => testAiConnection())
+  ipcMain.handle(aiCatalogRefreshChannel, (_event, payload: { provider?: unknown }) => refreshAiModelCatalog(payload ?? {}))
   ipcMain.handle(aiProposalChannel, (_event, payload: unknown) => {
     if (!payload || typeof payload !== 'object' || JSON.stringify(payload).length > 100_000) throw new Error('Invalid AI proposal request')
     return runAiProposal(payload)
@@ -146,6 +164,8 @@ app.whenReady().then(() => {
     if (!payload || typeof payload !== 'object') throw new Error('Invalid workspace payload')
     return saveWorkspace(app.getPath('userData'), payload)
   })
+  ipcMain.handle(activeAiSourceChannel, () => ({ source: currentActiveAiSource() }))
+  ipcMain.handle(activeAiSourceSaveChannel, (_event, payload: { source?: unknown }) => selectActiveAiSource(payload ?? {}))
   createMainWindow()
   app.on('activate', () => {
     focusMainWindow()

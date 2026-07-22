@@ -1,6 +1,6 @@
-import { AlertTriangle, Bot, CheckCircle2, Database, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, Save, Settings, Sun, UserRound, X } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Database, History, KeyRound, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
+import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
 import { ActionButton } from './ActionButton'
 import { Modal } from './Modal'
@@ -9,6 +9,7 @@ import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 export type SettingsSection = 'appearance' | 'ai' | 'datahub' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
+  activeAiSource: ActiveAiSource
   aiStatus: AiStatus
   chatGPTStatus: ChatGPTSessionStatus
   connectionMode: 'demo' | 'connected'
@@ -23,7 +24,9 @@ interface SettingsModalProps {
   onConnectChatGPT: () => Promise<void>
   onDisconnectChatGPT: () => Promise<void>
   onLoadPreset: (preset: PipelinePresetId) => void
+  onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
+  onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSyncDataHub: () => void
   onTestAiConnection: () => Promise<void>
   onValidate: () => void
@@ -36,7 +39,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
+  const { activeAiSource, aiStatus, chatGPTStatus, connectionMode, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onDisconnectChatGPT, onLoadPreset, onRefreshAiModelCatalog, onRestoreVersion, onSaveAiSettings, onSaveVersion, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, selectedVersionId, theme, versions } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -86,15 +89,77 @@ export function SettingsModal(props: SettingsModalProps) {
       applySavedSettings(saved)
       clearSavedKey()
       await onTestAiConnection()
-      setAiFeedback('OpenAI connection verified.')
+      setAiFeedback(`${draft.provider === 'anthropic' ? 'Claude' : draft.provider === 'moonshot' ? 'Kimi' : 'OpenAI'} connection and model catalog verified.`)
     } catch (error) {
-      setAiFeedback(error instanceof Error ? error.message : 'OpenAI connection failed.')
+      setAiFeedback(error instanceof Error ? error.message : 'Provider connection failed.')
+    } finally { setAiBusy(false) }
+  }
+
+  const refreshModels = async () => {
+    setAiBusy(true)
+    setAiFeedback('Refreshing the provider model catalog…')
+    try {
+      const status = await onRefreshAiModelCatalog(aiSettings.provider)
+      const provider = status.providers[aiSettings.provider]
+      setAiFeedback(`Catalog refreshed · ${provider.catalog.length} models · ${provider.catalogRefreshedAt ? new Date(provider.catalogRefreshedAt).toLocaleString() : 'just now'}. Your manual model ID was preserved.`)
+    } catch (error) {
+      setAiFeedback(`${error instanceof Error ? error.message : 'Model catalog refresh failed'} · The current manual model ID is unchanged.`)
+    } finally { setAiBusy(false) }
+  }
+
+  const removeProviderKey = async () => {
+    setAiBusy(true)
+    setAiFeedback('')
+    try {
+      const status = await onSaveAiSettings({ provider: aiSettings.provider, clearKey: true })
+      applySavedSettings(status)
+      clearSavedKey()
+      setAiFeedback(status.providers[aiSettings.provider].credentialSource === 'environment' ? 'The saved key was removed. An environment key remains active outside DATA LAB.' : 'The provider key was removed from secure storage.')
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to remove the provider key.')
+    } finally { setAiBusy(false) }
+  }
+
+  const connectChatGPTAccount = async () => {
+    setAiBusy(true)
+    setAiFeedback('Opening the secure ChatGPT sign-in…')
+    try {
+      await onConnectChatGPT()
+      setAiFeedback('ChatGPT account connected. Choose it as the active agent source below.')
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to connect the ChatGPT account.')
+    } finally { setAiBusy(false) }
+  }
+
+  const disconnectChatGPTAccount = async () => {
+    setAiBusy(true)
+    setAiFeedback('')
+    try {
+      await onDisconnectChatGPT()
+      setAiFeedback('ChatGPT account disconnected.')
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to disconnect the ChatGPT account.')
     } finally { setAiBusy(false) }
   }
 
   const chatGPTModel = chatGPTStatus.models?.find((model) => model.id === chatGPTStatus.selectedModel) ?? chatGPTStatus.models?.find((model) => model.isDefault) ?? chatGPTStatus.models?.[0]
   const chatGPTEffort = chatGPTModel?.efforts.includes(chatGPTStatus.selectedEffort ?? '') ? chatGPTStatus.selectedEffort ?? '' : chatGPTModel?.defaultEffort ?? chatGPTModel?.efforts[0] ?? ''
   const chooseProvider = (provider: ApiProvider) => setAiSettings((current) => ({ ...current, provider, model: aiStatus.providers[provider].model }))
+  const activeSourceConnected = activeAiSource === 'chatgpt' ? chatGPTStatus.connected : aiStatus.providers[activeAiSource].connected
+  const activeSourceModel = activeAiSource === 'chatgpt' ? chatGPTStatus.selectedModel ?? 'ChatGPT' : aiStatus.providers[activeAiSource].model
+  const selectedProviderStatus = aiStatus.providers[aiSettings.provider]
+  const selectedCapabilities = selectedProviderStatus.capabilities
+
+  const chooseActiveSource = async (source: ActiveAiSource) => {
+    setAiBusy(true)
+    setAiFeedback('')
+    try {
+      await onSelectActiveAiSource(source)
+      setAiFeedback(`${source === 'chatgpt' ? 'ChatGPT' : source === 'anthropic' ? 'Claude' : source === 'moonshot' ? 'Kimi' : 'OpenAI'} will run the next agent request.`)
+    } catch (error) {
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to select the active agent source.')
+    } finally { setAiBusy(false) }
+  }
 
   const menu = (id: SettingsSection, label: string, detail: string, icon: React.ReactNode) => <button aria-current={activeSection === id ? 'page' : undefined} className={activeSection === id ? 'is-active' : ''} onClick={() => setActiveSection(id)} type="button">{icon}<span><strong>{label}</strong><small>{detail}</small></span></button>
 
@@ -114,7 +179,7 @@ export function SettingsModal(props: SettingsModalProps) {
         {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
         {menu('pipeline', 'Pipeline', 'Layout and validation', <Network size={17} />)}
         {menu('versions', 'Versions', 'Safe graph checkpoints', <History size={17} />)}
-        <div className="settings-sidebar-status"><span className={aiStatus.connected ? 'connected' : 'demo'} /><div><strong>Agent model</strong><small>{aiStatus.connected ? aiStatus.settings.model : 'Not connected'}</small></div></div>
+        <div className="settings-sidebar-status"><span className={activeSourceConnected ? 'connected' : 'demo'} /><div><strong>Active agent</strong><small>{activeSourceConnected ? activeSourceModel : `${activeAiSource} · not connected`}</small></div></div>
       </nav>
 
       <div className="settings-content">
@@ -131,26 +196,35 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'ai' && <article className="settings-page">
           <div className="settings-page-heading"><small>AI CONNECTION</small><h3>Connect the real pipeline agent</h3><p>Without a provider connection, DATA LAB never generates a simulated proposal.</p></div>
+          <section className="settings-section active-agent-source">
+            <div className="settings-section-title"><span>Active agent source</span><small>Exactly one source runs each request</small></div>
+            <div aria-label="Active agent source" className="model-grid active-source-grid" role="radiogroup">{([
+              ['chatgpt', 'ChatGPT', chatGPTStatus.connected, chatGPTStatus.selectedModel ?? 'Account session'],
+              ['openai', 'OpenAI', aiStatus.providers.openai.connected, aiStatus.providers.openai.model],
+              ['anthropic', 'Claude', aiStatus.providers.anthropic.connected, aiStatus.providers.anthropic.model],
+              ['moonshot', 'Kimi', aiStatus.providers.moonshot.connected, aiStatus.providers.moonshot.model],
+            ] as const).map(([source, label, connected, model]) => <button aria-checked={activeAiSource === source} className={activeAiSource === source ? 'is-active' : ''} disabled={!connected || aiBusy} key={source} onClick={() => void chooseActiveSource(source)} role="radio" type="button"><strong>{label}</strong><small>{model}</small><code>{connected ? activeAiSource === source ? 'active' : 'ready' : 'connect first'}</code></button>)}</div>
+          </section>
           <section className="settings-section chatgpt-connection-panel">
             <div className="settings-section-title"><span><UserRound size={15} /> ChatGPT account</span><small>{chatGPTStatus.connected ? 'Connected' : 'Optional'}</small></div>
             {chatGPTStatus.connected ? <>
               <div className="chatgpt-account-status"><CheckCircle2 size={19} /><div><strong>{chatGPTStatus.email ?? 'ChatGPT account connected'}</strong><small>{chatGPTStatus.planType ? `${chatGPTStatus.planType} plan` : 'Codex account session'} · no API key required</small></div></div>
               {chatGPTModel && <div className="ai-option-grid"><label className="settings-field"><span>ChatGPT model</span><select onChange={(event) => { const model = chatGPTStatus.models?.find((item) => item.id === event.target.value); if (model) void onConfigureChatGPT({ model: model.id, effort: model.defaultEffort ?? model.efforts[0] ?? '' }) }} value={chatGPTModel.id}>{chatGPTStatus.models?.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label className="settings-field"><span>Reasoning</span><select disabled={!chatGPTModel.efforts.length} onChange={(event) => void onConfigureChatGPT({ model: chatGPTModel.id, effort: event.target.value })} value={chatGPTEffort}>{chatGPTModel.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label></div>}
-              <div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogOut size={14} />} onClick={() => void onDisconnectChatGPT()} variant="ghost">Disconnect ChatGPT</ActionButton></div>
-            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions"><ActionButton disabled={aiBusy || chatGPTStatus.available === false} icon={<LogIn size={14} />} onClick={() => void onConnectChatGPT()} variant="primary">Continue with ChatGPT</ActionButton></div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error}</p>}</>}
+              <div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogOut size={14} />} onClick={() => void disconnectChatGPTAccount()} variant="ghost">Disconnect ChatGPT</ActionButton></div>
+            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogIn size={14} />} onClick={() => void connectChatGPTAccount()} variant="primary">{aiBusy ? 'Connecting…' : 'Continue with ChatGPT'}</ActionButton></div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error} · You can retry the connection.</p>}</>}
           </section>
           <section className="settings-section ai-connection-panel">
             <div className="settings-section-title"><span>API providers</span><small>{aiStatus.providers[aiSettings.provider].connected ? `Connected · ${aiStatus.providers[aiSettings.provider].credentialSource}` : 'Not connected'}</small></div>
             <div className="model-grid provider-grid" role="radiogroup" aria-label="API provider">{([['openai', 'OpenAI', 'Responses API'], ['anthropic', 'Claude', 'Anthropic Messages'], ['moonshot', 'Kimi', 'Moonshot API']] as const).map(([provider, label, detail]) => <button aria-checked={aiSettings.provider === provider} className={aiSettings.provider === provider ? 'is-active' : ''} key={provider} onClick={() => chooseProvider(provider)} role="radio" type="button"><strong>{label}</strong><small>{detail}</small><code>{aiStatus.providers[provider].connected ? 'connected' : 'API key'}</code></button>)}</div>
             <label className="settings-field"><span><KeyRound size={14} /> {aiSettings.provider === 'anthropic' ? 'Anthropic' : aiSettings.provider === 'moonshot' ? 'Moonshot' : 'OpenAI'} API key</span><input autoComplete="off" defaultValue="" key={`api-key-${aiSettings.provider}`} placeholder={aiStatus.providers[aiSettings.provider].connected ? 'Saved securely · enter only to replace' : 'Paste key locally…'} ref={apiKeyRef} type="password" /><small>The key stays encrypted in Electron secure storage and is never exposed back to React.</small></label>
-            <label className="settings-field"><span>Model ID</span><input defaultValue={aiSettings.model} key={`model-${aiSettings.provider}`} placeholder="Model returned by this provider" ref={modelIdRef} type="text" /><small>“Test connection” validates the key and provider model catalog.</small></label>
+            <label className="settings-field"><span>Model ID</span><input defaultValue={aiSettings.model} key={`model-${aiSettings.provider}`} list={`models-${aiSettings.provider}`} placeholder="Model returned by this provider" ref={modelIdRef} type="text" /><datalist id={`models-${aiSettings.provider}`}>{selectedProviderStatus.catalog.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</datalist><small>{selectedProviderStatus.modelUnavailable ? 'This manual model is not in the latest catalog; it is preserved but may be unavailable.' : selectedCapabilities.deprecated ? 'This model appears deprecated. Refresh the catalog and choose a supported replacement.' : selectedProviderStatus.catalogRefreshedAt ? `Catalog refreshed ${new Date(selectedProviderStatus.catalogRefreshedAt).toLocaleString()}.` : 'Refresh models to discover supported capabilities. Manual IDs are preserved.'}</small></label>
             <div className="ai-option-grid">
-              <label className="settings-field"><span>Reasoning quality</span><select onChange={(event) => setAiSettings((current) => ({ ...current, reasoningEffort: event.target.value as AiSettings['reasoningEffort'] }))} value={aiSettings.reasoningEffort}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
-              <label className="settings-field"><span>Answer detail</span><select onChange={(event) => setAiSettings((current) => ({ ...current, verbosity: event.target.value as AiSettings['verbosity'] }))} value={aiSettings.verbosity}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-              <label className="settings-field"><span>Service speed</span><select onChange={(event) => setAiSettings((current) => ({ ...current, serviceTier: event.target.value as AiSettings['serviceTier'] }))} value={aiSettings.serviceTier}><option value="auto">Auto</option><option value="priority">Priority (if enabled)</option></select></label>
+              <label className="settings-field"><span>Reasoning quality</span><select disabled={!selectedCapabilities.reasoning} onChange={(event) => setAiSettings((current) => ({ ...current, reasoningEffort: event.target.value as AiSettings['reasoningEffort'] }))} value={aiSettings.reasoningEffort}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select><small>{selectedCapabilities.reasoning ? 'Supported by this model.' : 'Unavailable for this provider/model.'}</small></label>
+              <label className="settings-field"><span>Answer detail</span><select disabled={!selectedCapabilities.verbosity} onChange={(event) => setAiSettings((current) => ({ ...current, verbosity: event.target.value as AiSettings['verbosity'] }))} value={aiSettings.verbosity}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><small>{selectedCapabilities.verbosity ? 'Supported by this model.' : 'Unavailable for this provider/model.'}</small></label>
+              <label className="settings-field"><span>Service speed</span><select disabled={!selectedCapabilities.serviceTier} onChange={(event) => setAiSettings((current) => ({ ...current, serviceTier: event.target.value as AiSettings['serviceTier'] }))} value={aiSettings.serviceTier}><option value="auto">Auto</option><option value="priority">Priority (if enabled)</option></select><small>{selectedCapabilities.serviceTier ? 'Provider tier selection is available.' : 'Provider-managed for this model.'}</small></label>
             </div>
-            <div className="ai-connection-actions"><ActionButton disabled={aiBusy} onClick={saveAi} variant="ghost">Save settings</ActionButton><ActionButton disabled={aiBusy} onClick={testAi} variant="primary">{aiBusy ? 'Checking…' : 'Test connection'}</ActionButton></div>
-            {aiFeedback && <p className="settings-feedback">{aiFeedback}</p>}
+            <div className="ai-connection-actions"><ActionButton disabled={aiBusy || selectedProviderStatus.credentialSource !== 'encrypted'} onClick={removeProviderKey} variant="ghost">Remove saved key</ActionButton><ActionButton disabled={aiBusy || !selectedProviderStatus.connected} icon={<RefreshCw size={14} />} onClick={refreshModels} variant="ghost">Refresh models</ActionButton><ActionButton disabled={aiBusy} onClick={saveAi} variant="ghost">Save settings</ActionButton><ActionButton disabled={aiBusy} onClick={testAi} variant="primary">{aiBusy ? 'Checking…' : 'Test connection'}</ActionButton></div>
+            {aiFeedback && <p aria-live="polite" className="settings-feedback">{aiFeedback}</p>}
           </section>
           <p className="settings-note">Choose either a ChatGPT account or an API provider. If ChatGPT is connected, DATA LAB uses that account first; disconnect it to use the selected API provider.</p>
         </article>}

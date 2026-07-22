@@ -114,6 +114,20 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
   })
 
+  it('keeps ChatGPT sign-in retryable and reports why web preview cannot connect', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    await user.click(screen.getByRole('button', { name: 'AI connectionModel and quality' }))
+    const connectButton = screen.getByRole('button', { name: 'Continue with ChatGPT' }) as HTMLButtonElement
+    expect(connectButton.disabled).toBe(false)
+    await user.click(connectButton)
+
+    expect(await screen.findByText('ChatGPT connection requires Electron')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Continue with ChatGPT' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { proposalSchema } from './ai-provider.js'
+import { parseAndValidateProposal } from './proposal-contract.js'
 
 export interface ChatGPTModelOption { id: string; label: string; description?: string; efforts: string[]; defaultEffort?: string; isDefault: boolean }
 export interface ChatGPTSessionStatus { available: boolean; connected: boolean; email?: string; planType?: string; models?: ChatGPTModelOption[]; selectedModel?: string; selectedEffort?: string; error?: string }
@@ -121,7 +122,7 @@ export class ChatGPTAgentSession {
       await this.request('turn/start', { threadId: thread.id, input: [{ type: 'text', text: JSON.stringify(payload).slice(0, 80_000), text_elements: [] }], approvalPolicy: 'never', effort: status.selectedEffort ?? null, outputSchema: proposalSchema }, turnTimeoutMs)
       const notification = await completed; const turn = record(notification.turn); if (turn.status !== 'completed') throw new Error(errorMessage(turn.error ?? 'ChatGPT planning failed'))
       const items = (Array.isArray(turn.items) ? turn.items : []).map(record); const output = items.filter((item) => item.type === 'agentMessage' && typeof item.text === 'string').map((item) => item.text as string).at(-1) ?? collector.read(); if (!output) throw new Error('ChatGPT returned no proposal')
-      const proposal = JSON.parse(output) as Record<string, unknown>; if (!Array.isArray(proposal.actions) || typeof proposal.title !== 'string') throw new Error('ChatGPT returned an invalid proposal contract')
+      const proposal = parseAndValidateProposal(output, payload)
       return { proposal, model: status.selectedModel ?? 'ChatGPT', usage: undefined }
     } finally { collector.stop(); void this.request('thread/delete', { threadId: thread.id }).catch(() => undefined) }
   }
