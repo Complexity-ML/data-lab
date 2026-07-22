@@ -1,0 +1,126 @@
+import type { Edge } from '@xyflow/react'
+import { cardLabels, type AgentRunTraceStep, type PipelineNode } from './pipeline'
+
+export type AtomicRunState = 'idle' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped'
+
+export interface AtomicExecutionEvent {
+  nodeId: string
+  sequence: number
+  state: Exclude<AtomicRunState, 'idle'>
+  message: string
+}
+
+export interface AtomicBranchResult {
+  outputId: string
+  state: 'waiting' | 'completed' | 'failed' | 'stopped'
+}
+
+export interface AtomicPipelineRun {
+  started: boolean
+  state: AtomicRunState
+  nodeStates: Record<string, AtomicRunState>
+  events: AtomicExecutionEvent[]
+  branches: AtomicBranchResult[]
+  reason?: string
+}
+
+interface AtomicExecutionOptions {
+  reviewDecisions?: Record<string, 'approved' | 'rejected' | 'pending'>
+  shouldStop?(completedNodeIds: string[]): boolean
+}
+
+function branchState(outputId: string, states: Record<string, AtomicRunState>, incoming: Map<string, string[]>): AtomicBranchResult['state'] {
+  const outputState = states[outputId]
+  if (outputState === 'completed' || outputState === 'failed' || outputState === 'stopped') return outputState
+  const queue = [...(incoming.get(outputId) ?? [])]
+  const visited = new Set<string>()
+  while (queue.length) {
+    const id = queue.shift()!
+    if (visited.has(id)) continue
+    visited.add(id)
+    if (states[id] === 'waiting') return 'waiting'
+    if (states[id] === 'failed') return 'failed'
+    if (states[id] === 'stopped') return 'stopped'
+    queue.push(...(incoming.get(id) ?? []))
+  }
+  return 'failed'
+}
+
+export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], options: AtomicExecutionOptions = {}): AtomicPipelineRun {
+  const nodeStates = Object.fromEntries(nodes.map((node) => [node.id, 'idle' as AtomicRunState]))
+  if (nodes.length === 0) return { started: false, state: 'idle', nodeStates, events: [], branches: [], reason: 'A pipeline requires at least one card.' }
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
+  for (const edge of edges) if (byId.has(edge.source) && byId.has(edge.target)) incoming.get(edge.target)!.push(edge.source)
+  const events: AtomicExecutionEvent[] = []
+  const completed: string[] = []
+  let sequence = 0
+  let progressed = true
+
+  while (progressed) {
+    progressed = false
+    for (const node of nodes) {
+      if (nodeStates[node.id] !== 'idle') continue
+      const predecessors = incoming.get(node.id) ?? []
+      if (predecessors.some((id) => nodeStates[id] === 'failed')) {
+        nodeStates[node.id] = 'failed'
+        events.push({ nodeId: node.id, sequence: ++sequence, state: 'failed', message: 'A required predecessor failed.' })
+        progressed = true
+        continue
+      }
+      if (predecessors.some((id) => nodeStates[id] === 'stopped')) {
+        nodeStates[node.id] = 'stopped'
+        events.push({ nodeId: node.id, sequence: ++sequence, state: 'stopped', message: 'Execution was stopped upstream.' })
+        progressed = true
+        continue
+      }
+      if (!predecessors.every((id) => nodeStates[id] === 'completed')) continue
+      if (options.shouldStop?.(completed)) {
+        for (const pending of nodes.filter((candidate) => nodeStates[candidate.id] === 'idle')) nodeStates[pending.id] = 'stopped'
+        return { started: true, state: 'stopped', nodeStates, events: [...events, { nodeId: node.id, sequence: ++sequence, state: 'stopped', message: 'Emergency stop accepted before the next atomic card commit.' }], branches: nodes.filter((candidate) => candidate.data.kind === 'output').map((output) => ({ outputId: output.id, state: branchState(output.id, nodeStates, incoming) })), reason: 'Emergency stop prevented all later card commits.' }
+      }
+      nodeStates[node.id] = 'running'
+      events.push({ nodeId: node.id, sequence: ++sequence, state: 'running', message: 'All required predecessors completed.' })
+      if (node.data.kind === 'review') {
+        const decision = options.reviewDecisions?.[node.id] ?? 'pending'
+        nodeStates[node.id] = decision === 'approved' ? 'completed' : decision === 'rejected' ? 'failed' : 'waiting'
+        events.push({ nodeId: node.id, sequence: ++sequence, state: nodeStates[node.id] as 'completed' | 'failed' | 'waiting', message: decision === 'approved' ? 'Human Review approved.' : decision === 'rejected' ? 'Human Review rejected.' : 'Waiting for explicit Human Review.' })
+        if (decision === 'approved') completed.push(node.id)
+      } else {
+        nodeStates[node.id] = 'completed'
+        completed.push(node.id)
+        events.push({ nodeId: node.id, sequence: ++sequence, state: 'completed', message: 'Atomic card commit completed.' })
+      }
+      progressed = true
+    }
+  }
+
+  const outputs = nodes.filter((node) => node.data.kind === 'output')
+  const branches = outputs.map((output) => ({ outputId: output.id, state: branchState(output.id, nodeStates, incoming) }))
+  const state: AtomicRunState = Object.values(nodeStates).some((value) => value === 'waiting') ? 'waiting'
+    : branches.length > 0 && branches.every((branch) => branch.state === 'completed') ? 'completed'
+      : 'failed'
+  return { started: true, state, nodeStates, events, branches, reason: state === 'failed' ? 'The graph could not complete every terminal branch.' : undefined }
+}
+
+export function applyAtomicRunState(nodes: PipelineNode[], run: AtomicPipelineRun): PipelineNode[] {
+  const completedSequence = new Map(run.events.filter((event) => event.state === 'completed').map((event) => [event.nodeId, event.sequence]))
+  return nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      runState: run.nodeStates[node.id] ?? 'idle',
+      runSequence: completedSequence.get(node.id),
+    },
+  }))
+}
+
+export function buildAtomicRunTrace(nodes: PipelineNode[], run: AtomicPipelineRun): AgentRunTraceStep[] {
+  const latest = new Map<string, AtomicExecutionEvent>()
+  for (const event of run.events) if (event.state !== 'running') latest.set(event.nodeId, event)
+  return nodes.flatMap((node) => {
+    const event = latest.get(node.id)
+    if (!event || event.state === 'running') return []
+    return [{ nodeId: node.id, label: node.data.label, role: cardLabels[node.data.kind], state: event.state, summary: event.message }]
+  })
+}

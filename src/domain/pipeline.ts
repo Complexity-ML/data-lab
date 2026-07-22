@@ -28,7 +28,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
   rule?: string
   agentAdded?: boolean
-  runState?: 'idle' | 'running' | 'completed' | 'waiting' | 'failed'
+  runState?: 'idle' | 'running' | 'completed' | 'waiting' | 'failed' | 'stopped'
   runSequence?: number
 }
 
@@ -38,7 +38,7 @@ export interface AgentRunTraceStep {
   nodeId: string
   label: string
   role: string
-  state: 'completed' | 'waiting' | 'failed'
+  state: 'completed' | 'waiting' | 'failed' | 'stopped'
   summary: string
 }
 

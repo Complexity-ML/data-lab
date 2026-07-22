@@ -7,6 +7,7 @@ import { SettingsModal } from './components/shared/SettingsModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
 import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { layoutPipeline } from './domain/layout'
 import { cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
@@ -156,6 +157,8 @@ export default function App() {
 
     setAgentRunning(true)
     const runId = ++agentRunId.current
+    const atomicRun = executePipelineAtomically(nodes, edges)
+    setNodes((current) => applyAtomicRunState(current, atomicRun))
     setActivity('Agent reading the current graph, atomic findings and version history…')
     const source = nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
     let datahubEvidence: string[] = []
@@ -179,6 +182,7 @@ export default function App() {
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
@@ -208,6 +212,8 @@ export default function App() {
     }
     setAgentRunning(true)
     const runId = ++agentRunId.current
+    const atomicRun = executePipelineAtomically(nodes, edges)
+    setNodes((current) => applyAtomicRunState(current, atomicRun))
     const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.providers[activeAiSource].model
     setActivity(`${activeModel} is reviewing ${selected.data.label} with version context…`)
     try {
@@ -222,6 +228,7 @@ export default function App() {
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
@@ -237,6 +244,7 @@ export default function App() {
   const stopAgent = () => {
     agentRunId.current += 1
     setAgentRunning(false)
+    setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
     setActivity('Emergency stop · current agent run cancelled · active branch unchanged')
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()

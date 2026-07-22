@@ -37,6 +37,18 @@ export const pipelinePresenceAtom: ValidationAtom = {
   },
 }
 
+export const pipelineTerminalsAtom: ValidationAtom = {
+  id: 'pipeline-terminals',
+  label: 'Required pipeline terminals',
+  run({ nodes }) {
+    if (nodes.length === 0) return []
+    const findings: ValidationIssue[] = []
+    if (!nodes.some((node) => node.data.kind === 'source')) findings.push(issue(this.id, { id: 'missing-source', severity: 'error', title: 'Data Source is required', detail: 'A runnable pipeline must start from at least one Data Source card.' }))
+    if (!nodes.some((node) => node.data.kind === 'output')) findings.push(issue(this.id, { id: 'missing-output', severity: 'error', title: 'Terminal Output is required', detail: 'A runnable pipeline must end at least one branch with an Output card.' }))
+    return findings
+  },
+}
+
 export const edgeIntegrityAtom: ValidationAtom = {
   id: 'edge-integrity',
   label: 'Edge integrity',
@@ -63,7 +75,18 @@ type CardContract = (context: ValidationContext, nodeId: string) => ValidationIs
 
 const cardContracts: Partial<Record<CardKind, CardContract>> = {
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
-  split: ({ edges }, nodeId) => edges.filter((edge) => edge.source === nodeId).length < 2 ? [issue('card-contracts', { id: `split-branches-${nodeId}`, severity: 'warning', nodeId, title: 'Incomplete split', detail: 'A Split should expose at least two branches.' })] : [],
+  split: ({ edges }, nodeId) => {
+    const outgoing = edges.filter((edge) => edge.source === nodeId)
+    const handles = outgoing.map((edge) => edge.sourceHandle)
+    const findings: ValidationIssue[] = []
+    if (outgoing.length !== 2) findings.push(issue('card-contracts', { id: `split-branch-count-${nodeId}`, severity: 'error', nodeId, title: 'Invalid split branch count', detail: 'A Split must expose exactly one approved branch and one quarantine branch.' }))
+    for (const handle of ['approved', 'quarantine']) {
+      const count = handles.filter((candidate) => candidate === handle).length
+      if (count !== 1) findings.push(issue('card-contracts', { id: `split-handle-${handle}-${nodeId}`, severity: 'error', nodeId, title: `Invalid ${handle} split handle`, detail: `Expected exactly one ${handle} connection, found ${count}.` }))
+    }
+    for (const edge of outgoing) if (!['approved', 'quarantine'].includes(edge.sourceHandle ?? '')) findings.push(issue('card-contracts', { id: `split-handle-unknown-${edge.id}`, severity: 'error', nodeId, title: 'Unknown split handle', detail: `${edge.id} must use the approved or quarantine source handle.` }))
+    return findings
+  },
   review: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) && edges.some((edge) => edge.source === nodeId) ? [] : [issue('card-contracts', { id: `review-path-${nodeId}`, severity: 'warning', nodeId, title: 'Review is not gating a path', detail: 'A Human Review card must have an input and an output.' })],
   output: ({ edges }, nodeId) => edges.some((edge) => edge.source === nodeId) ? [issue('card-contracts', { id: `output-edge-${nodeId}`, severity: 'error', nodeId, title: 'Output has a downstream edge', detail: 'Output cards must end a lineage path.' })] : [],
 }
@@ -74,7 +97,8 @@ export const cardContractsAtom: ValidationAtom = {
   run(context) {
     return context.nodes.flatMap((node) => {
       const findings: ValidationIssue[] = []
-      if (node.data.kind !== 'source' && !context.edges.some((edge) => edge.target === node.id)) findings.push(issue(this.id, { id: `orphan-${node.id}`, severity: 'warning', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
+      if (node.data.kind !== 'source' && !context.edges.some((edge) => edge.target === node.id)) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
+      if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id)) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
     })
   },
@@ -83,11 +107,29 @@ export const cardContractsAtom: ValidationAtom = {
 export const sensitiveDataAtom: ValidationAtom = {
   id: 'sensitive-data-path',
   label: 'Sensitive data propagation',
-  run({ nodes }) {
-    const source = nodes.find((node) => node.data.schema.some((field) => field.tags?.includes('PII')))
-    const activation = nodes.find((node) => node.id === 'activation-output')
-    const protectedPath = nodes.some((node) => ['transform', 'decision'].includes(node.data.kind) && /mask|hash|token/i.test(`${node.data.label} ${node.data.rule ?? ''}`))
-    return source && activation && !protectedPath ? [issue(this.id, { id: 'pii-activation', severity: 'error', nodeId: activation.id, title: 'PII reaches activation unmasked', detail: 'DataHub classifies email as PII, but no masking transform exists on the activation path.' })] : []
+  run({ nodes, edges }) {
+    const byId = new Map(nodes.map((node) => [node.id, node]))
+    const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
+    for (const edge of edges) outgoing.get(edge.source)?.push(edge.target)
+    const sensitiveSources = nodes.filter((node) => node.data.kind === 'source' && (node.data.datahubTags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)) || node.data.schema.some((field) => field.tags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)))))
+    const unsafeOutputs = new Map<string, string>()
+    for (const source of sensitiveSources) {
+      const queue = [{ id: source.id, protected: false }]
+      const visited = new Set<string>()
+      while (queue.length) {
+        const current = queue.shift()!
+        const node = byId.get(current.id)
+        if (!node) continue
+        const protectedPath = current.protected || (node.data.kind === 'transform' && /mask|hash|sha(?:-?\d+)?|tokeni[sz]e|redact|encrypt/i.test(`${node.data.label} ${node.data.rule ?? ''}`))
+        const stateKey = `${node.id}:${protectedPath}`
+        if (visited.has(stateKey)) continue
+        visited.add(stateKey)
+        const governedRestrictedSink = node.data.kind === 'output' && /quarantine|secure|vault|restricted|steward|hold/i.test(`${node.data.label} ${node.data.description} ${node.data.datahubUrn ?? ''}`)
+        if (node.data.kind === 'output' && !protectedPath && !governedRestrictedSink) unsafeOutputs.set(node.id, source.id)
+        for (const target of outgoing.get(node.id) ?? []) queue.push({ id: target, protected: protectedPath })
+      }
+    }
+    return [...unsafeOutputs].map(([outputId, sourceId]) => issue(this.id, { id: `sensitive-unprotected-${sourceId}-${outputId}`, severity: 'error', nodeId: outputId, title: 'Sensitive data reaches an output unprotected', detail: `${byId.get(sourceId)?.data.label ?? sourceId} reaches ${byId.get(outputId)?.data.label ?? outputId} without a masking, hashing, tokenization, redaction or encryption transform on that path.` }))
   },
 }
 

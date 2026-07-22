@@ -12,13 +12,13 @@ describe('pipeline validation', () => {
     expect(blankEdges).toEqual([])
   })
   it('detects the unmasked PII path in the starter graph', () => {
-    expect(validatePipeline(initialNodes, initialEdges).some((issue) => issue.id === 'pii-activation')).toBe(true)
+    expect(validatePipeline(initialNodes, initialEdges).some((issue) => issue.id === 'sensitive-unprotected-customers-source-activation-output')).toBe(true)
   })
 
   it('clears the PII error after the reviewed agent proposal is applied', () => {
     const proposal = governanceProposalFixture(initialNodes, initialEdges)
     const next = applyProposal(initialNodes, initialEdges, proposal)
-    expect(validatePipeline(next.nodes, next.edges).some((issue) => issue.id === 'pii-activation')).toBe(false)
+    expect(validatePipeline(next.nodes, next.edges).some((issue) => issue.id.startsWith('sensitive-unprotected-'))).toBe(false)
   })
 
   it('rejects lineage cycles', () => {
