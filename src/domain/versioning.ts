@@ -54,7 +54,38 @@ export function createPipelineVersion(nodes: PipelineNode[], edges: Edge[], labe
 }
 
 export function appendPipelineVersion(versions: PipelineVersion[], version: PipelineVersion, limit = 12): PipelineVersion[] {
-  return [...versions, version].slice(-limit)
+  if (limit <= 0) return []
+  const combined = [...versions, version]
+  const bounded = combined.slice(-limit)
+  const lastCommitted = [...combined].reverse().find((candidate) => (candidate.status ?? 'committed') === 'committed')
+  if (!lastCommitted || bounded.some((candidate) => candidate.id === lastCommitted.id)) return bounded
+  const replaceIndex = bounded.findIndex((candidate) => (candidate.status ?? 'committed') !== 'committed')
+  if (replaceIndex < 0) return bounded
+  return bounded.map((candidate, index) => index === replaceIndex ? lastCommitted : candidate)
+}
+
+function canonicalGraph(nodes: PipelineNode[], edges: Edge[]) {
+  const cleanNodes = nodes.map((node) => ({
+    id: node.id,
+    kind: node.data.kind,
+    label: node.data.label,
+    description: node.data.description,
+    owner: node.data.owner,
+    rule: node.data.rule,
+    datahubUrn: node.data.datahubUrn,
+    schema: node.data.schema,
+  })).sort((left, right) => left.id.localeCompare(right.id))
+  const cleanEdges = edges.map((edge) => ({ source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  return JSON.stringify({ nodes: cleanNodes, edges: cleanEdges })
+}
+
+export function graphsEquivalent(leftNodes: PipelineNode[], leftEdges: Edge[], rightNodes: PipelineNode[], rightEdges: Edge[]) {
+  return canonicalGraph(leftNodes, leftEdges) === canonicalGraph(rightNodes, rightEdges)
+}
+
+export function findEquivalentVersion(nodes: PipelineNode[], edges: Edge[], versions: PipelineVersion[]): PipelineVersion | undefined {
+  const signature = canonicalGraph(nodes, edges)
+  return [...versions].reverse().find((version) => canonicalGraph(version.nodes, version.edges) === signature)
 }
 
 export function commitPendingVersion(versions: PipelineVersion[], pendingVersionId: string | undefined, committed: PipelineVersion): PipelineVersion[] {

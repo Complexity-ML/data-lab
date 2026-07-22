@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes } from './pipeline'
-import { appendPipelineVersion, buildVersionProvenanceExport, commitPendingVersion, createPipelineVersion, readPipelineVersions, rejectPendingVersion, resolveVersionSelection, restorePipelineVersion } from './versioning'
+import { appendPipelineVersion, buildVersionProvenanceExport, commitPendingVersion, createPipelineVersion, findEquivalentVersion, graphsEquivalent, readPipelineVersions, rejectPendingVersion, resolveVersionSelection, restorePipelineVersion } from './versioning'
 
 describe('pipeline versioning', () => {
   it('creates an isolated graph snapshot', () => {
@@ -13,6 +13,15 @@ describe('pipeline versioning', () => {
   it('keeps a bounded version history', () => {
     const versions = Array.from({ length: 4 }, (_, index) => createPipelineVersion(initialNodes, initialEdges, `${index}`, 'manual', []))
     expect(appendPipelineVersion(versions.slice(0, 3), versions[3], 2)).toHaveLength(2)
+  })
+
+  it('keeps the last committed checkpoint when rejected history reaches the bound', () => {
+    const committed = createPipelineVersion(initialNodes, initialEdges, 'Committed', 'manual', [])
+    const rejected = Array.from({ length: 4 }, (_, index) => ({ ...createPipelineVersion(initialNodes, initialEdges, `Rejected ${index}`, 'agent', []), status: 'rejected' as const }))
+    const bounded = rejected.reduce((current, version) => appendPipelineVersion(current, version, 3), [committed])
+    expect(bounded).toHaveLength(3)
+    expect(bounded.some((version) => version.id === committed.id)).toBe(true)
+    expect(bounded.at(-1)?.label).toBe('Rejected 3')
   })
 
   it('rejects malformed persisted history', () => {
@@ -44,5 +53,12 @@ describe('pipeline versioning', () => {
     expect(exported.evidence[0].summary).toBe('owner=Growth token=[REDACTED]')
     expect(JSON.stringify(exported)).not.toContain('private-token')
     expect(exported.revision).not.toHaveProperty('nodes')
+  })
+
+  it('detects equivalent graph proposals independently from positions and run state', () => {
+    const version = createPipelineVersion(initialNodes, initialEdges, 'Known graph', 'agent', [])
+    const moved = initialNodes.map((node, index) => ({ ...node, position: { x: index * 99, y: index * 12 }, data: { ...node.data, runState: 'completed' as const } }))
+    expect(graphsEquivalent(moved, initialEdges, version.nodes, version.edges)).toBe(true)
+    expect(findEquivalentVersion(moved, initialEdges, [version])?.id).toBe(version.id)
   })
 })

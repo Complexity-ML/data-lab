@@ -10,7 +10,8 @@ import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agen
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { layoutPipeline } from './domain/layout'
-import { cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
+import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
+import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
 import { validatePipeline } from './validation'
 import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
 import { useDataHubConnection } from './hooks/useDataHubConnection'
@@ -183,6 +184,12 @@ export default function App() {
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
+      const preview = applyProposal(nodes, edges, nextProposal)
+      const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
+      if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
+        setActivity(`Agent proposal blocked as equivalent to ${equivalentVersion ? `${equivalentVersion.label} (${equivalentVersion.status ?? 'committed'})` : 'the current graph'} · no revision created`)
+        return
+      }
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)
@@ -229,6 +236,12 @@ export default function App() {
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
+      const preview = applyProposal(nodes, edges, nextProposal)
+      const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
+      if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
+        setActivity(`Card proposal blocked as equivalent to ${equivalentVersion ? `${equivalentVersion.label} (${equivalentVersion.status ?? 'committed'})` : 'the current graph'} · no revision created`)
+        return
+      }
       nextProposal.evidence = evidenceEntries
       setProposal(nextProposal)
       setInspectorOpen(true)

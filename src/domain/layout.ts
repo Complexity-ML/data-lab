@@ -194,7 +194,8 @@ export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
  * Pass nodeIds to arrange only agent-created cards while preserving user work.
  */
 export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: Iterable<string>): PipelineNode[] {
-  const arranged = new Set(nodeIds ?? nodes.map((node) => node.id))
+  const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
+  const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
   if (arranged.size === 0) return nodes
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => ({ ...node.position }))

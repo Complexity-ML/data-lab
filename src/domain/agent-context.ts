@@ -5,7 +5,7 @@ import type { PipelineNode } from './pipeline'
 import type { PipelineVersion } from './versioning'
 import type { DataHubEvidence } from './datahub'
 
-function versionContext(versions: PipelineVersion[]) {
+function versionContext(versions: PipelineVersion[], currentNodes: PipelineNode[], currentEdges: Edge[]) {
   return versions.slice(-5).map((version) => ({
     label: version.label,
     origin: version.origin,
@@ -15,6 +15,15 @@ function versionContext(versions: PipelineVersion[]) {
     description: version.description,
     evidence: version.evidence?.map(({ tool, urn, capturedAt, expiresAt, status, summary, cached, stale }) => ({ tool, urn, capturedAt, expiresAt, status, summary, cached, stale })),
     graph: compactGraph(version.nodes, version.edges),
+    differenceFromCurrent: {
+      addedNodeIds: currentNodes.filter((node) => !version.nodes.some((candidate) => candidate.id === node.id)).map((node) => node.id),
+      removedNodeIds: version.nodes.filter((node) => !currentNodes.some((candidate) => candidate.id === node.id)).map((node) => node.id),
+      changedNodeIds: currentNodes.filter((node) => {
+        const prior = version.nodes.find((candidate) => candidate.id === node.id)
+        return prior && JSON.stringify(compactGraph([prior], []).nodes[0]) !== JSON.stringify(compactGraph([node], []).nodes[0])
+      }).map((node) => node.id),
+      edgeCountDelta: currentEdges.length - version.edges.length,
+    },
   }))
 }
 
@@ -33,7 +42,7 @@ export function buildPipelineAgentRequest(input: AgentContextInput & { datahubEv
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues.map(({ id, severity, title, detail, nodeId }) => ({ id, severity, title, detail, nodeId })),
     datahubEvidence: input.datahubEvidence,
-    recentVersions: versionContext(input.versions),
+    recentVersions: versionContext(input.versions, input.nodes, input.edges),
     guardrails: ['Return a reviewable diff only', 'Never claim execution', 'Prefer an incremental change over rebuilding without evidence', 'Use Human Review for uncertainty or sensitive/schema/downstream changes'],
   }
 }
@@ -46,6 +55,6 @@ export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId:
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues,
     datahubEvidence: input.datahubEvidence ?? [],
-    recentVersions: versionContext(input.versions),
+    recentVersions: versionContext(input.versions, input.nodes, input.edges),
   }
 }
