@@ -8,6 +8,12 @@ DATA LAB — Human-reviewed data pipeline agents
 
 **Agents That Do Real Work**
 
+## Verified project links
+
+- Devpost project: <https://devpost.com/software/data-lab>
+- Public Apache-2.0 repository: <https://github.com/Complexity-ML/data-lab>
+- Demo video: pending final public YouTube or Vimeo upload
+
 ## One-line pitch
 
 DATA LAB turns live DataHub context into an editable, replayable card pipeline where an AI agent can find lineage and governance risks, propose a precise graph correction, and preserve the approved decision without taking control away from the data team.
@@ -126,7 +132,9 @@ DATAHUB_GMS_URL=http://localhost:8080 npm run electron:dev
 - [x] Final project description, technology list, architecture, and timed demo script.
 - [ ] Capture final application screenshots after the DataHub OSS revision is visible in the merged desktop build.
 - [ ] Record and publish the final public demo video under three minutes.
-- [ ] Add the public repository, demo video, and optional live-demo links to Devpost.
-- [ ] Verify Devpost technologies and opt in to the feedback survey if desired.
+- [x] Add the public repository link to Devpost.
+- [x] Verify the Devpost description, pitch, and technology list.
+- [ ] Add the final public demo video and optional live-demo links to Devpost.
+- [ ] Opt in to the feedback survey if desired.
 
 The unchecked external deliverables must be verified before issue #6 is closed.
