@@ -6,16 +6,6 @@ on:
       - '.github/workflows/windows-smoke.yml'
       - 'build/**'
       - 'electron/**'
-      - 'src/**'
-      - 'package.json'
-      - 'package-lock.json'
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/windows-smoke.yml'
-      - 'build/**'
-      - 'electron/**'
-      - 'src/**'
       - 'package.json'
       - 'package-lock.json'
   workflow_dispatch:

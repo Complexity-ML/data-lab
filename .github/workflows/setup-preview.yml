@@ -1,15 +1,6 @@
 name: Build DATA LAB Setup installers
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    paths:
-      - 'apps/bootstrap-installer/**'
-      - '.github/workflows/setup-preview.yml'
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
