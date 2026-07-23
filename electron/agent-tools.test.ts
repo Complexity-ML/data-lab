@@ -120,6 +120,42 @@ describe('bounded DATA LAB agent tools', () => {
     ])
   })
 
+  it('preserves an existing Live Monitor rule during metadata-only updates', () => {
+    const session = new AgentToolSession({
+      ...payload,
+      graph: {
+        ...payload.graph,
+        nodes: [
+          ...payload.graph.nodes,
+          {
+            id: 'monitor-orders',
+            kind: 'monitor',
+            label: 'Watch orders',
+            rule: 'source=orders | alert=owner_change | on_change(metadata_fingerprint) | cooldown=15s | max_iterations=4',
+          },
+        ],
+      },
+    })
+
+    expect(session.execute('update_card', {
+      node_id: 'monitor-orders',
+      kind: null,
+      label: 'Watch governed orders',
+      description: null,
+      owner: null,
+      rule: null,
+      reason: 'Clarify the monitor label without changing its policy.',
+    })).toMatchObject({
+      ok: true,
+      action: {
+        type: 'update_card',
+        node_id: 'monitor-orders',
+        label: 'Watch governed orders',
+        rule: null,
+      },
+    })
+  })
+
   it('exposes host-owned incident context without granting an incident mutation tool', () => {
     const session = new AgentToolSession({
       ...payload,

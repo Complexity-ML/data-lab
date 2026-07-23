@@ -296,7 +296,10 @@ export class AgentToolSession {
         const description = text(args.description, 500)
         const owner = text(args.owner, 120)
         const effectiveKind = kind ?? this.kindOf(nodeId)
-        const rule = effectiveKind === 'monitor' ? this.normalizedRule('monitor', args.rule) : kind ? this.normalizedRule(kind, args.rule) : text(args.rule, 2_000)
+        const suppliedRule = text(args.rule, 2_000)
+        const rule = effectiveKind === 'monitor'
+          ? suppliedRule ? this.normalizedRule('monitor', suppliedRule) : null
+          : kind ? this.normalizedRule(kind, args.rule) : suppliedRule
         if (!kind && !label && !description && !owner && !rule) throw new Error('update_card requires at least one changed field')
         return this.validateCandidate(tool, {
           type: 'update_card',
