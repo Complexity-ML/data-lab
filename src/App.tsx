@@ -17,7 +17,7 @@ import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type Ag
 import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
 import { errorMessage, notifyError, notifyToast } from './domain/toasts'
 import { recordDiagnostic } from './domain/diagnostics'
-import { validatePipeline } from './validation'
+import { atomicTransactionBlockers, validatePipeline } from './validation'
 import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
 import { useDataHubConnection } from './hooks/useDataHubConnection'
 import { usePipelineVersions } from './hooks/usePipelineVersions'
@@ -565,6 +565,11 @@ export default function App() {
           } else {
             queueAutonomousStep(`Iteration "${nextProposal.title}" is committed. Reread the current graph, reports, diagnostics and version memory, then propose the next coherent useful iteration toward a self-monitoring incident workflow. Return no action when the graph is complete.`, expectedPlayerSessionId)
           }
+        } else if (autonomousSessionActive) {
+          const blockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
+          const feedback = blockers.map((issue) => `${issue.title}: ${issue.detail}`).join(' | ')
+          queueAutonomousStep(`The previous graph diff was rejected atomically and was not committed. Repair the proposal itself in one smaller coherent diff. Resolve these exact blockers without weakening validation or duplicating cards: ${feedback}`, expectedPlayerSessionId, 1_200)
+          setActivity(`Autonomous correction rejected safely · ${blockers.length} atomic check${blockers.length === 1 ? '' : 's'} failed · agent retry scheduled`)
         }
         return
       }

@@ -48,11 +48,15 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
-    {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
-    {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><span>Inspector</span><PanelRightOpen size={16} /></button>}
-    {!actionsOpen && <button aria-label="Open agent actions" className={`actions-open${activityBusy ? ' is-busy' : ''}`} onClick={onOpenActions} title="Open agent actions" type="button">{activityBusy ? <LoaderCircle aria-hidden="true" /> : <ListChecks size={16} />}<span>Actions</span></button>}
-    {!logsOpen && <button aria-label="Open live logs" className="logs-open" onClick={onOpenLogs} title="Open live activity log" type="button"><ScrollText size={16} /><span>Live logs</span></button>}
-    {!reportsOpen && <button aria-label="Open incident reports" className={`reports-open${reportCount ? ' has-reports' : ''}`} onClick={onOpenReports} title={`${reportCount} incident report${reportCount === 1 ? '' : 's'} requiring attention`} type="button"><span>Reports</span><FileWarning size={16} />{reportCount > 0 && <em aria-label={`${reportCount} reports requiring attention`}>{reportCount > 99 ? '99+' : reportCount}</em>}</button>}
+    <div className="canvas-sticker-stack is-left">
+      {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
+      {!actionsOpen && <button aria-label="Open agent actions" className={`actions-open${activityBusy ? ' is-busy' : ''}`} onClick={onOpenActions} title="Open agent actions" type="button">{activityBusy ? <LoaderCircle aria-hidden="true" /> : <ListChecks size={16} />}<span>Actions</span></button>}
+      {!logsOpen && <button aria-label="Open live logs" className="logs-open" onClick={onOpenLogs} title="Open live activity log" type="button"><ScrollText size={16} /><span>Live logs</span></button>}
+    </div>
+    <div className="canvas-sticker-stack is-right">
+      {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><span>Inspector</span><PanelRightOpen size={16} /></button>}
+      {!reportsOpen && <button aria-label="Open incident reports" className={`reports-open${reportCount ? ' has-reports' : ''}`} onClick={onOpenReports} title={`${reportCount} incident report${reportCount === 1 ? '' : 's'} requiring attention`} type="button"><span>Reports</span><FileWarning size={16} />{reportCount > 0 && <em aria-label={`${reportCount} reports requiring attention`}>{reportCount > 99 ? '99+' : reportCount}</em>}</button>}
+    </div>
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
     <ReactFlow
       nodes={nodes}
