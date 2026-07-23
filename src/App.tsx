@@ -48,6 +48,7 @@ export default function App() {
   const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
   const [agentRunning, setAgentRunning] = useState(false)
+  const [playerStarting, setPlayerStarting] = useState(false)
   const [playerState, setPlayerState] = useState<AgentPlayerState>('stopped')
   const [reviewAssistantBusy, setReviewAssistantBusy] = useState(false)
   const [reviewAssistantAnswer, setReviewAssistantAnswer] = useState<{ summary: string; rationale: string; evidence: string[]; model: string }>()
@@ -62,6 +63,7 @@ export default function App() {
   const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
   const [pendingWorkspacePrompt, setPendingWorkspacePrompt] = useState<string>()
   const agentRunId = useRef(0)
+  const playerSessionId = useRef(0)
   const reviewAssistantRunId = useRef(0)
   const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
   const proposalApprovalRunning = useRef(false)
@@ -214,7 +216,7 @@ export default function App() {
     if (result.recorded && result.event) setIncidentEvents((current) => [result.event!, ...current.filter((candidate) => candidate.id !== result.event!.id)].slice(0, 200))
   }, [])
 
-  const auditWithAgent = async (agentRequest = defaultBlankObjective, monitored?: LiveIncidentTrigger) => {
+  const auditWithAgent = async (agentRequest = defaultBlankObjective, monitored?: LiveIncidentTrigger, expectedPlayerSessionId?: number) => {
     const routingPreview: SourceSelection = monitored
       ? {
           mode: 'single',
@@ -236,6 +238,7 @@ export default function App() {
       return
     }
     const [currentAiStatus, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => disconnectedAiStatus), window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)])
+    if (expectedPlayerSessionId !== undefined && playerSessionId.current !== expectedPlayerSessionId) return
     const activeConnected = activeAiSource === 'chatgpt' ? currentChatGPT.connected : currentAiStatus.providers[activeAiSource].connected
     if (!activeConnected) {
       setSettingsSection('ai')
@@ -501,16 +504,21 @@ export default function App() {
   }
 
   const playAgent = () => {
-    if (agentRunning || reviewAssistantBusy || proposal) return
+    if (agentRunning || playerStarting || reviewAssistantBusy || proposal) return
     if (!active.connected) {
       setSettingsSection('ai')
       setSettingsOpen(true)
       setActivity(`${active.label} is not connected · autonomous player remains stopped`)
       return
     }
+    const sessionId = ++playerSessionId.current
+    setPlayerStarting(true)
     setPlayerState('running')
     setActivity(nodes.length ? 'Autonomous player started · auditing the current graph before monitoring changes…' : 'Autonomous player started · discovering the best governed starting point…')
-    void auditWithAgent()
+    void auditWithAgent(defaultBlankObjective, undefined, sessionId)
+      .finally(() => {
+        if (playerSessionId.current === sessionId) setPlayerStarting(false)
+      })
   }
 
   const pauseAgent = () => {
@@ -522,14 +530,21 @@ export default function App() {
   }
 
   const stopAgent = () => {
+    const cancellingActiveRun = agentRunning
     setPlayerState('stopped')
+    playerSessionId.current += 1
     agentRunId.current += 1
     reviewAssistantRunId.current += 1
+    setPlayerStarting(false)
     setAgentRunning(false)
     setReviewAssistantBusy(false)
-    setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
-    activeAtomicRun.current = undefined
-    setActivity('Emergency stop · current agent run cancelled · active branch unchanged')
+    if (cancellingActiveRun) {
+      setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
+      activeAtomicRun.current = undefined
+    }
+    setActivity(cancellingActiveRun
+      ? 'Emergency stop · current agent run cancelled · active branch unchanged'
+      : 'Autonomous player stopped · monitoring disabled · graph unchanged')
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
   }
@@ -605,7 +620,7 @@ export default function App() {
 
   useLiveIncidentMonitor({
     active: Boolean(window.dataLab) && connectionMode === 'connected' && playerState === 'running',
-    agentBlocked: agentRunning || Boolean(proposal),
+    agentBlocked: agentRunning || playerStarting || Boolean(proposal),
     nodes,
     edges,
     audit: async (urn) => {
@@ -742,7 +757,7 @@ export default function App() {
 
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
     <AppHeader
-      agentBusy={agentRunning}
+      agentBusy={agentRunning || playerStarting}
       cardCount={nodes.length}
       onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}
       onPause={pauseAgent}

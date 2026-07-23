@@ -11,7 +11,7 @@ import { disconnectedAiStatus, disconnectedChatGPTStatus } from './hooks/useAiCo
 interface MockNode {
   id: string
   position: { x: number; y: number }
-  data: { kind: string; label: string }
+  data: { kind: string; label: string; runState?: string }
 }
 
 interface MockFlowProps {
@@ -48,6 +48,7 @@ vi.mock('@xyflow/react', async () => {
         {nodes.map((node) => <div
           data-kind={node.data.kind}
           data-node-id={node.id}
+          data-run-state={node.data.runState ?? 'idle'}
           data-x={node.position.x}
           data-y={node.position.y}
           key={node.id}
@@ -168,6 +169,93 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
     expect(api.cancelAiProposal).toHaveBeenCalled()
     expect(api.cancelChatGPTProposal).toHaveBeenCalled()
+    expect(screen.getByText('stopped')).toBeTruthy()
+  })
+
+  it('blocks live-monitor agent triggers while the initial Play audit is starting', async () => {
+    const user = userEvent.setup()
+    const sourceNode = {
+      id: 'source',
+      type: 'pipeline' as const,
+      position: { x: 0, y: 0 },
+      data: { kind: 'source' as const, label: 'Orders', description: 'Governed source', owner: 'Data', status: 'healthy' as const, schema: [], datahubUrn: 'urn:orders' },
+    }
+    const monitorNode = {
+      id: 'monitor',
+      type: 'pipeline' as const,
+      position: { x: 300, y: 0 },
+      data: { kind: 'monitor' as const, label: 'Watch orders', description: 'Watch metadata', owner: 'Agent', status: 'healthy' as const, schema: [], rule: 'on_change(metadata_fingerprint) | cooldown=10s | max_iterations=10' },
+    }
+    const initialState = {
+      activeWorkspaceId: 'monitored-workspace',
+      activeWorkspace: { id: 'monitored-workspace', name: 'Monitored', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Monitored', nodes: [sourceNode, monitorNode], edges: [{ id: 'source-monitor', source: 'source', target: 'monitor' }], versions: [] } },
+      uncleanShutdown: false,
+      workspaces: [{ id: 'monitored-workspace', name: 'Monitored', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
+    }
+    const { api } = installElectronWorkspaceMock(initialState)
+    const connectedChatGPT = { ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }
+    let releaseStartupStatus!: (status: typeof connectedChatGPT) => void
+    const startupStatus = new Promise<typeof connectedChatGPT>((resolve) => { releaseStartupStatus = resolve })
+    let chatGPTStatusReads = 0
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(() => {
+      chatGPTStatusReads += 1
+      return chatGPTStatusReads === 1 ? Promise.resolve(connectedChatGPT) : startupStatus
+    })
+    api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
+    api.auditDataHubWithMcp = vi.fn(async () => ({
+      urn: 'urn:orders',
+      transport: 'stdio' as const,
+      reads: [{ name: 'get_entities' as const, status: 'error' as const, summary: 'DataHub read unavailable', capturedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), cached: false, stale: false }],
+    }))
+
+    render(<App />)
+    await screen.findByText('Orders')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await waitFor(() => expect(api.getDataHubMcpStatus).toHaveBeenCalled())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+    await waitFor(() => expect(api.auditDataHubWithMcp).toHaveBeenCalledTimes(1))
+
+    expect(api.getChatGPTStatus).toHaveBeenCalledTimes(2)
+
+    await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
+    releaseStartupStatus(connectedChatGPT)
+  })
+
+  it('stops idle monitoring without rewriting a waiting graph card', async () => {
+    const user = userEvent.setup()
+    const reviewNode = {
+      id: 'review',
+      type: 'pipeline' as const,
+      position: { x: 0, y: 0 },
+      data: { kind: 'review' as const, label: 'Human checkpoint', description: 'Wait for approval', owner: 'Reviewer', status: 'healthy' as const, schema: [] },
+    }
+    const initialState = {
+      activeWorkspaceId: 'waiting-workspace',
+      activeWorkspace: { id: 'waiting-workspace', name: 'Waiting', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Waiting', nodes: [reviewNode], edges: [], versions: [] } },
+      uncleanShutdown: false,
+      workspaces: [{ id: 'waiting-workspace', name: 'Waiting', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
+    }
+    const { api } = installElectronWorkspaceMock(initialState)
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: { title: 'No change', summary: 'Review remains pending.', rationale: 'No evidence supports a mutation.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+    }))
+    api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
+
+    render(<App />)
+    const flow = screen.getByTestId('pipeline-flow')
+    await screen.findByText('Human checkpoint')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(flow.querySelector('[data-node-id="review"]')?.getAttribute('data-run-state')).toBe('waiting'))
+
+    await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
+
+    expect(flow.querySelector('[data-node-id="review"]')?.getAttribute('data-run-state')).toBe('waiting')
     expect(screen.getByText('stopped')).toBeTruthy()
   })
 
