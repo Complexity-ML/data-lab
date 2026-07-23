@@ -283,4 +283,41 @@ describe('SQLite workspace persistence', () => {
     expect(listIncidentEvents(target)[0].fingerprint).toBe('warning-v2')
     expect(listIncidentEvents(target).at(-1)).toMatchObject({ sourceSystem: 'DataHub', sourceRef: 'urn:li:dataset:customers' })
   })
+
+  it('recovers provenance past legacy lifecycle rows that already stored null values', () => {
+    const target = directory('legacy-null-provenance')
+    const workspace = createWorkspace(target, 'Legacy incident', { projectTitle: 'Legacy incident' })
+    recordIncidentEvent(target, {
+      incidentKey: 'connector:orders',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Orders drift',
+      detail: 'Initial monitored drift.',
+      sourceSystem: 'Kafka',
+      sourceRef: 'topic:orders',
+      fingerprint: 'orders-v1',
+    })
+    closeWorkspaceDatabase()
+
+    const legacy = new DatabaseSync(join(target, 'data-lab.sqlite'))
+    legacy.prepare(`
+      INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, source_system, source_ref, fingerprint, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+    `).run('legacy-null-row', workspace.activeWorkspaceId, 'connector:orders', 'human-review', 'warning', 'Legacy review', 'Written by the previous release.', 'orders-v2', new Date(Date.now() + 1_000).toISOString())
+    legacy.close()
+
+    const repaired = recordIncidentEvent(target, {
+      incidentKey: 'connector:orders',
+      transition: 'agent-action',
+      severity: 'warning',
+      title: 'Repair proposed',
+      detail: 'Continue the incident lifecycle.',
+      fingerprint: 'orders-v3',
+    })
+
+    expect(repaired.event).toMatchObject({
+      sourceSystem: 'Kafka',
+      sourceRef: 'topic:orders',
+    })
+  })
 })
