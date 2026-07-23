@@ -1,6 +1,6 @@
 # Devpost submission answers
 
-Verified against the live **Build with DataHub: The Agent Hackathon** submission form on 2026-07-23. Keep the three operator-owned choices below explicit; do not invent them in automation.
+Verified against the live **Build with DataHub: The Agent Hackathon** submission form on 2026-07-23. Keep the remaining operator-owned choices below explicit; do not invent them in automation.
 
 ## Required technical answers
 
@@ -12,12 +12,20 @@ Verified against the live **Build with DataHub: The Agent Hackathon** submission
 | Sample outputs | <https://github.com/Complexity-ML/data-lab/tree/main/examples> |
 | DataHub technologies | `DataHub OSS / Core Platform`, `DataHub MCP Server`, `DataHub Skills` |
 | DataHub contribution | No upstream DataHub contribution is claimed. DATA LAB reports its integration findings below instead. |
+| Newly created / pre-existing code | Select **Includes pre-existing code**. DATA LAB was created during the hackathon, but its graph placement implementation adapts the author's pre-existing Apache-2.0 LABO AI placement work. |
 
 ## Operator-owned answers still required
 
 1. **Country of residence** — select the real country; the repository cannot infer this.
-2. **Newly created / pre-existing code declaration** — confirm whether every project-specific implementation was created during the submission period. If any LABO AI code was copied rather than merely studied, select **Includes pre-existing code** and describe the exact files or algorithms.
-3. **Feedback Prize** — opt in only if desired. The form currently exposes `Yes, consider me for the Feedback Prize` and asks for the detailed feedback below.
+2. **Feedback Prize** — opt in only if desired. The form currently exposes `Yes, consider me for the Feedback Prize` and asks for the detailed feedback below.
+
+## Pre-existing code disclosure
+
+DATA LAB itself was started during the hackathon on 2026-07-22. Its DataHub integration, MCP trust boundary, card roles, atomic review transaction, provider contracts, SQLite workspace model and submission evidence were created for this project. The graph placement implementation in `src/domain/layout.ts` adapts the author's earlier LABO AI approach in `src/core/graph-placement.ts`, including connected-component layout, layered topology, repeated barycentric sweeps and separated layers. LABO AI is also published by Complexity-ML under Apache-2.0: <https://github.com/Complexity-ML/labo-ai>.
+
+Suggested form text:
+
+> DATA LAB was created during the hackathon. Its XY graph placement algorithm adapts connected-component, layered-topology and barycentric-sweep concepts from my pre-existing Apache-2.0 LABO AI project. All DataHub/MCP integration, data-card domain logic, agent review workflow and submission artifacts were created specifically for DATA LAB.
 
 ## Feedback Prize draft
 
@@ -42,6 +50,5 @@ I would add one official, versioned “agent integration quickstart” that star
 ## Final external checklist
 
 - [ ] Upload a public YouTube or Vimeo demo under three minutes and add its URL to the project.
-- [ ] Supply the three operator-owned answers above.
+- [ ] Supply the two remaining operator-owned answers above.
 - [ ] Submit the project to the `datahub` hackathon and verify the returned status is **Submitted**.
-

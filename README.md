@@ -166,3 +166,7 @@ Optional synthetic scenarios are loaded explicitly from **Settings → Examples*
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+## Pre-existing work disclosure
+
+DATA LAB was started during the hackathon. Its graph placement implementation in `src/domain/layout.ts` adapts the connected-component, layered-topology and barycentric-sweep approach from the author's pre-existing Apache-2.0 [LABO AI](https://github.com/Complexity-ML/labo-ai) project. The DataHub/MCP integration, data-card domain, provider contracts, atomic review workflow and submission evidence were created specifically for DATA LAB.
