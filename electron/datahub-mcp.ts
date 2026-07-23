@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { app, safeStorage } from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 import { secureStorageCapability } from './secure-storage.js'
@@ -95,16 +95,18 @@ export function resolveDataHubMcpCommand(
   const configured = environment.DATAHUB_MCP_COMMAND?.trim()
   if (configured && configured !== 'uvx' && configured !== 'uvx.exe') return configured
   const executable = platform === 'win32' ? 'uvx.exe' : 'uvx'
-  const pathCandidates = (environment.PATH ?? '').split(delimiter).filter(Boolean).map((directory) => join(directory, executable))
+  const path = platform === 'win32' ? win32 : posix
+  const pathDelimiter = platform === 'win32' ? ';' : ':'
+  const pathCandidates = (environment.PATH ?? '').split(pathDelimiter).filter(Boolean).map((directory) => path.join(directory, executable))
   const commonCandidates = platform === 'win32'
     ? [
-        environment.LOCALAPPDATA ? join(environment.LOCALAPPDATA, 'Programs', 'uv', executable) : '',
-        join(home, '.local', 'bin', executable),
-        join(home, '.cargo', 'bin', executable),
+        environment.LOCALAPPDATA ? path.join(environment.LOCALAPPDATA, 'Programs', 'uv', executable) : '',
+        path.join(home, '.local', 'bin', executable),
+        path.join(home, '.cargo', 'bin', executable),
       ]
     : [
-        join(home, '.local', 'bin', executable),
-        join(home, '.cargo', 'bin', executable),
+        path.join(home, '.local', 'bin', executable),
+        path.join(home, '.cargo', 'bin', executable),
         '/opt/homebrew/bin/uvx',
         '/usr/local/bin/uvx',
         '/usr/bin/uvx',

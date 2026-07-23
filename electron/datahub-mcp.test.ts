@@ -50,6 +50,11 @@ describe('DataHub MCP connection settings', () => {
     expect(resolveDataHubMcpCommand({ DATAHUB_MCP_COMMAND: '/custom/bin/datahub-mcp' }, 'darwin', '/Users/data-lab', () => false)).toBe('/custom/bin/datahub-mcp')
   })
 
+  it('uses Windows path rules when resolving uvx for a Windows desktop build', () => {
+    const expected = 'C:\\Users\\data-lab\\.local\\bin\\uvx.exe'
+    expect(resolveDataHubMcpCommand({ PATH: 'C:\\Windows;C:\\Tools' }, 'win32', 'C:\\Users\\data-lab', (candidate) => candidate === expected)).toBe(expected)
+  })
+
   it('turns a missing uvx spawn failure into an actionable desktop message', () => {
     const error = Object.assign(new Error('spawn uvx ENOENT'), { code: 'ENOENT' })
     expect(normalizeDataHubMcpStartupError(error, 'uvx').message).toContain('Install uv, restart DATA LAB')
