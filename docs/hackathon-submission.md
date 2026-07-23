@@ -13,6 +13,7 @@ DATA LAB — Human-reviewed data pipeline agents
 - Devpost project: <https://devpost.com/software/data-lab>
 - Public Apache-2.0 repository: <https://github.com/Complexity-ML/data-lab>
 - Demo video: pending final public YouTube or Vimeo upload
+- Downloadable captioned demo draft (2:20): [`data-lab-demo-draft.mp4`](assets/data-lab-demo-draft.mp4)
 
 ## One-line pitch
 
@@ -72,6 +73,7 @@ Trust boundaries and failure modes are detailed in [`threat-model.md`](threat-mo
 - [`examples/datahub-oss/reviewed-pipeline.json`](../examples/datahub-oss/reviewed-pipeline.json): importable approved graph and evidence checkpoint.
 - [`examples/datahub-oss/validation-report.json`](../examples/datahub-oss/validation-report.json): validation and atomic replay results.
 - [`examples/generated-transform.sql`](../examples/generated-transform.sql): sample generated transformation artifact.
+- [`devpost-submission-answers.md`](devpost-submission-answers.md): verified form answers and actionable DataHub feedback draft.
 
 No raw rows, credentials, authorization headers, or provider secrets are committed.
 
@@ -93,7 +95,21 @@ No raw rows, credentials, authorization headers, or provider secrets are committ
 
 ![DATA LAB checkpoint showing get_entities, list_schema_fields and get_lineage evidence](assets/data-lab-version-checkpoint.png)
 
+### Agent proposal review
+
+![DATA LAB full proposal review before graph mutation](assets/data-lab-proposal-review.png)
+
 ## Demo script — target 2:45
+
+The repository includes a silent, captioned 2:20 draft assembled from the verified desktop states. Regenerate it on macOS without recording the desktop:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app \
+  CLANG_MODULE_CACHE_PATH=/tmp/data-lab-swift-cache \
+  xcrun swift scripts/render-demo-video.swift "$PWD" docs/assets/data-lab-demo-draft.mp4
+```
+
+Add narration or upload the captioned draft as-is, then replace the pending public-video URL above with the final YouTube or Vimeo link.
 
 **0:00–0:15 — Blank, honest start**
 
@@ -150,6 +166,7 @@ DATAHUB_GMS_URL=http://localhost:8080 npm run electron:dev
 - [x] Complete sample graph diff and atomic validation report.
 - [x] Final project description, technology list, architecture, and timed demo script.
 - [x] Capture final application screenshots after the DataHub OSS revision is visible in the desktop build.
+- [x] Render a captioned 2:20 demo draft without recording the operator desktop.
 - [ ] Record and publish the final public demo video under three minutes.
 - [x] Add the public repository link to Devpost.
 - [x] Verify the Devpost description, pitch, and technology list.
