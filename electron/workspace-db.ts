@@ -52,6 +52,7 @@ export interface IncidentEventInput {
   severity: 'info' | 'warning' | 'critical'
   title: string
   detail: string
+  fingerprint?: string
   cardId?: string
   branchId?: string
   versionId?: string
@@ -71,6 +72,7 @@ type IncidentRow = {
   severity: IncidentEventInput['severity']
   title: string
   detail: string
+  fingerprint: string | null
   card_id: string | null
   branch_id: string | null
   version_id: string | null
@@ -161,6 +163,7 @@ function db(userDataDirectory: string) {
       severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
       title TEXT NOT NULL,
       detail TEXT NOT NULL,
+      fingerprint TEXT,
       card_id TEXT,
       branch_id TEXT,
       version_id TEXT,
@@ -170,6 +173,8 @@ function db(userDataDirectory: string) {
     CREATE INDEX IF NOT EXISTS incident_events_workspace_time_idx ON incident_events (workspace_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS incident_events_key_time_idx ON incident_events (incident_key, created_at DESC);
   `)
+  const incidentColumns = database.prepare('PRAGMA table_info(incident_events)').all() as unknown as { name: string }[]
+  if (!incidentColumns.some((column) => column.name === 'fingerprint')) database.exec('ALTER TABLE incident_events ADD COLUMN fingerprint TEXT')
   migrateLegacyWorkspace(database)
   return database
 }
@@ -383,6 +388,11 @@ function boundedIncidentText(value: unknown, label: string, maximum: number) {
   return clean
 }
 
+function optionalIncidentText(value: unknown, maximum: number) {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  return value.trim().replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, maximum) || undefined
+}
+
 function incidentFromRow(row: IncidentRow): IncidentEvent {
   return {
     id: row.id,
@@ -392,6 +402,7 @@ function incidentFromRow(row: IncidentRow): IncidentEvent {
     severity: row.severity,
     title: row.title,
     detail: row.detail,
+    fingerprint: row.fingerprint ?? undefined,
     cardId: row.card_id ?? undefined,
     branchId: row.branch_id ?? undefined,
     versionId: row.version_id ?? undefined,
@@ -419,6 +430,7 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
   const incidentKey = boundedIncidentText(value.incidentKey, 'Incident key', 180)
   const title = boundedIncidentText(value.title, 'Incident title', 180)
   const detail = boundedIncidentText(value.detail, 'Incident detail', 1_000)
+  const fingerprint = optionalIncidentText(value.fingerprint, 180)
   const optional = (entry: unknown) => typeof entry === 'string' && entry.trim() ? entry.trim().slice(0, 180) : undefined
   const target = db(userDataDirectory)
   const workspaceId = activeWorkspaceId(target) ?? undefined
@@ -428,6 +440,7 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     ORDER BY created_at DESC, rowid DESC LIMIT 1
   `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as IncidentRow | undefined
   const transition = value.transition as IncidentEventInput['transition']
+  if (last && fingerprint && last.fingerprint === fingerprint && last.transition === transition && last.severity === value.severity) return { recorded: false }
   if (transition === 'recovered' && (!last || last.transition === 'recovered')) return { recorded: false }
   if (transition === 'opened' && last && last.transition !== 'recovered') {
     const rank = { info: 0, warning: 1, critical: 2 }
@@ -441,15 +454,16 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     severity: value.severity as IncidentEventInput['severity'],
     title,
     detail,
+    fingerprint,
     cardId: optional(value.cardId),
     branchId: optional(value.branchId),
     versionId: optional(value.versionId),
     createdAt: new Date().toISOString(),
   }
   target.prepare(`
-    INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, card_id, branch_id, version_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(event.id, event.workspaceId ?? null, event.incidentKey, event.transition, event.severity, event.title, event.detail, event.cardId ?? null, event.branchId ?? null, event.versionId ?? null, event.createdAt)
+    INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, fingerprint, card_id, branch_id, version_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(event.id, event.workspaceId ?? null, event.incidentKey, event.transition, event.severity, event.title, event.detail, event.fingerprint ?? null, event.cardId ?? null, event.branchId ?? null, event.versionId ?? null, event.createdAt)
   target.prepare("DELETE FROM incident_events WHERE julianday(created_at) < julianday('now', '-30 days')").run()
   return { recorded: true, event }
 }

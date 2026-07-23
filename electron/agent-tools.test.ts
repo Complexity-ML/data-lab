@@ -100,6 +100,18 @@ describe('bounded DATA LAB agent tools', () => {
     expect(session.execute('validate_plan', {})).toMatchObject({ ok: true, action_count: 1 })
   })
 
+  it('exposes host-owned incident context without granting an incident mutation tool', () => {
+    const session = new AgentToolSession({
+      ...payload,
+      incidentContext: [{ incidentKey: 'live-monitor:monitor-1:dataset', status: 'investigating', occurrenceCount: 2, fingerprint: 'abc123' }],
+    })
+    expect(session.execute('inspect_incident_context', { incident_key: 'live-monitor:monitor-1:dataset' })).toMatchObject({
+      ok: true,
+      incidents: [{ status: 'investigating', occurrenceCount: 2 }],
+    })
+    expect(agentToolDefinitions.map((tool) => tool.name)).not.toContain('record_incident')
+  })
+
   it('requires a Human Review card before finishing a review-gated plan', () => {
     const session = new AgentToolSession(payload)
     const first = session.execute('finish_plan', {

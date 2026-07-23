@@ -40,7 +40,7 @@ interface DataHubMcpStatus {
   }
 }
 
-interface DataHubMcpAudit {
+export interface DataHubMcpAudit {
   urn: string
   transport: 'http' | 'stdio'
   serverVersion?: string

@@ -10,7 +10,7 @@ import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
-import type { IncidentEvent } from '../../domain/incidents'
+import type { IncidentEvent, IncidentSummary } from '../../domain/incidents'
 
 export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
@@ -35,6 +35,7 @@ interface SettingsModalProps {
   mcpTransport: 'demo' | 'http' | 'stdio'
   initialSection?: SettingsSection
   incidentEvents: IncidentEvent[]
+  incidentSummaries: IncidentSummary[]
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
@@ -81,7 +82,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -310,6 +311,17 @@ export function SettingsModal(props: SettingsModalProps) {
           <section className="settings-section diagnostics-settings">
             <div className="settings-section-title"><span>Local diagnostics</span><small>7 days · 500 events maximum</small></div>
             <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>External telemetry disabled</strong><small>Tokens, authorization headers and sensitive prompts are redacted before storage and export.</small></div></div>
+            <div className="incident-overview">
+              <div><strong>{incidentSummaries.filter((incident) => incident.status !== 'resolved').length}</strong><small>Active incidents</small></div>
+              <div><strong>{incidentSummaries.filter((incident) => incident.severity === 'critical' && incident.status !== 'resolved').length}</strong><small>Critical</small></div>
+              <div><strong>{incidentSummaries.filter((incident) => incident.status === 'waiting-review').length}</strong><small>Waiting review</small></div>
+              <div><strong>{incidentSummaries.filter((incident) => incident.status === 'resolved').length}</strong><small>Recovered</small></div>
+            </div>
+            {incidentSummaries.length > 0 && <div className="incident-ledger">{incidentSummaries.map((incident) => <article className={`status-${incident.status} severity-${incident.severity}`} key={incident.incidentKey}>
+              <div><strong>{incident.title}</strong><span>{incident.status.replace('-', ' ')}</span></div>
+              <p>{incident.detail}</p>
+              <small>{incident.occurrenceCount} occurrence{incident.occurrenceCount === 1 ? '' : 's'} · {incident.eventCount} transition{incident.eventCount === 1 ? '' : 's'} · updated {new Date(incident.updatedAt).toLocaleString()}</small>
+            </article>)}</div>}
             <div className="settings-section-title incident-title"><span>Incident timeline</span><small>{incidentEvents.length} local event{incidentEvents.length === 1 ? '' : 's'}</small></div>
             {incidentEvents.length ? <ol className="incident-timeline">{incidentEvents.map((event) => <li className={`incident-${event.transition} severity-${event.severity}`} key={event.id}>
               <span>{event.transition === 'recovered' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}</span>

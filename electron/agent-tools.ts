@@ -35,6 +35,13 @@ export const agentToolDefinitions = [
   },
   {
     type: 'function',
+    name: 'inspect_incident_context',
+    description: 'Read the current host-owned incident fingerprint, lifecycle state, occurrences and affected branch. This is immutable evidence; incident writes remain owned by Electron.',
+    strict: true,
+    parameters: objectSchema({ incident_key: nullableText }),
+  },
+  {
+    type: 'function',
     name: 'add_card',
     description: 'Queue one complete DATA LAB card. The host supplies safe defaults for nullable metadata. Human Review becomes a resumable branch checkpoint.',
     strict: true,
@@ -222,6 +229,16 @@ export class AgentToolSession {
             edges: current.edges,
           },
           queued_actions: this.actions,
+        })
+      }
+      if (tool === 'inspect_incident_context') {
+        const root = record(this.payload)
+        const incidents = Array.isArray(root.incidentContext) ? root.incidentContext.map(record) : []
+        const incidentKey = text(args.incident_key, 180)
+        const selected = incidentKey ? incidents.filter((incident) => incident.incidentKey === incidentKey) : incidents
+        return this.result(tool, 'read', `${selected.length} host-owned incident record(s) inspected`, {
+          incidents: selected.slice(0, 24),
+          policy: 'Read-only evidence. Electron fingerprints, deduplicates and records transitions; agent tools may only queue a graph diff.',
         })
       }
       if (tool === 'add_card') {

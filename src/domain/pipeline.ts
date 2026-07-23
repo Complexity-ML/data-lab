@@ -73,6 +73,7 @@ export interface AgentRunTraceStep {
 
 export interface AgentProposal {
   id: string
+  incidentKey?: string
   title: string
   summary: string
   rationale: string

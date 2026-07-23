@@ -1,5 +1,5 @@
 import { addEdge, useEdgesState, useNodesState, type Connection } from '@xyflow/react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { AppFooter } from './components/AppFooter'
 import { AppHeader } from './components/AppHeader'
 import { ProposalReviewModal } from './components/ProposalReviewModal'
@@ -25,11 +25,12 @@ import { useGraphHistory } from './hooks/useGraphHistory'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useWorkspacePersistence } from './hooks/useWorkspacePersistence'
 import { useAppUpdates } from './hooks/useAppUpdates'
+import { useLiveIncidentMonitor, type LiveIncidentTrigger } from './hooks/useLiveIncidentMonitor'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
 import { useLanguage } from './i18n'
-import type { IncidentEvent, IncidentEventInput } from './domain/incidents'
+import { summarizeIncidentEvents, type IncidentEvent, type IncidentEventInput } from './domain/incidents'
 import { incidentDiagramNodeIds } from './domain/incident-diagram'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
@@ -79,7 +80,7 @@ export default function App() {
   const appUpdates = useAppUpdates(setActivity)
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writebackAvailable: dataHubWritebackAvailable, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
-  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({
+  const { approvePendingVersion, approveProposal, commitAutonomousProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({
     edges,
     nodes,
     proposal,
@@ -98,6 +99,7 @@ export default function App() {
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
   const errors = issues.filter((issue) => issue.severity === 'error')
+  const incidentSummaries = useMemo(() => summarizeIncidentEvents(incidentEvents), [incidentEvents])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -193,13 +195,13 @@ export default function App() {
     setActivity(`${asset.name} bound atomically · ${asset.fields.length} fields · ${asset.downstream.length} downstream assets · fresh MCP read required before agent execution`)
   }
 
-  const logIncident = async (event: IncidentEventInput) => {
+  const logIncident = useCallback(async (event: IncidentEventInput) => {
     if (!window.dataLab?.recordIncidentEvent) return
     const result = await window.dataLab.recordIncidentEvent(event).catch(() => ({ recorded: false as const }))
     if (result.recorded && result.event) setIncidentEvents((current) => [result.event!, ...current.filter((candidate) => candidate.id !== result.event!.id)].slice(0, 200))
-  }
+  }, [])
 
-  const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.') => {
+  const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.', monitored?: LiveIncidentTrigger) => {
     setContextMenu(undefined)
     setProposal(undefined)
     if (!window.dataLab) {
@@ -236,7 +238,9 @@ export default function App() {
           evidenceEntries = remembered.evidence
         } else {
           setActivity('Agent reading trusted schema and lineage through DataHub MCP to create a compact profile…')
-          const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
+          const audit = monitored?.monitor.urn === source.data.datahubUrn
+            ? monitored.audit
+            : await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
           if (agentRunId.current !== runId) return
           const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
           datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
@@ -279,11 +283,12 @@ export default function App() {
 
       const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : currentAiStatus.providers[activeAiSource].model
       setActivity(`${activeModel} is analyzing the graph and previous versions…`)
-      const requestPayload = buildPipelineAgentRequest({ datahubEvidence, edges, issues, nodes, objective: agentRequest, responseLanguage: language === 'fr' ? 'French' : 'English', versions })
+      const requestPayload = buildPipelineAgentRequest({ datahubEvidence, edges, incidentContext: incidentSummaries, issues, nodes, objective: agentRequest, responseLanguage: language === 'fr' ? 'French' : 'English', versions })
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'success', detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length } })
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      nextProposal.incidentKey = monitored?.incidentKey
       if (blankCandidate) {
         const proposedSource = nextProposal.addedNodes.find((node) => node.data.kind === 'source')
         if (proposedSource) proposedSource.data = {
@@ -312,12 +317,29 @@ export default function App() {
         return
       }
       nextProposal.evidence = evidenceEntries
+      if (monitored && !nextProposal.requiresHumanReview) {
+        const autonomousVersionId = commitAutonomousProposal(nextProposal)
+        if (autonomousVersionId) {
+          await logIncident({
+            incidentKey: monitored.incidentKey,
+            transition: 'agent-action',
+            severity: 'info',
+            title: nextProposal.title,
+            detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version; Live Monitor will verify the next fingerprint.`,
+            fingerprint: monitored.audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
+            cardId: monitored.monitor.monitorId,
+            branchId: monitored.monitor.monitorId,
+            versionId: autonomousVersionId,
+          })
+        }
+        return
+      }
       setProposal(nextProposal)
       setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) {
-        void logIncident({ incidentKey: `human-review:${reviewVersionId}`, transition: 'human-review', severity: 'warning', title: nextProposal.title, detail: nextProposal.summary, versionId: reviewVersionId })
+        void logIncident({ incidentKey: nextProposal.incidentKey ?? `human-review:${reviewVersionId}`, transition: 'human-review', severity: 'warning', title: nextProposal.title, detail: nextProposal.summary, versionId: reviewVersionId, branchId: monitored?.monitor.monitorId })
         void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
       }
     } catch (error) {
@@ -391,6 +413,41 @@ export default function App() {
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
   }
+
+  const rejectAgentProposal = () => {
+    const rejected = proposal
+    rejectProposal()
+    if (!rejected?.incidentKey) return
+    void logIncident({
+      incidentKey: rejected.incidentKey,
+      transition: 'worsened',
+      severity: 'warning',
+      title: `${rejected.title} · repair requested`,
+      detail: 'Human Review rejected the proposed correction. The affected branch remains unchanged and enters one bounded repair iteration.',
+      versionId: pendingVersionId,
+    })
+    window.setTimeout(() => {
+      if (!agentRunning) void auditWithAgent(`Repair the rejected incident proposal "${rejected.title}". Preserve the reviewer rejection in version memory, change only the affected branch, and do not repeat the rejected diff.`)
+    }, 250)
+  }
+
+  useLiveIncidentMonitor({
+    active: Boolean(window.dataLab) && connectionMode === 'connected',
+    agentBlocked: agentRunning || Boolean(proposal),
+    nodes,
+    edges,
+    audit: async (urn) => {
+      if (!window.dataLab) throw new Error('Electron is not running')
+      return window.dataLab.auditDataHubWithMcp(urn, true)
+    },
+    onIncident: logIncident,
+    onTrigger: async (trigger) => {
+      await auditWithAgent(
+        `Live Monitor detected a DataHub metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, update only the affected branch, and propose the smallest versioned correction.`,
+        trigger,
+      )
+    },
+  })
 
   const deleteCard = (nodeId: string) => {
     const node = nodes.find((candidate) => candidate.id === nodeId)
@@ -468,7 +525,7 @@ export default function App() {
         return false
       }
       if (!approveProposal()) return false
-      void logIncident({ incidentKey: `revision:${revisionId ?? currentProposal.id}`, transition: 'agent-action', severity: 'info', title: currentProposal.title, detail: currentProposal.summary, versionId: revisionId })
+      void logIncident({ incidentKey: currentProposal.incidentKey ?? `revision:${revisionId ?? currentProposal.id}`, transition: 'agent-action', severity: 'info', title: currentProposal.title, detail: currentProposal.summary, versionId: revisionId })
       fitCommittedGraph()
       if (!writebackRequested) return true
       if (!revisionId) {
@@ -524,7 +581,7 @@ export default function App() {
       writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled && dataHubWritebackAvailable}
       onApply={(writebackRequested) => { void approveAgentProposal(writebackRequested).then((applied) => { if (applied) setProposalReviewOpen(false) }) }}
       onClose={() => setProposalReviewOpen(false)}
-      onDiscard={() => { setProposalReviewOpen(false); rejectProposal() }}
+      onDiscard={() => { setProposalReviewOpen(false); rejectAgentProposal() }}
     />}
 
     {settingsOpen && <Suspense fallback={<div aria-live="polite" className="lazy-modal-loading" role="status">Loading workspace settings…</div>}><SettingsModal
@@ -539,6 +596,7 @@ export default function App() {
       errorCount={errors.length}
       findingCount={issues.length}
       incidentEvents={incidentEvents}
+      incidentSummaries={incidentSummaries}
       initialSection={settingsSection}
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
