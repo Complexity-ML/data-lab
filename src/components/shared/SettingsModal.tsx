@@ -10,8 +10,7 @@ import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
-import type { IncidentEvent, IncidentSummary } from '../../domain/incidents'
-import type { DiagnosticBundle, DiagnosticCategory, DiagnosticStatus } from '../../domain/diagnostics'
+import type { DiagnosticBundle, DiagnosticSettings } from '../../domain/diagnostics'
 
 export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
@@ -35,8 +34,6 @@ interface SettingsModalProps {
   mcpMessage: string
   mcpTransport: 'demo' | 'http' | 'stdio'
   initialSection?: SettingsSection
-  incidentEvents: IncidentEvent[]
-  incidentSummaries: IncidentSummary[]
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
@@ -49,12 +46,14 @@ interface SettingsModalProps {
   onDisconnectChatGPT: () => Promise<void>
   onEmergencyStop: () => void
   onDuplicateWorkspace: (workspaceId: string) => Promise<void>
+  onDeleteWorkspace: (workspaceId: string) => Promise<void>
   onDownloadAppUpdate: () => Promise<AppUpdateStatus>
   onExportPipeline: () => void
   onExportDiagnostics: () => Promise<void>
   onImportPipeline: (file: File) => Promise<void>
   onInstallAppUpdate: () => Promise<AppUpdateStatus>
   onLoadDiagnostics: () => Promise<DiagnosticBundle>
+  onSaveDiagnosticSettings: (settings: DiagnosticSettings) => Promise<DiagnosticSettings>
   onLoadPreset: (preset: PipelinePresetId) => void
   onOpenWorkspace: (workspaceId: string) => Promise<void>
   onOpenDiagnosticLogs: () => Promise<void>
@@ -85,7 +84,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -98,8 +97,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
   const [updateFeedback, setUpdateFeedback] = useState('')
   const [diagnosticBundle, setDiagnosticBundle] = useState<DiagnosticBundle>()
-  const [diagnosticCategory, setDiagnosticCategory] = useState<DiagnosticCategory | 'all'>('all')
-  const [diagnosticStatus, setDiagnosticStatus] = useState<DiagnosticStatus | 'all'>('all')
+  const [diagnosticSettings, setDiagnosticSettings] = useState<DiagnosticSettings>({ enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
@@ -124,7 +122,10 @@ export function SettingsModal(props: SettingsModalProps) {
     const refresh = async () => {
       try {
         const bundle = await diagnosticLoaderRef.current()
-        if (active) setDiagnosticBundle(bundle)
+        if (active) {
+          setDiagnosticBundle(bundle)
+          setDiagnosticSettings(bundle.settings)
+        }
       } catch { /* The existing diagnostics actions surface filesystem errors. */ }
     }
     void refresh()
@@ -134,8 +135,22 @@ export function SettingsModal(props: SettingsModalProps) {
 
   const refreshDiagnostics = async () => {
     setDiagnosticsBusy(true)
-    try { setDiagnosticBundle(await onLoadDiagnostics()) }
+    try {
+      const bundle = await onLoadDiagnostics()
+      setDiagnosticBundle(bundle)
+      setDiagnosticSettings(bundle.settings)
+    }
     catch (error) { notifyError(error, 'Unable to refresh local diagnostics') }
+    finally { setDiagnosticsBusy(false) }
+  }
+
+  const saveDiagnostics = async () => {
+    setDiagnosticsBusy(true)
+    try {
+      const saved = await onSaveDiagnosticSettings(diagnosticSettings)
+      setDiagnosticSettings(saved)
+      setDiagnosticBundle(await onLoadDiagnostics())
+    } catch (error) { notifyError(error, 'Unable to save diagnostic settings') }
     finally { setDiagnosticsBusy(false) }
   }
 
@@ -296,12 +311,6 @@ export function SettingsModal(props: SettingsModalProps) {
   const activeSourceModel = activeAiSource === 'chatgpt' ? chatGPTStatus.selectedModel ?? 'ChatGPT' : aiStatus.providers[activeAiSource].model
   const selectedProviderStatus = aiStatus.providers[aiSettings.provider]
   const selectedCapabilities = selectedProviderStatus.capabilities
-  const visibleDiagnostics = [...(diagnosticBundle?.events ?? [])]
-    .reverse()
-    .filter((event) => diagnosticCategory === 'all' || event.category === diagnosticCategory)
-    .filter((event) => diagnosticStatus === 'all' || event.status === diagnosticStatus)
-    .slice(0, 120)
-
   const runUpdateAction = async (action: () => Promise<AppUpdateStatus | { opened: true; channel: AppUpdateChannel; path: string }>) => {
     setUpdateFeedback('')
     try {
@@ -369,41 +378,21 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'workspaces' && <article className="settings-page">
           <div className="settings-page-heading"><small>WORKSPACES</small><h3>Local projects and recovery</h3><p>Each graph, version history and pending agent review stays isolated in its own SQLite workspace.</p></div>
-          <WorkspaceManager activeWorkspaceId={activeWorkspaceId} onArchive={onArchiveWorkspace} onCreate={onCreateWorkspace} onDuplicate={onDuplicateWorkspace} onOpen={onOpenWorkspace} onRename={onRenameWorkspace} onSave={onSaveWorkspace} projectTitle={projectTitle} saveState={workspaceSaveState} workspaces={workspaces} />
+          <WorkspaceManager activeWorkspaceId={activeWorkspaceId} onArchive={onArchiveWorkspace} onCreate={onCreateWorkspace} onDelete={onDeleteWorkspace} onDuplicate={onDuplicateWorkspace} onOpen={onOpenWorkspace} onRename={onRenameWorkspace} onSave={onSaveWorkspace} projectTitle={projectTitle} saveState={workspaceSaveState} workspaces={workspaces} />
         </article>}
 
         {activeSection === 'diagnostics' && <article className="settings-page">
-          <div className="settings-page-heading"><small>DIAGNOSTICS</small><h3>Private local activity log</h3><p>Inspect failures without sending catalog content or credentials to a telemetry service.</p></div>
+          <div className="settings-page-heading"><small>DIAGNOSTICS</small><h3>Local diagnostic settings</h3><p>Choose how much technical history DATA LAB keeps on this device. Data incidents remain in Reports.</p></div>
           <section className="settings-section diagnostics-settings">
-            <div className="settings-section-title"><span>Local diagnostics</span><small>7 days · 500 events maximum</small></div>
-            <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>External telemetry disabled</strong><small>Tokens, authorization headers and sensitive prompts are redacted before storage and export.</small></div></div>
-            <div className="settings-section-title incident-title"><span>Activity logger</span><small>{diagnosticBundle?.events.length ?? 0} sanitized event{diagnosticBundle?.events.length === 1 ? '' : 's'}</small></div>
-            <div className="diagnostic-toolbar">
-              <label><span>Category</span><select onChange={(event) => setDiagnosticCategory(event.target.value as DiagnosticCategory | 'all')} value={diagnosticCategory}><option value="all">All</option><option value="provider">AI provider</option><option value="mcp">DataHub MCP</option><option value="validation">Validation</option><option value="revision">Revisions</option><option value="workspace">Workspace</option><option value="renderer">Interface</option></select></label>
-              <label><span>Status</span><select onChange={(event) => setDiagnosticStatus(event.target.value as DiagnosticStatus | 'all')} value={diagnosticStatus}><option value="all">All</option><option value="info">Info</option><option value="success">Success</option><option value="warning">Warning</option><option value="error">Error</option></select></label>
-              <ActionButton disabled={diagnosticsBusy} icon={<RefreshCw className={diagnosticsBusy ? 'agent-context-wheel' : ''} size={14} />} onClick={() => void refreshDiagnostics()} variant="ghost">{diagnosticsBusy ? 'Refreshing…' : 'Refresh'}</ActionButton>
+            <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>Private by design</strong><small>External telemetry is disabled. Tokens, authorization headers and sensitive prompts are always redacted.</small></div></div>
+            <div className="diagnostic-settings-grid">
+              <label className="diagnostic-toggle"><input checked={diagnosticSettings.enabled} onChange={(event) => setDiagnosticSettings((current) => ({ ...current, enabled: event.target.checked }))} type="checkbox" /><span><strong>Keep a local technical log</strong><small>Connection, provider, validation and workspace recovery events only.</small></span></label>
+              <label className="settings-field"><span>Detail level</span><select disabled={!diagnosticSettings.enabled} onChange={(event) => setDiagnosticSettings((current) => ({ ...current, level: event.target.value as DiagnosticSettings['level'] }))} value={diagnosticSettings.level}><option value="all">All useful activity</option><option value="warnings">Warnings and errors</option><option value="errors">Errors only</option></select></label>
+              <label className="settings-field"><span>Keep history for</span><select disabled={!diagnosticSettings.enabled} onChange={(event) => setDiagnosticSettings((current) => ({ ...current, retentionDays: Number(event.target.value) }))} value={diagnosticSettings.retentionDays}><option value={1}>1 day</option><option value={7}>7 days</option><option value={14}>14 days</option><option value={30}>30 days</option></select></label>
+              <label className="settings-field"><span>Maximum events</span><select disabled={!diagnosticSettings.enabled} onChange={(event) => setDiagnosticSettings((current) => ({ ...current, maximumEvents: Number(event.target.value) }))} value={diagnosticSettings.maximumEvents}><option value={100}>100</option><option value={500}>500</option><option value={1000}>1,000</option><option value={2000}>2,000</option></select></label>
             </div>
-            {visibleDiagnostics.length ? <ol aria-live="polite" className="diagnostic-event-list">{visibleDiagnostics.map((event) => <li className={`diagnostic-${event.status}`} key={event.id}>
-              <span className="diagnostic-event-dot" />
-              <div><header><strong>{event.action}</strong><span>{event.category} · {event.status}</span><time>{new Date(event.timestamp).toLocaleTimeString()}</time></header>{event.detail !== undefined && <code>{typeof event.detail === 'string' ? event.detail : JSON.stringify(event.detail)}</code>}</div>
-            </li>)}</ol> : <div className="incident-empty"><Activity size={17} /><div><strong>No matching activity yet</strong><small>Connection stages, MCP reads, revisions, validation and SQLite saves will appear here automatically.</small></div></div>}
-            <div className="incident-overview">
-              <div><strong>{incidentSummaries.filter((incident) => incident.status !== 'resolved').length}</strong><small>Active incidents</small></div>
-              <div><strong>{incidentSummaries.filter((incident) => incident.severity === 'critical' && incident.status !== 'resolved').length}</strong><small>Critical</small></div>
-              <div><strong>{incidentSummaries.filter((incident) => incident.status === 'waiting-review').length}</strong><small>Waiting review</small></div>
-              <div><strong>{incidentSummaries.filter((incident) => incident.status === 'resolved').length}</strong><small>Recovered</small></div>
-            </div>
-            {incidentSummaries.length > 0 && <div className="incident-ledger">{incidentSummaries.map((incident) => <article className={`status-${incident.status} severity-${incident.severity}`} key={incident.incidentKey}>
-              <div><strong>{incident.title}</strong><span>{incident.status.replace('-', ' ')}</span></div>
-              <p>{incident.detail}</p>
-              <small>{incident.occurrenceCount} occurrence{incident.occurrenceCount === 1 ? '' : 's'} · {incident.eventCount} transition{incident.eventCount === 1 ? '' : 's'} · updated {new Date(incident.updatedAt).toLocaleString()}</small>
-            </article>)}</div>}
-            <div className="settings-section-title incident-title"><span>Incident timeline</span><small>{incidentEvents.length} local event{incidentEvents.length === 1 ? '' : 's'}</small></div>
-            {incidentEvents.length ? <ol className="incident-timeline">{incidentEvents.map((event) => <li className={`incident-${event.transition} severity-${event.severity}`} key={event.id}>
-              <span>{event.transition === 'recovered' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}</span>
-              <div><strong>{event.title}</strong><p>{event.detail}</p><small>{event.transition.replace('-', ' ')} · {event.severity} · {new Date(event.createdAt).toLocaleString()}{event.cardId ? ` · card ${event.cardId}` : ''}{event.versionId ? ` · revision ${event.versionId}` : ''}</small></div>
-            </li>)}</ol> : <div className="incident-empty"><CheckCircle2 size={17} /><div><strong>No incident recorded</strong><small>Live Monitor changes, agent actions, human reviews and returns to normal will appear here.</small></div></div>}
-            <div className="diagnostics-actions"><ActionButton icon={<FolderOpen size={15} />} onClick={() => void onOpenDiagnosticLogs()}>Open local logs</ActionButton><ActionButton icon={<FileDown size={15} />} onClick={() => void onExportDiagnostics()} variant="primary">Export sanitized bundle</ActionButton></div>
+            <div className="diagnostic-storage-summary"><Activity size={17} /><div><strong>{diagnosticBundle?.events.length ?? 0} sanitized technical event{diagnosticBundle?.events.length === 1 ? '' : 's'} stored</strong><small>The agent receives only compact recent warnings and errors as reliability context. Raw secrets never enter its prompt.</small></div></div>
+            <div className="diagnostics-actions"><ActionButton disabled={diagnosticsBusy} icon={<Save size={14} />} onClick={() => void saveDiagnostics()} variant="primary">{diagnosticsBusy ? 'Saving…' : 'Save diagnostic settings'}</ActionButton><ActionButton disabled={diagnosticsBusy} icon={<RefreshCw className={diagnosticsBusy ? 'agent-context-wheel' : ''} size={14} />} onClick={() => void refreshDiagnostics()} variant="ghost">Refresh status</ActionButton><ActionButton icon={<FolderOpen size={15} />} onClick={() => void onOpenDiagnosticLogs()}>Open local logs</ActionButton><ActionButton icon={<FileDown size={15} />} onClick={() => void onExportDiagnostics()}>Export sanitized bundle</ActionButton></div>
           </section>
         </article>}
 

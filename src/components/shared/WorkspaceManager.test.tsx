@@ -7,7 +7,7 @@ import { WorkspaceManager } from './WorkspaceManager'
 
 afterEach(cleanup)
 
-const actions = () => ({ onArchive: vi.fn(async () => undefined), onCreate: vi.fn(async () => undefined), onDuplicate: vi.fn(async () => undefined), onOpen: vi.fn(async () => undefined), onRename: vi.fn(async () => undefined), onSave: vi.fn(async () => undefined) })
+const actions = () => ({ onArchive: vi.fn(async () => undefined), onCreate: vi.fn(async () => undefined), onDelete: vi.fn(async () => undefined), onDuplicate: vi.fn(async () => undefined), onOpen: vi.fn(async () => undefined), onRename: vi.fn(async () => undefined), onSave: vi.fn(async () => undefined) })
 
 describe('WorkspaceManager', () => {
   it('keeps a blank workbench unsaved until the user creates a workspace', async () => {
@@ -20,6 +20,18 @@ describe('WorkspaceManager', () => {
     await user.type(screen.getByRole('textbox', { name: 'New workspace name' }), 'Governed orders')
     await user.click(screen.getByRole('button', { name: 'Create from workbench' }))
     expect(handlers.onCreate).toHaveBeenCalledWith('Governed orders')
+  })
+
+  it('requires an explicit second click before permanently deleting an archived workspace', async () => {
+    const user = userEvent.setup()
+    const handlers = actions()
+    const archived = { id: 'archived', name: 'Old graph', archived: true, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }
+    render(<WorkspaceManager activeWorkspaceId={null} {...handlers} projectTitle="Blank" saveState="unsaved" workspaces={[archived]} />)
+
+    await user.click(screen.getByRole('button', { name: 'Delete Old graph' }))
+    expect(handlers.onDelete).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Confirm delete Old graph' }))
+    expect(handlers.onDelete).toHaveBeenCalledWith('archived')
   })
 
   it('exposes rename, save, switch, duplicate and archive actions', async () => {

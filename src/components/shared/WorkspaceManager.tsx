@@ -1,4 +1,4 @@
-import { Archive, Check, Copy, FolderOpen, Plus, Save } from 'lucide-react'
+import { Archive, Check, Copy, FolderOpen, Plus, Save, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { WorkspaceSaveState, WorkspaceSummary } from '../../domain/workspace'
 import { notifyError } from '../../domain/toasts'
@@ -8,6 +8,7 @@ interface WorkspaceManagerProps {
   activeWorkspaceId: string | null
   onArchive(workspaceId: string): Promise<void>
   onCreate(name: string): Promise<void>
+  onDelete(workspaceId: string): Promise<void>
   onDuplicate(workspaceId: string): Promise<void>
   onOpen(workspaceId: string): Promise<void>
   onRename(workspaceId: string, name: string): Promise<void>
@@ -18,11 +19,12 @@ interface WorkspaceManagerProps {
 }
 
 export function WorkspaceManager(props: WorkspaceManagerProps) {
-  const { activeWorkspaceId, onArchive, onCreate, onDuplicate, onOpen, onRename, onSave, projectTitle, saveState, workspaces } = props
+  const { activeWorkspaceId, onArchive, onCreate, onDelete, onDuplicate, onOpen, onRename, onSave, projectTitle, saveState, workspaces } = props
   const [name, setName] = useState(projectTitle)
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [deleteCandidate, setDeleteCandidate] = useState<string>()
   const active = workspaces.find((workspace) => workspace.id === activeWorkspaceId)
 
   useEffect(() => { setRenameValue(active?.name ?? '') }, [active?.id, active?.name])
@@ -64,6 +66,8 @@ export function WorkspaceManager(props: WorkspaceManagerProps) {
           <div className="workspace-row-actions">
             <button aria-label={`Duplicate ${workspace.name}`} disabled={busy} onClick={() => void run(() => onDuplicate(workspace.id))} title="Duplicate workspace" type="button"><Copy size={15} /></button>
             {!workspace.archived && <button aria-label={`Archive ${workspace.name}`} disabled={busy} onClick={() => void run(() => onArchive(workspace.id))} title="Archive workspace" type="button"><Archive size={15} /></button>}
+            {workspace.archived && deleteCandidate !== workspace.id && <button aria-label={`Delete ${workspace.name}`} className="workspace-delete" disabled={busy} onClick={() => setDeleteCandidate(workspace.id)} title="Delete archived workspace permanently" type="button"><Trash2 size={15} /></button>}
+            {workspace.archived && deleteCandidate === workspace.id && <div className="workspace-delete-confirm"><button aria-label={`Confirm delete ${workspace.name}`} className="workspace-delete" disabled={busy} onClick={() => void run(async () => { await onDelete(workspace.id); setDeleteCandidate(undefined) })} title="Confirm permanent deletion" type="button"><Trash2 size={14} /><span>Delete</span></button><button aria-label={`Cancel delete ${workspace.name}`} disabled={busy} onClick={() => setDeleteCandidate(undefined)} title="Cancel deletion" type="button"><X size={14} /></button></div>}
           </div>
         </article>)}
       </div>}
