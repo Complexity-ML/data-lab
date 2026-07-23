@@ -15,7 +15,7 @@ import { layoutPipeline } from './domain/layout'
 import { createPipelineExport, parsePipelineExport } from './domain/pipeline-io'
 import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
 import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
-import { notifyError, notifyToast } from './domain/toasts'
+import { errorMessage, notifyError, notifyToast } from './domain/toasts'
 import { recordDiagnostic } from './domain/diagnostics'
 import { validatePipeline } from './validation'
 import { disconnectedAiStatus, disconnectedChatGPTStatus, useAiConnections } from './hooks/useAiConnections'
@@ -91,7 +91,7 @@ export default function App() {
       activeAtomicRun.current = resumed
       return applyAtomicRunState(candidateNodes, resumed)
     } catch (error) {
-      recordDiagnostic({ category: 'provider', action: 'branch.resume', status: 'error', detail: { decision, message: error instanceof Error ? error.message : 'unknown resume error' } })
+      recordDiagnostic({ category: 'provider', action: 'branch.resume', status: 'error', detail: { decision, message: errorMessage(error, 'Unknown resume error') } })
       return candidateNodes
     }
   }
@@ -296,7 +296,7 @@ export default function App() {
       } catch (error) {
         setPendingWorkspacePrompt(undefined)
         notifyError(error, 'Unable to create the separate workspace')
-        setActivity(`Separate workspace creation failed · ${error instanceof Error ? error.message : 'SQLite unavailable'} · current graph preserved`)
+        setActivity(`Separate workspace creation failed · ${errorMessage(error, 'SQLite unavailable')} · current graph preserved`)
       }
       return
     }
@@ -334,7 +334,7 @@ export default function App() {
           try {
             audit = forcedMonitorAudit ?? await window.dataLab.auditDataHubWithMcp(sourceUrn)
           } catch (error) {
-            const detail = error instanceof Error ? error.message : 'DataHub audit failed'
+            const detail = errorMessage(error, 'DataHub audit failed')
             datahubEvidence.push(`${source.data.label} (${sourceUrn}) · audit error · ${detail}`)
             await logIncident({
               incidentKey: monitored?.incidentKey ?? `datahub-evidence:${sourceUrn}`,
@@ -579,9 +579,9 @@ export default function App() {
       }
     } catch (error) {
       notifyError(error, 'Agent run failed')
-      recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: error instanceof Error ? error.message : 'unknown error' } })
+      recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
       if (agentRunId.current !== runId) return
-      setActivity(`Agent run failed · ${error instanceof Error ? error.message : 'unknown provider error'} · graph unchanged`)
+      setActivity(`Agent run failed · ${errorMessage(error, 'Unknown provider error')} · graph unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
   }
 
@@ -654,7 +654,7 @@ export default function App() {
     } catch (error) {
       notifyError(error, 'Card analysis failed')
       if (agentRunId.current !== runId) return
-      setActivity(`Card analysis failed · ${error instanceof Error ? error.message : 'unknown provider error'} · card unchanged`)
+      setActivity(`Card analysis failed · ${errorMessage(error, 'Unknown provider error')} · card unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
   }
 
@@ -791,8 +791,8 @@ export default function App() {
     } catch (error) {
       if (reviewAssistantRunId.current !== runId) return
       notifyError(error, 'Human Review assistant failed')
-      setActivity(`Human Review assistant failed · ${error instanceof Error ? error.message : 'unknown provider error'} · proposal unchanged`)
-      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'error', detail: { source: activeAiSource, message: error instanceof Error ? error.message : 'unknown error' } })
+      setActivity(`Human Review assistant failed · ${errorMessage(error, 'Unknown provider error')} · proposal unchanged`)
+      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
     } finally {
       if (reviewAssistantRunId.current === runId) setReviewAssistantBusy(false)
     }
@@ -892,7 +892,7 @@ export default function App() {
       setActivity(`Pipeline imported after full validation · ${artifact.graph.nodes.length} cards · schema v${artifact.schemaVersion}`)
     } catch (error) {
       notifyError(error, 'Pipeline import failed')
-      setActivity(`Import rejected · ${error instanceof Error ? error.message : 'invalid pipeline file'} · active workspace unchanged`)
+      setActivity(`Import rejected · ${errorMessage(error, 'Invalid pipeline file')} · active workspace unchanged`)
     }
   }
 
@@ -947,14 +947,14 @@ export default function App() {
         setActivity(`Revision committed locally · DataHub write-back succeeded · ${result.summary}`)
       } catch (error) {
         notifyError(error, 'DataHub write-back failed')
-        setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
+        setActivity(`Revision committed locally · DataHub write-back failed · ${errorMessage(error)} · local graph was not rolled back`)
       }
       continuePlayer(`Human Review approved "${currentProposal.title}". Reread the committed graph, reports, diagnostics and version memory, then propose the next coherent safe iteration.`)
       return true
     } catch (error) {
       notifyError(error, 'Unable to apply the reviewed graph')
-      setActivity(`Approval failed · ${error instanceof Error ? error.message : 'unexpected graph transaction error'} · graph unchanged`)
-      recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'error', detail: { message: error instanceof Error ? error.message : 'unknown error' } })
+      setActivity(`Approval failed · ${errorMessage(error, 'Unexpected graph transaction error')} · graph unchanged`)
+      recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'error', detail: { message: errorMessage(error) } })
       return false
     } finally {
       proposalApprovalRunning.current = false

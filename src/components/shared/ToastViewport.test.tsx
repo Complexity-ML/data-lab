@@ -29,4 +29,12 @@ describe('ToastViewport', () => {
     expect(screen.getByText('Interface error')).toBeTruthy()
     expect(screen.getByText('Renderer exploded')).toBeTruthy()
   })
+
+  it('replaces minified bundle fragments with a readable diagnostic handoff', () => {
+    render(<ToastViewport />)
+    act(() => notifyError(new Error(`var Au=function(l){return "mousedown".split(" ")};${'x'.repeat(220)}`), 'Interface failed'))
+
+    expect(screen.getByText('Interface failed. Technical details are available in Diagnostics.')).toBeTruthy()
+    expect(screen.queryByText(/mousedown/)).toBeNull()
+  })
 })

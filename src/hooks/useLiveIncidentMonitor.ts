@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { Edge } from '@xyflow/react'
 import type { DataHubMcpAudit } from '../electron-api'
 import type { IncidentEventInput } from '../domain/incidents'
+import { errorMessage } from '../domain/toasts'
 import { evaluateMonitorObservation, findBoundLiveMonitors, liveMonitorBindingKey, observeDataHubAudit, type BoundLiveMonitor, type MonitorRuntimeState } from '../domain/live-monitor'
 import type { PipelineNode } from '../domain/pipeline'
 
@@ -99,7 +100,7 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
               transition: runtime.current.get(bindingKey)?.open ? 'worsened' : 'opened',
               severity: 'critical',
               title: `${monitor.monitorLabel} · monitoring unavailable`,
-              detail: error instanceof Error ? error.message : 'Connector monitoring failed.',
+              detail: errorMessage(error, 'Connector monitoring failed'),
               sourceSystem: 'DataHub',
               sourceRef: monitor.urn,
               fingerprint: 'monitor-read-error',

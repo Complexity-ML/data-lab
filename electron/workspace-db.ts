@@ -319,8 +319,17 @@ export function deleteWorkspace(userDataDirectory: string, workspaceId: unknown)
   if (typeof workspaceId !== 'string') throw new Error('Invalid workspace ID')
   const target = db(userDataDirectory)
   if (readSetting(target, ACTIVE_WORKSPACE_KEY) === workspaceId) throw new Error('The active workspace cannot be deleted')
-  const result = target.prepare('DELETE FROM workspaces WHERE id = ? AND archived = 1').run(workspaceId)
-  if (Number(result.changes) !== 1) throw new Error('Only an archived workspace can be deleted')
+  const workspace = readWorkspaceRow(target, workspaceId)
+  if (!workspace || workspace.archived !== 1) throw new Error('Only an archived workspace can be deleted')
+  target.exec('BEGIN')
+  try {
+    target.prepare('DELETE FROM incident_events WHERE workspace_id = ?').run(workspaceId)
+    target.prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId)
+    target.exec('COMMIT')
+  } catch (error) {
+    target.exec('ROLLBACK')
+    throw error
+  }
   return currentState(target, false)
 }
 
