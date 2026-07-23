@@ -5,10 +5,10 @@ import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, parseDataHubDecisionRequest, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
+import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, deleteWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
-import { ensureDiagnosticLog, exportDiagnosticBundle, recordDiagnosticEvent } from './diagnostics.js'
+import { ensureDiagnosticLog, exportDiagnosticBundle, loadDiagnosticSettings, recordDiagnosticEvent, saveDiagnosticSettings } from './diagnostics.js'
 import { AppUpdateController } from './app-updater.js'
 import { parseUpdateChannel } from './update-policy.js'
 import { desktopWindowFrame } from './window-platform.js'
@@ -47,6 +47,7 @@ const workspaceCreateChannel = 'data-lab:workspace-create'
 const workspaceRenameChannel = 'data-lab:workspace-rename'
 const workspaceDuplicateChannel = 'data-lab:workspace-duplicate'
 const workspaceArchiveChannel = 'data-lab:workspace-archive'
+const workspaceDeleteChannel = 'data-lab:workspace-delete'
 const workspaceOpenChannel = 'data-lab:workspace-open'
 const workspaceAutosaveChannel = 'data-lab:workspace-autosave'
 const workspaceCommitChannel = 'data-lab:workspace-commit'
@@ -56,6 +57,8 @@ const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
 const diagnosticsExportChannel = 'data-lab:diagnostics-export'
 const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
+const diagnosticsSettingsChannel = 'data-lab:diagnostics-settings'
+const diagnosticsSettingsSaveChannel = 'data-lab:diagnostics-settings-save'
 const incidentsListChannel = 'data-lab:incidents-list'
 const incidentsRecordChannel = 'data-lab:incidents-record'
 const applicationRestartChannel = 'data-lab:application-restart'
@@ -282,6 +285,7 @@ app.whenReady().then(() => {
   ipcMain.handle(workspaceRenameChannel, (_event, payload: { workspaceId?: unknown; name?: unknown }) => renameWorkspace(app.getPath('userData'), payload?.workspaceId, payload?.name))
   ipcMain.handle(workspaceDuplicateChannel, (_event, payload: { workspaceId?: unknown; name?: unknown }) => duplicateWorkspace(app.getPath('userData'), payload?.workspaceId, payload?.name))
   ipcMain.handle(workspaceArchiveChannel, (_event, payload: { workspaceId?: unknown }) => archiveWorkspace(app.getPath('userData'), payload?.workspaceId))
+  ipcMain.handle(workspaceDeleteChannel, (_event, payload: { workspaceId?: unknown }) => deleteWorkspace(app.getPath('userData'), payload?.workspaceId))
   ipcMain.handle(workspaceOpenChannel, (_event, payload: { workspaceId?: unknown }) => openWorkspace(app.getPath('userData'), payload?.workspaceId))
   ipcMain.handle(workspaceAutosaveChannel, (_event, payload: unknown) => autosaveWorkspaceDraft(app.getPath('userData'), payload))
   ipcMain.handle(workspaceCommitChannel, (_event, payload: unknown) => commitActiveWorkspace(app.getPath('userData'), payload))
@@ -294,6 +298,8 @@ app.whenReady().then(() => {
   ipcMain.handle(activeAiSourceSaveChannel, (_event, payload: { source?: unknown }) => selectActiveAiSource(payload ?? {}))
   ipcMain.handle(diagnosticsRecordChannel, (_event, payload: unknown) => recordDiagnosticEvent(app.getPath('userData'), payload))
   ipcMain.handle(diagnosticsExportChannel, () => exportDiagnosticBundle(app.getPath('userData')))
+  ipcMain.handle(diagnosticsSettingsChannel, () => loadDiagnosticSettings(app.getPath('userData')))
+  ipcMain.handle(diagnosticsSettingsSaveChannel, (_event, payload: unknown) => saveDiagnosticSettings(app.getPath('userData'), payload))
   ipcMain.handle(diagnosticsOpenChannel, () => {
     const path = ensureDiagnosticLog(app.getPath('userData'))
     shell.showItemInFolder(path)

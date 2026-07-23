@@ -194,9 +194,14 @@ export class AgentToolSession {
   private validateCandidate(tool: string, action: ValidatedProposalAction) {
     if (this.reviewAssistantMode) throw new Error('Human Review assistant is read-only; graph actions are unavailable')
     const candidate = [...this.actions, action]
-    validateProposal(proposalWith(candidate), this.payload)
+    validateProposal(proposalWith(candidate, { requires_human_review: this.includesReview(candidate) }), this.payload)
     this.actions.push(action)
     return this.result(tool, 'accepted', `${action.type} queued`, { action })
+  }
+
+  private includesReview(actions = this.actions) {
+    const existingReviews = new Set(graph(this.payload).nodes.filter((node) => node.kind === 'review').map((node) => node.id))
+    return actions.some((action) => action.kind === 'review' || (action.type === 'update_card' && Boolean(action.node_id && existingReviews.has(action.node_id))))
   }
 
   private kindOf(nodeId: string): ProposalCardKind | undefined {
@@ -210,7 +215,7 @@ export class AgentToolSession {
   private normalizedRule(kind: ProposalCardKind, value: unknown): string | null {
     const supplied = text(value, 2_000)
     if (kind === 'control') return supplied ?? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
-    if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_atom | on_reject=repair_loop'
+    if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_iteration | on_reject=repair_loop'
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
     return supplied
   }
@@ -337,7 +342,7 @@ export class AgentToolSession {
         })
       }
       if (tool === 'validate_plan') {
-        const proposal = validateProposal(proposalWith(this.actions), this.payload)
+        const proposal = validateProposal(proposalWith(this.actions, { requires_human_review: this.includesReview() }), this.payload)
         return this.result(tool, 'read', `${proposal.actions.length} queued action(s) satisfy the proposal contract`, {
           action_count: proposal.actions.length,
         })

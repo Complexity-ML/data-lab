@@ -53,6 +53,7 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
     const previousState = previous?.nodeStates[node.id]
     if (previousState === 'completed' || previousState === 'failed' || previousState === 'stopped') return [node.id, previousState]
     if (previousState === 'waiting' && !options.reviewDecisions?.[node.id]) return [node.id, 'waiting']
+    if (!previous && node.data.kind === 'review' && node.data.runState === 'completed') return [node.id, 'completed']
     return [node.id, 'idle' as AtomicRunState]
   }))
   if (nodes.length === 0) return { started: false, state: 'idle', nodeStates, events: [], branches: [], reason: 'A pipeline requires at least one card.' }

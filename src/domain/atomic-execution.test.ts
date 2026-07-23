@@ -65,6 +65,19 @@ describe('atomic pipeline execution state machine', () => {
     expect(resumed.events.filter((event) => event.nodeId === 'reviewed-output' && event.state === 'completed')).toHaveLength(1)
   })
 
+  it('does not pause again at a durable Human Review checkpoint that was already approved', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const review = { ...newCard('review', 1), id: 'review', data: { ...newCard('review', 1).data, runState: 'completed' as const } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const run = executePipelineAtomically([source, review, output], [
+      { id: 'source-review', source: source.id, target: review.id },
+      { id: 'review-output', source: review.id, target: output.id },
+    ])
+    expect(run.state).toBe('completed')
+    expect(run.nodeStates.review).toBe('completed')
+    expect(run.events.some((event) => event.nodeId === review.id && event.state === 'waiting')).toBe(false)
+  })
+
   it('rejects only the waiting branch while preserving an already completed parallel branch', () => {
     const source = { ...newCard('source', 0), id: 'source' }
     const review = { ...newCard('review', 1), id: 'review' }

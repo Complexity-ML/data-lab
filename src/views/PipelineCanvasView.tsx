@@ -1,5 +1,5 @@
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes } from '@xyflow/react'
-import { Activity, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, Trash2 } from 'lucide-react'
+import { FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, ScrollText, Trash2 } from 'lucide-react'
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
 import { ElasticEdge } from '../components/shared/ElasticEdge'
@@ -15,13 +15,16 @@ const miniMapColors: Record<CardKind, string> = {
 }
 
 interface PipelineCanvasViewProps {
-  activity: string
   activityBusy: boolean
+  actionsOpen: boolean
   contextMenu?: { nodeId: string; label: string; x: number; y: number }
   edges: Edge[]
   inspectorOpen: boolean
   libraryOpen: boolean
+  logsOpen: boolean
   nodes: PipelineNode[]
+  reportCount: number
+  reportsOpen: boolean
   onConnect(connection: Connection): void
   onDeleteCard(nodeId: string): void
   onDrop(event: DragEvent<HTMLDivElement>): void
@@ -32,23 +35,24 @@ interface PipelineCanvasViewProps {
   onNodesChange(changes: NodeChange<PipelineNode>[]): void
   onOpenInspector(): void
   onOpenLibrary(): void
-  onOpenActivity(): void
+  onOpenLogs(): void
+  onOpenActions(): void
   onPaneClick(): void
+  onOpenReports(): void
   onSelectNode(nodeId: string): void
   theme: 'light' | 'dark'
 }
 
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
-  const { activity, activityBusy, contextMenu, edges, inspectorOpen, libraryOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActivity, onOpenInspector, onOpenLibrary, onPaneClick, onSelectNode, theme } = props
+  const { activityBusy, actionsOpen, contextMenu, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onPaneClick, onSelectNode, reportCount, reportsOpen, theme } = props
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
     {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
-    {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><PanelRightOpen size={16} /><span>Inspector</span></button>}
-    <button aria-label="Open activity log" className={`canvas-activity${activityBusy ? ' is-busy' : ''}`} onClick={onOpenActivity} title="Open activity log in Settings" type="button">
-      <span>{activityBusy ? <LoaderCircle aria-hidden="true" /> : <Activity aria-hidden="true" />}</span>
-      <span><small>ACTIVITY</small><strong>{activity}</strong></span>
-    </button>
+    {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><span>Inspector</span><PanelRightOpen size={16} /></button>}
+    {!actionsOpen && <button aria-label="Open agent actions" className={`actions-open${activityBusy ? ' is-busy' : ''}`} onClick={onOpenActions} title="Open agent actions" type="button"><span>Actions</span>{activityBusy ? <LoaderCircle aria-hidden="true" /> : <ListChecks size={16} />}</button>}
+    {!logsOpen && <button aria-label="Open live logs" className="logs-open" onClick={onOpenLogs} title="Open live activity log" type="button"><span>Live logs</span><ScrollText size={16} /></button>}
+    {!reportsOpen && <button aria-label="Open incident reports" className={`reports-open${reportCount ? ' has-reports' : ''}`} onClick={onOpenReports} title={`${reportCount} incident report${reportCount === 1 ? '' : 's'} requiring attention`} type="button"><span>Reports</span><FileWarning size={16} />{reportCount > 0 && <em aria-label={`${reportCount} reports requiring attention`}>{reportCount > 99 ? '99+' : reportCount}</em>}</button>}
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
     <ReactFlow
       nodes={nodes}

@@ -10,6 +10,7 @@ import {
   closeWorkspaceDatabase,
   commitActiveWorkspace,
   createWorkspace,
+  deleteWorkspace,
   duplicateWorkspace,
   listWorkspaces,
   listIncidentEvents,
@@ -88,6 +89,20 @@ describe('SQLite workspace persistence', () => {
     expect(afterArchive.activeWorkspaceId).toBe(duplicateId)
     expect(afterArchive.workspaces.find((workspace) => workspace.id === firstId)?.archived).toBe(true)
     expect(listWorkspaces(target)).toHaveLength(2)
+  })
+
+  it('numbers duplicate names cleanly and permanently deletes only archived workspaces', () => {
+    const target = directory('copies')
+    const original = createWorkspace(target, 'Untitled pipeline', { projectTitle: 'Untitled pipeline' })
+    const originalId = original.activeWorkspaceId!
+    const firstCopy = duplicateWorkspace(target, originalId)
+    expect(firstCopy.activeWorkspace?.name).toBe('Untitled pipeline copy')
+    const secondCopy = duplicateWorkspace(target, firstCopy.activeWorkspaceId!)
+    expect(secondCopy.activeWorkspace?.name).toBe('Untitled pipeline copy 2')
+    expect(() => deleteWorkspace(target, originalId)).toThrow('Only an archived workspace')
+    archiveWorkspace(target, originalId)
+    const afterDelete = deleteWorkspace(target, originalId)
+    expect(afterDelete.workspaces.map((workspace) => workspace.name).sort()).toEqual(['Untitled pipeline copy', 'Untitled pipeline copy 2'])
   })
 
   it('keeps debounced drafts separate and offers recovery only after an unclean shutdown', () => {

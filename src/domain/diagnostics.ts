@@ -1,5 +1,13 @@
 export type DiagnosticCategory = 'mcp' | 'provider' | 'validation' | 'revision' | 'renderer' | 'workspace'
 export type DiagnosticStatus = 'info' | 'success' | 'warning' | 'error'
+export type DiagnosticLevel = 'all' | 'warnings' | 'errors'
+
+export interface DiagnosticSettings {
+  enabled: boolean
+  level: DiagnosticLevel
+  maximumEvents: number
+  retentionDays: number
+}
 
 export interface DiagnosticInput {
   action: string
@@ -11,7 +19,7 @@ export interface DiagnosticInput {
 export interface DiagnosticBundle {
   events: Array<DiagnosticInput & { id: string; timestamp: string }>
   generatedAt: string
-  retention: { days: number; maximumEvents: number }
+  settings: DiagnosticSettings
   schemaVersion: 1
   telemetryEnabled: false
 }

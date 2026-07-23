@@ -101,11 +101,17 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
     cancelAiProposal: vi.fn(async () => ({ cancelled: true })),
     cancelChatGPTProposal: vi.fn(async () => ({ cancelled: true })),
     getDataHubMcpStatus: vi.fn(async () => ({ mode: 'demo' as const, transport: 'demo' as const, message: 'Not connected', toolCount: 0, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } })),
+    exportDiagnostics: vi.fn(async () => ({ schemaVersion: 1 as const, generatedAt: new Date().toISOString(), telemetryEnabled: false as const, settings: { enabled: true, level: 'all' as const, retentionDays: 7, maximumEvents: 500 }, events: [] })),
+    getDiagnosticSettings: vi.fn(async () => ({ enabled: true, level: 'all' as const, retentionDays: 7, maximumEvents: 500 })),
+    saveDiagnosticSettings: vi.fn(async (settings: { enabled: boolean; level: 'all' | 'warnings' | 'errors'; retentionDays: number; maximumEvents: number }) => settings),
+    openDiagnosticLogs: vi.fn(async () => ({ opened: true as const, path: '/tmp/data-lab-diagnostics.json' })),
+    recordDiagnostic: vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() })),
     listIncidentEvents: vi.fn(async () => []),
     recordIncidentEvent: vi.fn(async () => ({ recorded: true })),
     loadWorkspaceState: vi.fn(async () => state),
     autosaveWorkspace,
     resolveWorkspaceRecovery: vi.fn(async () => ({ ...state, recovery: undefined, uncleanShutdown: false })),
+    deleteWorkspace: vi.fn(async () => state),
     getWindowState: vi.fn(async () => ({ fullscreen: false })),
     onWindowStateChanged: vi.fn(() => () => undefined),
     onHumanReviewOpened: vi.fn(() => () => undefined),
@@ -144,7 +150,7 @@ describe('visual pipeline workspace regressions', () => {
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
       objective: expect.stringContaining('governed'),
-      graph: expect.objectContaining({ nodes: [] }),
+      graph: expect.objectContaining({ nodes: expect.arrayContaining([expect.objectContaining({ kind: 'control' })]) }),
     }))
   })
 
@@ -218,7 +224,7 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
     await waitFor(() => expect(api.auditDataHubWithMcp).toHaveBeenCalledTimes(1))
 
-    expect(api.getChatGPTStatus).toHaveBeenCalledTimes(2)
+    expect(api.getChatGPTStatus).toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
     releaseStartupStatus(connectedChatGPT)
@@ -261,7 +267,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('stopped')).toBeTruthy()
   })
 
-  it('collapses and reopens Card Library and Inspector independently', async () => {
+  it('switches between Card Library, Inspector, Actions, Live logs and Reports panels', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -276,6 +282,39 @@ describe('visual pipeline workspace regressions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open inspector' }))
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
+
+    const actionsSticker = screen.getByRole('button', { name: 'Open agent actions' })
+    expect(actionsSticker.querySelector('em')).toBeNull()
+    await user.click(actionsSticker)
+    expect(screen.getByRole('button', { name: 'Close agent actions' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Open live logs' }))
+    expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
+    expect(screen.getByText('Simple session timeline · newest first')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
+    expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
+    expect(screen.getByText('No unresolved incident')).toBeTruthy()
+
+    const inspectorSticker = screen.getByRole('button', { name: 'Open inspector' })
+    expect(inspectorSticker.children[0]?.textContent).toBe('Inspector')
+    expect(inspectorSticker.children[1]?.tagName.toLowerCase()).toBe('svg')
+  })
+
+  it('shows one Reports badge per unresolved incident rather than per event', async () => {
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.listIncidentEvents = vi.fn(async () => [
+      { id: 'incident-open', incidentKey: 'orders-drift', transition: 'opened' as const, severity: 'warning' as const, title: 'Orders drift', detail: 'Schema changed.', createdAt: '2026-07-23T20:00:00.000Z' },
+      { id: 'incident-worse', incidentKey: 'orders-drift', transition: 'worsened' as const, severity: 'critical' as const, title: 'Orders drift', detail: 'More fields changed.', createdAt: '2026-07-23T20:01:00.000Z' },
+    ])
+
+    render(<App />)
+
+    expect(await screen.findByLabelText('1 reports requiring attention')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Open incident reports' }))
+    expect(screen.getByText('1 unique incident')).toBeTruthy()
+    expect(screen.getByText('1 occurrence', { exact: false })).toBeTruthy()
   })
 
   it('keeps ChatGPT sign-in retryable and reports why web preview cannot connect', async () => {
@@ -308,14 +347,14 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('ChatGPT sign-in cancelled. You can retry safely.')).toBeTruthy()
   })
 
-  it('shows sanitized connection stages in the Settings activity logger', async () => {
+  it('offers real local diagnostic controls without mixing in data incidents', async () => {
     const user = userEvent.setup()
     const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
     api.exportDiagnostics = vi.fn(async () => ({
       schemaVersion: 1 as const,
       generatedAt: '2026-07-23T23:00:00.000Z',
       telemetryEnabled: false as const,
-      retention: { days: 7, maximumEvents: 500 },
+      settings: { enabled: true, level: 'all' as const, retentionDays: 7, maximumEvents: 500 },
       events: [{ id: 'event-1', timestamp: '2026-07-23T22:59:59.000Z', category: 'provider' as const, action: 'chatgpt.connect.waiting', status: 'info' as const, detail: { stage: 'browser-approval' } }],
     }))
 
@@ -323,8 +362,10 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Open settings' }))
     await user.click(await screen.findByRole('button', { name: 'DiagnosticsLocal, private and bounded' }))
 
-    expect(await screen.findByText('chatgpt.connect.waiting')).toBeTruthy()
-    expect(screen.getByText('{"stage":"browser-approval"}')).toBeTruthy()
+    expect(await screen.findByText('Local diagnostic settings')).toBeTruthy()
+    expect(screen.getByText('Keep a local technical log')).toBeTruthy()
+    expect(screen.getByText('1 sanitized technical event stored')).toBeTruthy()
+    expect(screen.queryByText('chatgpt.connect.waiting')).toBeNull()
   })
 
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
@@ -451,8 +492,8 @@ describe('visual pipeline workspace regressions', () => {
     const flow = screen.getByTestId('pipeline-flow')
     expect(within(flow).getByText('Intended Dataset')).toBeTruthy()
     expect(within(flow).getByText('Verify and Bind Dataset')).toBeTruthy()
-    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(2)
-    expect(screen.getAllByText('2 cards', { exact: false }).length).toBeGreaterThan(0)
+    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(3)
+    expect(screen.getAllByText('3 cards', { exact: false }).length).toBeGreaterThan(0)
     expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
   })
 

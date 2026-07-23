@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { exportDiagnosticBundle, recordDiagnosticEvent, sanitizeDiagnosticValue } from './diagnostics.js'
+import { exportDiagnosticBundle, loadDiagnosticSettings, recordDiagnosticEvent, sanitizeDiagnosticValue, saveDiagnosticSettings } from './diagnostics.js'
 
 let directory: string | undefined
 afterEach(() => { if (directory) rmSync(directory, { force: true, recursive: true }); directory = undefined })
@@ -22,7 +22,18 @@ describe('privacy-safe diagnostics', () => {
     const bundle = exportDiagnosticBundle(directory)
     expect(bundle.events).toHaveLength(500)
     expect(bundle.telemetryEnabled).toBe(false)
-    expect(bundle.retention).toEqual({ days: 7, maximumEvents: 500 })
+    expect(bundle.settings).toEqual({ enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
     expect((bundle.events[0].detail as Record<string, unknown>).token).toBe('[REDACTED]')
+  })
+
+  it('applies saved detail and retention settings to real local logging', () => {
+    directory = mkdtempSync(join(tmpdir(), 'data-lab-diagnostics-settings-'))
+    expect(loadDiagnosticSettings(directory)).toEqual({ enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
+    saveDiagnosticSettings(directory, { enabled: true, level: 'warnings', retentionDays: 14, maximumEvents: 100 })
+    recordDiagnosticEvent(directory, { category: 'workspace', action: 'draft.saved', status: 'success' })
+    recordDiagnosticEvent(directory, { category: 'mcp', action: 'connection.failed', status: 'error' })
+    const bundle = exportDiagnosticBundle(directory)
+    expect(bundle.settings).toEqual({ enabled: true, level: 'warnings', retentionDays: 14, maximumEvents: 100 })
+    expect(bundle.events.map((event) => event.action)).toEqual(['connection.failed'])
   })
 })
