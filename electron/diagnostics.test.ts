@@ -36,4 +36,14 @@ describe('privacy-safe diagnostics', () => {
     expect(bundle.settings).toEqual({ enabled: true, level: 'warnings', retentionDays: 14, maximumEvents: 100 })
     expect(bundle.events.map((event) => event.action)).toEqual(['connection.failed'])
   })
+
+  it('purges and withholds historical context while diagnostics are disabled', () => {
+    directory = mkdtempSync(join(tmpdir(), 'data-lab-diagnostics-disabled-'))
+    recordDiagnosticEvent(directory, { category: 'provider', action: 'provider.failed', status: 'error' })
+    expect(exportDiagnosticBundle(directory).events).toHaveLength(1)
+    saveDiagnosticSettings(directory, { enabled: false, level: 'all', retentionDays: 7, maximumEvents: 500 })
+    expect(exportDiagnosticBundle(directory)).toMatchObject({ settings: { enabled: false }, events: [] })
+    saveDiagnosticSettings(directory, { enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
+    expect(exportDiagnosticBundle(directory).events).toEqual([])
+  })
 })

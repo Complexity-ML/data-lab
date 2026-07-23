@@ -136,7 +136,7 @@ export function recordDiagnosticEvent(userDataDirectory: string, input: unknown)
 
 export function exportDiagnosticBundle(userDataDirectory: string): DiagnosticBundle {
   const settings = loadDiagnosticSettings(userDataDirectory)
-  const events = retained(readEvents(userDataDirectory), settings).map((event) => ({ ...event, detail: sanitizeDiagnosticValue(event.detail) }))
+  const events = settings.enabled ? retained(readEvents(userDataDirectory), settings).map((event) => ({ ...event, detail: sanitizeDiagnosticValue(event.detail) })) : []
   return { schemaVersion: 1, generatedAt: new Date().toISOString(), telemetryEnabled: false, settings, events }
 }
 
@@ -146,7 +146,7 @@ export function saveDiagnosticSettings(userDataDirectory: string, input: unknown
   const temporaryPath = `${path}.tmp`
   writeFileSync(temporaryPath, JSON.stringify(settings), { encoding: 'utf8', mode: 0o600 })
   renameSync(temporaryPath, path)
-  writeEvents(userDataDirectory, retained(readEvents(userDataDirectory), settings))
+  writeEvents(userDataDirectory, settings.enabled ? retained(readEvents(userDataDirectory), settings) : [])
   return settings
 }
 

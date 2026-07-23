@@ -1,6 +1,7 @@
 import { AlertTriangle, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { recordDiagnostic } from '../../domain/diagnostics'
+import { errorMessage } from '../../domain/toasts'
 
 interface UiErrorBoundaryState { error?: Error }
 
@@ -23,7 +24,7 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, UiErrorB
         <small>RECOVERABLE INTERFACE ERROR</small>
         <h1>DATA LAB kept your last safe workspace</h1>
         <p>The renderer stopped unexpectedly. SQLite was not replaced, and no empty or failed agent run was marked successful.</p>
-        <code>{this.state.error.message}</code>
+        <code>{errorMessage(this.state.error, 'The interface stopped unexpectedly')}</code>
         <div>
           <button onClick={this.retry} type="button"><RefreshCw size={16} />Retry interface</button>
           <button onClick={() => void window.dataLab?.openDiagnosticLogs()} type="button"><FolderOpen size={16} />Open local logs</button>

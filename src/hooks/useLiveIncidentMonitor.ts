@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { Edge } from '@xyflow/react'
 import type { DataHubMcpAudit } from '../electron-api'
 import type { IncidentEventInput } from '../domain/incidents'
+import { errorMessage } from '../domain/toasts'
 import { evaluateMonitorObservation, findBoundLiveMonitors, liveMonitorBindingKey, observeDataHubAudit, type BoundLiveMonitor, type MonitorRuntimeState } from '../domain/live-monitor'
 import type { PipelineNode } from '../domain/pipeline'
 
@@ -66,14 +67,16 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
           if (!decision.transition) continue
           const incidentKey = `live-monitor:${monitor.monitorId}:${monitor.urn}`
           const detail = decision.transition === 'recovered'
-            ? `All ${observation.totalReads} monitored DataHub reads returned to normal.`
-            : `${observation.failedReads}/${observation.totalReads} monitored DataHub reads are unavailable or stale. Fingerprint ${observation.fingerprint}.`
+            ? `All ${observation.totalReads} monitored connector reads returned to normal.`
+            : `${observation.failedReads}/${observation.totalReads} monitored connector reads are unavailable or stale. Fingerprint ${observation.fingerprint}.`
           await callbacks.current.onIncident({
             incidentKey,
             transition: decision.transition,
             severity: observation.severity,
             title: `${monitor.monitorLabel} · ${monitor.sourceLabel}`,
             detail,
+            sourceSystem: 'DataHub',
+            sourceRef: monitor.urn,
             fingerprint: observation.fingerprint,
             cardId: monitor.monitorId,
             branchId: monitor.monitorId,
@@ -97,7 +100,9 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
               transition: runtime.current.get(bindingKey)?.open ? 'worsened' : 'opened',
               severity: 'critical',
               title: `${monitor.monitorLabel} · monitoring unavailable`,
-              detail: error instanceof Error ? error.message : 'DataHub monitoring failed.',
+              detail: errorMessage(error, 'Connector monitoring failed'),
+              sourceSystem: 'DataHub',
+              sourceRef: monitor.urn,
               fingerprint: 'monitor-read-error',
               cardId: monitor.monitorId,
               branchId: monitor.monitorId,

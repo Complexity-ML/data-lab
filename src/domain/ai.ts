@@ -93,6 +93,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
   if (!contract || !Array.isArray(contract.actions)) throw new Error('The AI response does not match the DATA LAB proposal contract')
 
   const knownNodeIds = new Set(nodes.map((node) => node.id))
+  const knownNodeKinds = new Map(nodes.map((node) => [node.id, node.data.kind]))
   const knownEdgeIds = new Set(edges.map((edge) => edge.id))
   const idAliases = new Map<string, string>()
   const addedNodes: PipelineNode[] = []
@@ -163,7 +164,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
   }
 
   const includesHumanReviewCard = addedNodes.some((node) => node.data.kind === 'review')
-    || updatedNodes.some((update) => update.patch.kind === 'review')
+    || updatedNodes.some((update) => update.patch.kind === 'review' || knownNodeKinds.get(update.nodeId) === 'review')
   if (contract.requires_human_review && !includesHumanReviewCard) {
     throw new Error('The agent requested Human Review without adding the required Human Review card. The graph was left unchanged.')
   }

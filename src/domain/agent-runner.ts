@@ -54,7 +54,7 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
   },
   monitor: {
     role: 'Evidence change monitor',
-    mission: 'Start a new bounded atomic iteration only when the versioned DataHub evidence fingerprint changes or severity increases.',
+    mission: 'Start a new bounded atomic iteration only when a versioned connector evidence fingerprint changes or severity increases.',
     input: 'CurrentEvidence + PreviousEvidenceFingerprint',
     output: 'NoChange | BoundedIterationTrigger | HumanAlert',
     allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],

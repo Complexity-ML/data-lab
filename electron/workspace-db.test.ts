@@ -105,6 +105,25 @@ describe('SQLite workspace persistence', () => {
     expect(afterDelete.workspaces.map((workspace) => workspace.name).sort()).toEqual(['Untitled pipeline copy', 'Untitled pipeline copy 2'])
   })
 
+  it('purges incident history when its archived workspace is permanently deleted', () => {
+    const target = directory('delete-incidents')
+    const workspace = createWorkspace(target, 'Disposable monitor', { projectTitle: 'Disposable monitor' })
+    const workspaceId = workspace.activeWorkspaceId!
+    recordIncidentEvent(target, {
+      incidentKey: 'connector:orders',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Orders unavailable',
+      detail: 'Connector read failed.',
+      sourceSystem: 'Kafka',
+      sourceRef: 'topic:orders',
+    })
+    expect(listIncidentEvents(target)).toHaveLength(1)
+    archiveWorkspace(target, workspaceId)
+    deleteWorkspace(target, workspaceId)
+    expect(listIncidentEvents(target)).toEqual([])
+  })
+
   it('keeps debounced drafts separate and offers recovery only after an unclean shutdown', () => {
     const target = directory('recovery')
     createWorkspace(target, 'Orders', { projectTitle: 'Orders', nodes: [{ id: 'baseline' }], versions: [] })
@@ -173,6 +192,8 @@ describe('SQLite workspace persistence', () => {
       severity: 'warning',
       title: 'Customer evidence unavailable',
       detail: 'get_entities timed out',
+      sourceSystem: 'DataHub',
+      sourceRef: 'urn:li:dataset:customers',
       fingerprint: 'warning-v1',
       cardId: 'customers-source',
     })
@@ -220,5 +241,6 @@ describe('SQLite workspace persistence', () => {
 
     expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['opened', 'recovered', 'worsened', 'opened'])
     expect(listIncidentEvents(target)[0].fingerprint).toBe('warning-v2')
+    expect(listIncidentEvents(target).at(-1)).toMatchObject({ sourceSystem: 'DataHub', sourceRef: 'urn:li:dataset:customers' })
   })
 })

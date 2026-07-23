@@ -7,6 +7,8 @@ export interface IncidentEventInput {
   severity: IncidentSeverity
   title: string
   detail: string
+  sourceSystem?: string
+  sourceRef?: string
   fingerprint?: string
   cardId?: string
   branchId?: string
@@ -35,6 +37,8 @@ export interface IncidentSummary {
   openedAt: string
   updatedAt: string
   resolvedAt?: string
+  sourceSystem?: string
+  sourceRef?: string
   fingerprint?: string
   occurrenceCount: number
   eventCount: number
@@ -86,6 +90,8 @@ export function summarizeIncidentEvents(events: IncidentEvent[]): IncidentSummar
       openedAt,
       updatedAt: latest.createdAt,
       resolvedAt: latest.transition === 'recovered' ? latest.createdAt : undefined,
+      sourceSystem: latest.sourceSystem,
+      sourceRef: latest.sourceRef,
       fingerprint: latest.fingerprint,
       occurrenceCount: Math.max(1, occurrenceCount),
       eventCount: ordered.length,

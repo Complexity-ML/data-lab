@@ -90,4 +90,17 @@ describe('visual SCSS contracts', () => {
     expect(close.get('pointer-events')).toBe('auto')
     expect(close.get('-webkit-app-region')).toBe('no-drag')
   })
+
+  it('keeps every canvas sticker equal-sized and compacts each side without holes', () => {
+    const stack = declarations('.canvas-sticker-stack')
+    const stickers = declarations('.inspector-open, .library-open, .actions-open, .logs-open, .reports-open')
+
+    expect(stack.get('display')).toBe('grid')
+    expect(stack.get('grid-auto-flow')).toBe('row')
+    expect(stack.get('grid-auto-rows')).toBe('34px')
+    expect(stack.get('gap')).toBe('8px')
+    expect(stickers.get('width')).toBe('108px')
+    expect(stickers.get('height')).toBe('34px')
+    expect(stickers.get('min-height')).toBe('34px')
+  })
 })

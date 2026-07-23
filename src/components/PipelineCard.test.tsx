@@ -29,4 +29,11 @@ describe('Pipeline card ports', () => {
       ['source', 'feedback'],
     ])
   })
+
+  it('keeps the global DATA LAB Controller outside dataset lineage', () => {
+    const controller = newCard('control', 0)
+    render(PipelineCard({ data: controller.data, selected: false } as never))
+    expect(screen.queryAllByTestId('pipeline-handle')).toEqual([])
+    expect(screen.getByText('Player')).toBeTruthy()
+  })
 })

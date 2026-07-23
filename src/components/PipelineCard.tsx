@@ -25,9 +25,10 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
+  const isControl = data.kind === 'control'
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
-    {!isSource && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
+    {!isSource && !isControl && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
     <header>
       <span className="card-icon"><Icon size={16} /></span>
       <span className="card-kind">{data.kind}</span>
@@ -57,7 +58,7 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
       <span>{data.owner}</span>
       {data.datahubUrn && <span className="datahub-badge">DataHub</span>}
     </footer>
-    {!isOutput && !isSplit && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
+    {!isOutput && !isSplit && !isControl && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
     {isOutput && <>
       <Handle className="pipeline-handle output-feedback" id="feedback" position={Position.Right} type="source" />
       <span className="feedback-label">feedback</span>

@@ -52,6 +52,8 @@ export interface IncidentEventInput {
   severity: 'info' | 'warning' | 'critical'
   title: string
   detail: string
+  sourceSystem?: string
+  sourceRef?: string
   fingerprint?: string
   cardId?: string
   branchId?: string
@@ -72,6 +74,8 @@ type IncidentRow = {
   severity: IncidentEventInput['severity']
   title: string
   detail: string
+  source_system: string | null
+  source_ref: string | null
   fingerprint: string | null
   card_id: string | null
   branch_id: string | null
@@ -163,6 +167,8 @@ function db(userDataDirectory: string) {
       severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
       title TEXT NOT NULL,
       detail TEXT NOT NULL,
+      source_system TEXT,
+      source_ref TEXT,
       fingerprint TEXT,
       card_id TEXT,
       branch_id TEXT,
@@ -175,6 +181,8 @@ function db(userDataDirectory: string) {
   `)
   const incidentColumns = database.prepare('PRAGMA table_info(incident_events)').all() as unknown as { name: string }[]
   if (!incidentColumns.some((column) => column.name === 'fingerprint')) database.exec('ALTER TABLE incident_events ADD COLUMN fingerprint TEXT')
+  if (!incidentColumns.some((column) => column.name === 'source_system')) database.exec('ALTER TABLE incident_events ADD COLUMN source_system TEXT')
+  if (!incidentColumns.some((column) => column.name === 'source_ref')) database.exec('ALTER TABLE incident_events ADD COLUMN source_ref TEXT')
   migrateLegacyWorkspace(database)
   return database
 }
@@ -311,8 +319,17 @@ export function deleteWorkspace(userDataDirectory: string, workspaceId: unknown)
   if (typeof workspaceId !== 'string') throw new Error('Invalid workspace ID')
   const target = db(userDataDirectory)
   if (readSetting(target, ACTIVE_WORKSPACE_KEY) === workspaceId) throw new Error('The active workspace cannot be deleted')
-  const result = target.prepare('DELETE FROM workspaces WHERE id = ? AND archived = 1').run(workspaceId)
-  if (Number(result.changes) !== 1) throw new Error('Only an archived workspace can be deleted')
+  const workspace = readWorkspaceRow(target, workspaceId)
+  if (!workspace || workspace.archived !== 1) throw new Error('Only an archived workspace can be deleted')
+  target.exec('BEGIN')
+  try {
+    target.prepare('DELETE FROM incident_events WHERE workspace_id = ?').run(workspaceId)
+    target.prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId)
+    target.exec('COMMIT')
+  } catch (error) {
+    target.exec('ROLLBACK')
+    throw error
+  }
   return currentState(target, false)
 }
 
@@ -416,6 +433,8 @@ function incidentFromRow(row: IncidentRow): IncidentEvent {
     severity: row.severity,
     title: row.title,
     detail: row.detail,
+    sourceSystem: row.source_system ?? undefined,
+    sourceRef: row.source_ref ?? undefined,
     fingerprint: row.fingerprint ?? undefined,
     cardId: row.card_id ?? undefined,
     branchId: row.branch_id ?? undefined,
@@ -468,6 +487,8 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     severity: value.severity as IncidentEventInput['severity'],
     title,
     detail,
+    sourceSystem: optional(value.sourceSystem),
+    sourceRef: optional(value.sourceRef),
     fingerprint,
     cardId: optional(value.cardId),
     branchId: optional(value.branchId),
@@ -475,9 +496,9 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     createdAt: new Date().toISOString(),
   }
   target.prepare(`
-    INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, fingerprint, card_id, branch_id, version_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(event.id, event.workspaceId ?? null, event.incidentKey, event.transition, event.severity, event.title, event.detail, event.fingerprint ?? null, event.cardId ?? null, event.branchId ?? null, event.versionId ?? null, event.createdAt)
+    INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, source_system, source_ref, fingerprint, card_id, branch_id, version_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(event.id, event.workspaceId ?? null, event.incidentKey, event.transition, event.severity, event.title, event.detail, event.sourceSystem ?? null, event.sourceRef ?? null, event.fingerprint ?? null, event.cardId ?? null, event.branchId ?? null, event.versionId ?? null, event.createdAt)
   target.prepare("DELETE FROM incident_events WHERE julianday(created_at) < julianday('now', '-30 days')").run()
   return { recorded: true, event }
 }
