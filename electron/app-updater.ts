@@ -38,13 +38,18 @@ export class AppUpdateController {
     window: () => BrowserWindow | undefined
     statusChannel: string
   }) {
+    const unavailableMessage = options.platform === 'win32'
+      ? 'Updates require a signed DATA LAB Windows installer. Unsigned development packages stay offline.'
+      : options.platform === 'darwin'
+        ? 'Updates are available only in a signed DATA LAB macOS application.'
+        : 'Automatic desktop updates are not available on this platform.'
     this.status = withUpdateCapabilities({
       currentVersion: options.currentVersion,
       channel: options.channel,
       phase: 'unavailable',
       currentSignatureVerified: false,
       downloadedSignatureEnforced: false,
-      message: 'Updates are available only in a signed DATA LAB macOS application.',
+      message: unavailableMessage,
     })
     this.publish = (status) => {
       this.status = status
@@ -62,7 +67,7 @@ export class AppUpdateController {
     this.updater.on('update-available', (info: UpdateInfo) => this.transition('available', `DATA LAB ${info.version} is available. Download requires your approval.`, { availableVersion: info.version }))
     this.updater.on('update-not-available', (info: UpdateInfo) => this.transition('ready', `DATA LAB ${this.options.currentVersion} is current on the ${this.status.channel} channel.`, { availableVersion: info.version }))
     this.updater.on('download-progress', (progress: ProgressInfo) => this.transition('downloading', `Downloading ${this.status.availableVersion ?? 'the signed update'}…`, { progress: Math.max(0, Math.min(100, progress.percent)) }))
-    this.updater.on('update-downloaded', (event: UpdateDownloadedEvent) => this.transition('downloaded', `DATA LAB ${event.version} is downloaded. macOS will enforce its code signature during installation.`, { availableVersion: event.version, progress: 100 }))
+    this.updater.on('update-downloaded', (event: UpdateDownloadedEvent) => this.transition('downloaded', `DATA LAB ${event.version} is downloaded. The operating system will enforce its code signature during installation.`, { availableVersion: event.version, progress: 100 }))
     this.updater.on('error', (error) => this.transition('error', 'The update was stopped safely.', { error: safeError(error) }))
   }
 

@@ -63,6 +63,8 @@ npm run build:electron
 
 Signed macOS releases provide x64 and arm64 DMG/ZIP artifacts, a default Stable channel, and an explicit Main preview channel. See [macOS releases and updater security](docs/macos-releases.md).
 
+Windows keeps its standard system title bar and native minimize, maximize and close controls outside the DATA LAB interface. The Windows CI workflow builds and verifies an unsigned x64 NSIS/ZIP smoke package; unsigned builds cannot use the updater. See [Windows desktop support](docs/windows-desktop.md).
+
 ## Connect a local DataHub Quickstart
 
 DataHub's official Quickstart requires Docker with Compose v2, Python 3.10+, and enough Docker resources. The documented tested allocation is 2 CPUs, 8 GB RAM, 2 GB swap and 13 GB disk.
@@ -166,7 +168,3 @@ Optional synthetic scenarios are loaded explicitly from **Settings → Examples*
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
-
-## Pre-existing work disclosure
-
-DATA LAB was started during the hackathon. Its graph placement implementation in `src/domain/layout.ts` adapts the connected-component, layered-topology and barycentric-sweep approach from the author's pre-existing Apache-2.0 [LABO AI](https://github.com/Complexity-ML/labo-ai) project. The DataHub/MCP integration, data-card domain, provider contracts, atomic review workflow and submission evidence were created specifically for DATA LAB.
