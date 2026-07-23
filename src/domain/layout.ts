@@ -2,7 +2,10 @@ import type { Edge } from '@xyflow/react'
 import type { PipelineNode } from './pipeline'
 
 const cardWidth = 232
-const cardHeight = 132
+// Cards with a wrapped description, rule and footer render much taller than
+// their CSS minimum. Keep the layout collision box aligned with the common
+// rendered height so neighbouring components cannot visually overlap.
+const cardHeight = 192
 const gridSpacing = 24
 const horizontalGap = 96
 const verticalGap = 60
@@ -11,6 +14,7 @@ const layoutStartX = 72
 const layoutStartY = 72
 const horizontalStep = Math.ceil((cardWidth + horizontalGap) / gridSpacing) * gridSpacing
 const verticalStep = Math.ceil((cardHeight + verticalGap) / gridSpacing) * gridSpacing
+const controlLaneHeight = Math.ceil((cardHeight + componentGap) / gridSpacing) * gridSpacing
 
 type Position = { x: number; y: number }
 
@@ -198,13 +202,26 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
   const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
   const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
   if (arranged.size === 0) return nodes
+  const controls = nodes.filter((node) => arranged.has(node.id) && node.data.kind === 'control')
+  const lineageArranged = new Set([...arranged].filter((id) => !controls.some((control) => control.id === id)))
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => ({ ...node.position }))
   const positions = new Map<string, Position>()
-  const components = connectedComponents(nodes, iterationEdges, arranged)
   let fullCursorY = layoutStartY
 
   try {
+    // DATA LAB Controller is a global player policy, not a lineage atom. Keep
+    // it in a reserved floating lane so regular topology layers never reuse
+    // the same visual space.
+    for (const [index, control] of controls.entries()) {
+      let placed = { x: snap(layoutStartX + index * horizontalStep), y: snap(layoutStartY) }
+      while (collides(placed, occupied)) placed = { ...placed, y: placed.y + verticalStep }
+      positions.set(control.id, placed)
+      occupied.push(placed)
+    }
+    if (controls.length > 0) fullCursorY += controlLaneHeight
+
+    const components = connectedComponents(nodes, iterationEdges, lineageArranged)
     for (const componentIds of components) {
       const ids = new Set(componentIds)
       const localNodes = nodes.filter((node) => ids.has(node.id))
@@ -219,9 +236,11 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
       baseX = snap(baseX)
       baseY = snap(baseY)
       if (external.length > 0) {
-        const offsets = [0, 1, -1, 2, -2, 3, -3, 4]
-        const clear = offsets.find((step) => [...local.positions.values()].every((position) => !collides({ x: position.x + baseX, y: position.y + baseY + step * verticalStep }, occupied))) ?? 4
-        baseY += clear * verticalStep
+        const offsets = [0, ...Array.from({ length: 16 }, (_, index) => [index + 1, -(index + 1)]).flat()]
+        const clear = offsets.find((step) => [...local.positions.values()].every((position) => !collides({ x: position.x + baseX, y: position.y + baseY + step * verticalStep }, occupied)))
+        baseY = clear === undefined
+          ? snap(Math.max(layoutStartY, ...occupied.map((position) => position.y + cardHeight + verticalGap)))
+          : baseY + clear * verticalStep
       }
       for (const [id, position] of local.positions) {
         const placed = { x: snap(position.x + baseX), y: snap(position.y + baseY) }

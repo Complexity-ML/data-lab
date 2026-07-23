@@ -45,6 +45,12 @@ describe('continuous incident lifecycle', () => {
     expect(evaluateMonitorObservation(opened.next, healthy, policy)).toMatchObject({ transition: 'recovered', triggerAgent: false, next: { open: false, iterations: 0 } })
   })
 
+  it('parses second, minute and hour cooldown units', () => {
+    expect(parseLiveMonitorPolicy('cooldown=30s').cooldownMs).toBe(30_000)
+    expect(parseLiveMonitorPolicy('cooldown=30m').cooldownMs).toBe(1_800_000)
+    expect(parseLiveMonitorPolicy('cooldown=1h').cooldownMs).toBe(3_600_000)
+  })
+
   it('binds a monitor to its upstream governed source and ignores feedback edges', () => {
     const nodes = [
       { id: 'source', data: { kind: 'source', label: 'Orders', datahubUrn: 'urn:orders', description: '', owner: '', status: 'healthy', schema: [] }, position: { x: 0, y: 0 }, type: 'pipeline' },

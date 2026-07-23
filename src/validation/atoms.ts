@@ -181,7 +181,7 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       detail: 'Live Monitor must open a new bounded iteration instead of creating an in-run cycle.',
     }))
     if (!/on_change\(metadata_fingerprint\)/i.test(node.data.rule ?? '')
-      || !/cooldown=\d+s/i.test(node.data.rule ?? '')
+      || !/cooldown\s*=\s*\d+\s*(?:s|m|h)?\b/i.test(node.data.rule ?? '')
       || !/max_iterations=\d+/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
       id: `monitor-policy-${nodeId}`,
       severity: 'error',
@@ -273,7 +273,7 @@ export const cardContractsAtom: ValidationAtom = {
       const findings: ValidationIssue[] = []
       const globalControl = node.data.kind === 'control'
       if (!globalControl && node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
-      if (!globalControl && node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
+      if (!globalControl && node.data.kind !== 'output' && node.data.kind !== 'review' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
     })
   },

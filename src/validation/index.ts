@@ -21,14 +21,15 @@ export function validatePipeline(nodes: PipelineNode[], edges: Edge[]): Validati
 
 /**
  * A reviewed diff may intentionally build a pipeline in small, replayable steps.
- * Missing terminals and temporarily orphaned cards keep the pipeline non-runnable,
- * but they must not prevent a safe graph transaction from being committed.
+ * Missing terminals keep the pipeline non-runnable, but they do not prevent a
+ * safe graph transaction. Orphaned lineage cards do block the transaction:
+ * every coherent iteration must preserve its connectors. Human Review may be a
+ * temporary terminal checkpoint and is handled by its warning-level contract.
  */
 export function atomicTransactionBlockers(issues: ValidationIssue[]): ValidationIssue[] {
   return issues.filter((issue) => {
     if (issue.severity !== 'error') return false
     if (issue.atomId === 'pipeline-presence' || issue.atomId === 'pipeline-terminals') return false
-    if (issue.atomId === 'card-contracts' && /^orphan-(?:input|output)-/.test(issue.id)) return false
     return true
   })
 }

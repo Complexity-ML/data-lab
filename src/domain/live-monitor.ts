@@ -53,7 +53,10 @@ function stableHash(value: string) {
 }
 
 export function parseLiveMonitorPolicy(rule?: string): LiveMonitorPolicy {
-  const cooldownSeconds = Number(rule?.match(/cooldown\s*=\s*(\d+)/i)?.[1] ?? 60)
+  const cooldown = rule?.match(/cooldown\s*=\s*(\d+)\s*([smh])?/i)
+  const cooldownAmount = Number(cooldown?.[1] ?? 60)
+  const cooldownMultiplier = cooldown?.[2]?.toLowerCase() === 'h' ? 3_600 : cooldown?.[2]?.toLowerCase() === 'm' ? 60 : 1
+  const cooldownSeconds = cooldownAmount * cooldownMultiplier
   const maxIterations = Number(rule?.match(/max_iterations\s*=\s*(\d+)/i)?.[1] ?? 10)
   return {
     cooldownMs: Math.min(3_600, Math.max(10, cooldownSeconds)) * 1_000,
