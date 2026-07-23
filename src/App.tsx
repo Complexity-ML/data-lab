@@ -374,11 +374,18 @@ export default function App() {
     }
   }
 
+  const fitCommittedGraph = () => {
+    window.requestAnimationFrame(() => {
+      void flowInstance.current?.fitView({ duration: 240, padding: 0.22 })
+    })
+  }
+
   const approveAgentProposal = async (writebackRequested: boolean) => {
     const currentProposal = proposal
     const revisionId = pendingVersionId
     const relatedAssets = [...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]
     if (!currentProposal || !approveProposal()) return false
+    fitCommittedGraph()
     if (!writebackRequested) return true
     if (!revisionId) {
       setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
@@ -438,7 +445,9 @@ export default function App() {
       initialSection={settingsSection}
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
-      onApprovePendingReview={approvePendingVersion}
+      onApprovePendingReview={(versionId) => {
+        if (approvePendingVersion(versionId)) fitCommittedGraph()
+      }}
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
