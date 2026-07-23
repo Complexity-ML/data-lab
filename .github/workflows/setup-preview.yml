@@ -64,6 +64,13 @@ jobs:
           test "$ROOT_VERSION" = "$SETUP_VERSION"
           grep -q "^version = \"$ROOT_VERSION\"$" apps/bootstrap-installer/src-tauri/Cargo.toml
 
+      - name: Verify Setup application icons
+        shell: bash
+        run: |
+          test -s apps/bootstrap-installer/src-tauri/icons/icon.png
+          test -s apps/bootstrap-installer/src-tauri/icons/icon.icns
+          test -s apps/bootstrap-installer/src-tauri/icons/icon.ico
+
       - name: Build macOS Setup DMG
         if: matrix.platform == 'macOS'
         run: |
