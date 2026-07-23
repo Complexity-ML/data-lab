@@ -15,6 +15,8 @@
     "electron:dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "electron:start": "npm run build && npm run build:electron && electron .",
     "package:mac:dir": "npm run build && npm run build:electron && electron-builder --mac dir --publish never",
+    "verify:datahub-oss": "node scripts/verify-datahub-oss.mjs --query=email",
+    "verify:datahub-agent": "npm run build:electron && node scripts/generate-datahub-agent-proposal.mjs --confirm-external-share",
     "test": "vitest run",
     "preview": "vite preview"
   },
