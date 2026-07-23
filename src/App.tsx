@@ -39,6 +39,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState('')
   const [proposal, setProposal] = useState<AgentProposal>()
   const [proposalReviewOpen, setProposalReviewOpen] = useState(false)
+  const [proposalApprovalBusy, setProposalApprovalBusy] = useState(false)
   const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
   const [agentRunning, setAgentRunning] = useState(false)
@@ -58,6 +59,7 @@ export default function App() {
   const graphHistory = useGraphHistory({ edges, nodes, setActivity, setEdges, setNodes })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
+  const proposalApprovalRunning = useRef(false)
   const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
@@ -383,31 +385,48 @@ export default function App() {
   }
 
   const approveAgentProposal = async (writebackRequested: boolean) => {
-    const currentProposal = proposal
-    const revisionId = pendingVersionId
-    const relatedAssets = [...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]
-    if (!currentProposal || !approveProposal()) return false
-    fitCommittedGraph()
-    if (!writebackRequested) return true
-    if (!revisionId) {
-      setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
-      return true
-    }
+    if (proposalApprovalRunning.current) return false
+    proposalApprovalRunning.current = true
+    setProposalApprovalBusy(true)
     try {
-      setActivity('Revision committed locally · writing the explicitly approved Decision to DataHub…')
-      const result = await writeDataHubDecision({
-        revisionId,
-        title: currentProposal.title,
-        rationale: currentProposal.rationale,
-        author: 'DATA LAB operator',
-        relatedAssets,
-      })
-      setActivity(`Revision committed locally · DataHub write-back succeeded · ${result.summary}`)
+      const currentProposal = proposal
+      const revisionId = pendingVersionId
+      const relatedAssets = [...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]
+      if (!currentProposal) {
+        notifyToast('The reviewed proposal is no longer pending. The graph was not changed.', 'error', 'Approval unavailable')
+        return false
+      }
+      if (!approveProposal()) return false
+      fitCommittedGraph()
+      if (!writebackRequested) return true
+      if (!revisionId) {
+        setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
+        return true
+      }
+      try {
+        setActivity('Revision committed locally · writing the explicitly approved Decision to DataHub…')
+        const result = await writeDataHubDecision({
+          revisionId,
+          title: currentProposal.title,
+          rationale: currentProposal.rationale,
+          author: 'DATA LAB operator',
+          relatedAssets,
+        })
+        setActivity(`Revision committed locally · DataHub write-back succeeded · ${result.summary}`)
+      } catch (error) {
+        notifyError(error, 'DataHub write-back failed')
+        setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
+      }
+      return true
     } catch (error) {
-      notifyError(error, 'DataHub write-back failed')
-      setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
+      notifyError(error, 'Unable to apply the reviewed graph')
+      setActivity(`Approval failed · ${error instanceof Error ? error.message : 'unexpected graph transaction error'} · graph unchanged`)
+      recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'error', detail: { message: error instanceof Error ? error.message : 'unknown error' } })
+      return false
+    } finally {
+      proposalApprovalRunning.current = false
+      setProposalApprovalBusy(false)
     }
-    return true
   }
 
   useKeyboardShortcuts({
@@ -426,6 +445,7 @@ export default function App() {
     {workspacePersistence.recovery && <WorkspaceRecoveryModal onDiscard={() => void workspacePersistence.resolveRecovery('discard')} onRecover={() => void workspacePersistence.resolveRecovery('recover')} updatedAt={workspacePersistence.recovery.updatedAt} />}
     {shortcutsOpen && <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />}
     {proposal && proposalReviewOpen && <ProposalReviewModal
+      applying={proposalApprovalBusy}
       proposal={proposal}
       relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
       revisionId={pendingVersionId}
