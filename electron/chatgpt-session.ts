@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { proposalSchema } from './ai-provider.js'
+import { proposalSchema } from './proposal-schema.js'
 import { parseAndValidateProposal } from './proposal-contract.js'
 
 export interface ChatGPTModelOption { id: string; label: string; description?: string; efforts: string[]; defaultEffort?: string; isDefault: boolean }

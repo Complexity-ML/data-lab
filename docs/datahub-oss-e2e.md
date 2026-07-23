@@ -46,10 +46,18 @@ Bind the discovered `order_details` URN to a Data Source card, run the agent, in
 Running the connected AI provider sends the sanitized showcase URN, field classifications, lineage counts, graph, and validation finding to that external provider. It never sends raw rows or credentials. Perform this step only after approving that disclosure:
 
 ```bash
-npm run verify:datahub-agent
+npm run verify:datahub-agent -- --confirm-external-share
 ```
 
-The command includes an explicit external-sharing acknowledgement and uses the connected ChatGPT account in a read-only, ephemeral planning thread. DATA LAB denies tool requests and validates the returned strict proposal contract before graph materialization.
+The flag is the explicit external-sharing acknowledgement; the npm script does not add it automatically. The verifier first repeats the three live MCP reads, then uses the connected ChatGPT account in a read-only, ephemeral planning thread. DATA LAB denies tool requests and validates the returned strict proposal contract. It writes a private `provider-proposal.pending.json` artifact and does not claim that the graph changed.
+
+Inspect the exact pending card and edge actions. Only after accepting that diff, run:
+
+```bash
+npm run approve:datahub-agent -- --approve-reviewed-diff
+```
+
+The second explicit flag records the human decision, materializes the provider proposal through DATA LAB's production graph adapter, runs the real pipeline validation and atomic execution checks, and only then publishes `examples/datahub-oss/provider-reviewed-workflow.json`. A failed check preserves the pending proposal and leaves the active graph unchanged.
 
 ## 5. Stop without deleting local state
 

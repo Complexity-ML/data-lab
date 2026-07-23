@@ -18,7 +18,8 @@
     "package:mac:release": "npm run build && npm run build:electron && electron-builder --mac dmg zip --x64 --arm64 --publish always",
     "verify:electron-load": "npm run build:electron && node scripts/verify-electron-load.mjs",
     "verify:datahub-oss": "node scripts/verify-datahub-oss.mjs --query=email",
-    "verify:datahub-agent": "npm run build:electron && node scripts/generate-datahub-agent-proposal.mjs --confirm-external-share",
+    "verify:datahub-agent": "npm run build:electron && node scripts/generate-datahub-agent-proposal.mjs",
+    "approve:datahub-agent": "npm run build:electron && node scripts/approve-datahub-agent-proposal.mjs",
     "test": "vitest run && npm run verify:electron-load",
     "preview": "vite preview"
   },
