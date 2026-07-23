@@ -35,6 +35,17 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
   useEffect(() => { callbacks.current = { audit, onIncident, onTrigger } }, [audit, onIncident, onTrigger])
 
   useEffect(() => {
+    if (!active) {
+      pendingTriggers.current.clear()
+      return
+    }
+    const activeBindings = new Set(monitors.map(liveMonitorBindingKey))
+    for (const bindingKey of pendingTriggers.current.keys()) {
+      if (!activeBindings.has(bindingKey)) pendingTriggers.current.delete(bindingKey)
+    }
+  }, [active, monitors])
+
+  useEffect(() => {
     if (!active || monitors.length === 0) return
     let disposed = false
 
