@@ -1,6 +1,15 @@
 name: Build DATA LAB Setup installers
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'apps/bootstrap-installer/**'
+      - '.github/workflows/setup-preview.yml'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
@@ -103,6 +112,7 @@ jobs:
   publish:
     name: Publish Setup pre-release
     needs: package
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
