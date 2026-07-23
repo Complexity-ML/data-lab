@@ -8,7 +8,7 @@ import { KeyboardShortcutsModal } from './components/shared/KeyboardShortcutsMod
 import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
 import { materializeAiProposal } from './domain/ai'
 import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
-import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './domain/atomic-execution'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, resumePipelineAtomically, type AtomicPipelineRun } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { addDataProfileToProposal, dataProfileEvidence, isDataProfileFresh } from './domain/data-profile'
 import { layoutPipeline } from './domain/layout'
@@ -54,16 +54,47 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
+  const agentRunId = useRef(0)
+  const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
+  const proposalApprovalRunning = useRef(false)
+  const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
+
+  const resolveAtomicReview = (candidateNodes: PipelineNode[], candidateEdges: typeof edges, decision: 'approved' | 'rejected') => {
+    const previous = activeAtomicRun.current
+    if (!previous || previous.state !== 'waiting') return candidateNodes
+    const reviewDecisions = Object.fromEntries(candidateNodes
+      .filter((node) => node.data.kind === 'review' && previous.nodeStates[node.id] === 'waiting')
+      .map((node) => [node.id, decision]))
+    if (Object.keys(reviewDecisions).length === 0) return candidateNodes
+    try {
+      const resumed = resumePipelineAtomically(candidateNodes, candidateEdges, previous, reviewDecisions)
+      activeAtomicRun.current = resumed
+      return applyAtomicRunState(candidateNodes, resumed)
+    } catch (error) {
+      recordDiagnostic({ category: 'provider', action: 'branch.resume', status: 'error', detail: { decision, message: error instanceof Error ? error.message : 'unknown resume error' } })
+      return candidateNodes
+    }
+  }
+
   const appUpdates = useAppUpdates(setActivity)
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writebackAvailable: dataHubWritebackAvailable, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
-  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
+  const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({
+    edges,
+    nodes,
+    proposal,
+    resolveApprovedExecution: (candidateNodes, candidateEdges) => resolveAtomicReview(candidateNodes, candidateEdges, 'approved'),
+    resolveRejectedExecution: (candidateNodes, candidateEdges) => resolveAtomicReview(candidateNodes, candidateEdges, 'rejected'),
+    setActivity,
+    setEdges,
+    setNodes,
+    setProjectTitle,
+    setProposal,
+    setSelectedId,
+  })
   const workspacePersistence = useWorkspacePersistence({ edges, inspectorOpen, libraryOpen, nodes, projectTitle, setActivity, setEdges, setInspectorOpen, setLibraryOpen, setNodes, setProjectTitle, setSelectedId, setVersions, versions })
   const graphHistory = useGraphHistory({ edges, nodes, setActivity, setEdges, setNodes })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
-  const agentRunId = useRef(0)
-  const proposalApprovalRunning = useRef(false)
-  const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
   const errors = issues.filter((issue) => issue.severity === 'error')
@@ -187,6 +218,7 @@ export default function App() {
     setAgentRunning(true)
     const runId = ++agentRunId.current
     const atomicRun = executePipelineAtomically(nodes, edges)
+    activeAtomicRun.current = atomicRun
     setNodes((current) => applyAtomicRunState(current, atomicRun))
     setActivity('Agent reading the current graph, atomic findings and version history…')
     const source = nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
@@ -314,6 +346,7 @@ export default function App() {
     setAgentRunning(true)
     const runId = ++agentRunId.current
     const atomicRun = executePipelineAtomically(nodes, edges)
+    activeAtomicRun.current = atomicRun
     setNodes((current) => applyAtomicRunState(current, atomicRun))
     const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.providers[activeAiSource].model
     setActivity(`${activeModel} is reviewing ${selected.data.label} with version context…`)
@@ -353,6 +386,7 @@ export default function App() {
     agentRunId.current += 1
     setAgentRunning(false)
     setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
+    activeAtomicRun.current = undefined
     setActivity('Emergency stop · current agent run cancelled · active branch unchanged')
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()

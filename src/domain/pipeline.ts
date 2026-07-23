@@ -87,6 +87,7 @@ export interface AgentProposal {
   confidence?: number
   model?: string
   runTrace?: AgentRunTraceStep[]
+  toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
 export const cardLabels: Record<CardKind, string> = {

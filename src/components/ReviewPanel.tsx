@@ -36,6 +36,11 @@ export function ReviewPanel({ applying = false, proposal, relatedAssets, revisio
           <ol>{proposal.runTrace.map((step, index) => <li className={`trace-${step.state}`} key={`${step.nodeId}-${index}`}><span>{index + 1}</span><div><strong>{step.label}</strong><small>{step.role} · {step.summary}</small></div></li>)}</ol>
         </section> : null}
 
+        {proposal.toolTrace?.length ? <section className="review-section run-trace agent-tool-trace">
+          <h3><Sparkles size={15} /> Agent tools</h3>
+          <ol>{proposal.toolTrace.map((step, index) => <li className={`trace-${step.status === 'rejected' ? 'failed' : 'completed'}`} key={`${step.tool}-${index}`}><span>{index + 1}</span><div><strong>{step.tool}</strong><small>{step.status} · {step.summary}</small></div></li>)}</ol>
+        </section> : null}
+
         <section className="review-section">
           <h3><DatabaseZap size={15} /> DataHub context read</h3>
           <ol>{proposal.datahubReads.map((item) => <li key={item}><code>{item}</code></li>)}</ol>

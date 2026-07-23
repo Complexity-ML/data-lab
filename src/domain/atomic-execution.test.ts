@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically } from './atomic-execution'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, resumePipelineAtomically } from './atomic-execution'
 import { customerActivationEdges, customerActivationNodes, newCard } from './pipeline'
 
 describe('atomic pipeline execution state machine', () => {
@@ -28,6 +28,64 @@ describe('atomic pipeline execution state machine', () => {
     ])
     expect(run.state).toBe('waiting')
     expect(run.branches).toEqual(expect.arrayContaining([{ outputId: 'reviewed-output', state: 'waiting' }, { outputId: 'direct-output', state: 'completed' }]))
+  })
+
+  it('resumes only the reviewed branch from its checkpoint without replaying completed cards', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const split = { ...newCard('split', 1), id: 'split' }
+    const review = { ...newCard('review', 2), id: 'review' }
+    const reviewedOutput = { ...newCard('output', 3), id: 'reviewed-output' }
+    const directOutput = { ...newCard('output', 4), id: 'direct-output' }
+    const graphNodes = [source, split, review, reviewedOutput, directOutput]
+    const graphEdges = [
+      { id: 'source-split', source: 'source', target: 'split' },
+      { id: 'split-review', source: 'split', target: 'review', sourceHandle: 'approved' },
+      { id: 'review-output', source: 'review', target: 'reviewed-output' },
+      { id: 'split-direct', source: 'split', target: 'direct-output', sourceHandle: 'quarantine' },
+    ]
+    const waiting = executePipelineAtomically(graphNodes, graphEdges)
+    const completedBeforeResume = new Map(
+      waiting.events
+        .filter((event) => event.state === 'completed')
+        .map((event) => [event.nodeId, event.sequence]),
+    )
+
+    const resumed = resumePipelineAtomically(graphNodes, graphEdges, waiting, { review: 'approved' })
+
+    expect(resumed.state).toBe('completed')
+    expect(resumed.branches).toEqual(expect.arrayContaining([
+      { outputId: 'reviewed-output', state: 'completed' },
+      { outputId: 'direct-output', state: 'completed' },
+    ]))
+    for (const [nodeId, sequence] of completedBeforeResume) {
+      expect(resumed.events.filter((event) => event.nodeId === nodeId && event.state === 'completed')).toHaveLength(1)
+      expect(resumed.events.find((event) => event.nodeId === nodeId && event.state === 'completed')?.sequence).toBe(sequence)
+    }
+    expect(resumed.events.filter((event) => event.nodeId === 'review' && event.state === 'completed')).toHaveLength(1)
+    expect(resumed.events.filter((event) => event.nodeId === 'reviewed-output' && event.state === 'completed')).toHaveLength(1)
+  })
+
+  it('rejects only the waiting branch while preserving an already completed parallel branch', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const review = { ...newCard('review', 1), id: 'review' }
+    const reviewedOutput = { ...newCard('output', 2), id: 'reviewed-output' }
+    const directOutput = { ...newCard('output', 3), id: 'direct-output' }
+    const graphNodes = [source, review, reviewedOutput, directOutput]
+    const graphEdges = [
+      { id: 'source-review', source: 'source', target: 'review' },
+      { id: 'review-output', source: 'review', target: 'reviewed-output' },
+      { id: 'source-direct', source: 'source', target: 'direct-output' },
+    ]
+    const waiting = executePipelineAtomically(graphNodes, graphEdges)
+    const resumed = resumePipelineAtomically(graphNodes, graphEdges, waiting, { review: 'rejected' })
+
+    expect(resumed.state).toBe('failed')
+    expect(resumed.nodeStates).toMatchObject({
+      review: 'failed',
+      'reviewed-output': 'failed',
+      'direct-output': 'completed',
+    })
+    expect(resumed.events.filter((event) => event.nodeId === 'direct-output' && event.state === 'completed')).toHaveLength(1)
   })
 
   it('stops before a later card commit and never completes a terminal output', () => {
