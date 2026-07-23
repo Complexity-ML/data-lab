@@ -378,10 +378,11 @@ export default function App() {
     const currentProposal = proposal
     const revisionId = pendingVersionId
     const relatedAssets = [...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]
-    if (!currentProposal || !approveProposal() || !writebackRequested) return
+    if (!currentProposal || !approveProposal()) return false
+    if (!writebackRequested) return true
     if (!revisionId) {
       setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
-      return
+      return true
     }
     try {
       setActivity('Revision committed locally · writing the explicitly approved Decision to DataHub…')
@@ -397,6 +398,7 @@ export default function App() {
       notifyError(error, 'DataHub write-back failed')
       setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
     }
+    return true
   }
 
   useKeyboardShortcuts({
@@ -419,7 +421,7 @@ export default function App() {
       relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
       revisionId={pendingVersionId}
       writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled}
-      onApply={(writebackRequested) => { setProposalReviewOpen(false); void approveAgentProposal(writebackRequested) }}
+      onApply={(writebackRequested) => { void approveAgentProposal(writebackRequested).then((applied) => { if (applied) setProposalReviewOpen(false) }) }}
       onClose={() => setProposalReviewOpen(false)}
       onDiscard={() => { setProposalReviewOpen(false); rejectProposal() }}
     />}

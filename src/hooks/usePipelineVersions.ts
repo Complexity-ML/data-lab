@@ -3,7 +3,7 @@ import { useState, type Dispatch, type SetStateAction } from 'react'
 import { layoutPipeline } from '../domain/layout'
 import { applyProposal, loadPipelinePreset, type AgentProposal, type PipelineNode, type PipelinePresetId } from '../domain/pipeline'
 import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from '../domain/versioning'
-import { validatePipeline } from '../validation'
+import { atomicTransactionBlockers, validatePipeline } from '../validation'
 import { recordDiagnostic } from '../domain/diagnostics'
 
 type PipelineVersionsOptions = {
@@ -26,6 +26,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     const preview = applyProposal(nodes, edges, nextProposal)
     const previewIssues = validatePipeline(preview.nodes, preview.edges)
     const version = createPipelineVersion(preview.nodes, preview.edges, `Review · ${nextProposal.title}`, 'agent', previewIssues)
+    version.blockingIssues = atomicTransactionBlockers(previewIssues).length
     version.status = 'pending-review'
     version.description = `Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale} Incremental diff: +${nextProposal.addedNodes.length} cards, ~${nextProposal.updatedNodes.length} cards, +${nextProposal.addedEdges.length} edges, -${nextProposal.removedEdgeIds.length} edges.`
     version.evidence = nextProposal.evidence
@@ -38,7 +39,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     if (!proposal) return false
     const next = applyProposal(nodes, edges, proposal)
     const nextIssues = validatePipeline(next.nodes, next.edges)
-    const blocking = nextIssues.filter((issue) => issue.severity === 'error')
+    const blocking = atomicTransactionBlockers(nextIssues)
     if (blocking.length) {
       setActivity(`Transaction rejected · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed · graph unchanged`)
       return false
@@ -52,7 +53,10 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     setSelectedId(proposal.updatedNodes[0]?.nodeId ?? proposal.addedNodes[0]?.id ?? '')
     setProposal(undefined)
     setPendingVersionId(undefined)
-    setActivity('Change approved · atomic checks passed · revision committed')
+    const readinessErrors = nextIssues.filter((issue) => issue.severity === 'error').length - blocking.length
+    setActivity(readinessErrors > 0
+      ? `Change approved · atomic transaction passed · ${readinessErrors} pipeline readiness check${readinessErrors === 1 ? '' : 's'} remain`
+      : 'Change approved · atomic checks passed · revision committed')
     recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'success', detail: { versionId: version.id, blockingIssues: 0 } })
     return true
   }
@@ -68,14 +72,19 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
   const approvePendingVersion = (versionId: string) => {
     const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
     if (!version) { setActivity('Review is no longer pending · no graph change applied'); return false }
-    if (version.blockingIssues > 0) { setActivity(`Review cannot be approved · ${version.blockingIssues} atomic check${version.blockingIssues === 1 ? '' : 's'} failed`); return false }
+    const versionIssues = validatePipeline(version.nodes, version.edges)
+    const blocking = atomicTransactionBlockers(versionIssues)
+    if (blocking.length > 0) { setActivity(`Review cannot be approved · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed`); return false }
     const layouted = layoutPipeline(version.nodes, version.edges)
     setNodes(layouted)
     setEdges(version.edges)
     setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, status: 'committed' as const } : candidate))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
     setSelectedId(layouted[0]?.id ?? '')
-    setActivity(`Human Review approved · ${version.label} committed atomically`)
+    const readinessErrors = versionIssues.filter((issue) => issue.severity === 'error').length - blocking.length
+    setActivity(readinessErrors > 0
+      ? `Human Review approved · ${version.label} committed · ${readinessErrors} pipeline readiness check${readinessErrors === 1 ? '' : 's'} remain`
+      : `Human Review approved · ${version.label} committed atomically`)
     return true
   }
 
