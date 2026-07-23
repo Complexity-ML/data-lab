@@ -190,6 +190,26 @@ button { color: inherit; }
 .diagnostics-privacy strong { color: #14532d; font-size: 10px; }
 .diagnostics-privacy small { color: #166534; font-size: 8px; line-height: 1.45; }
 .diagnostics-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.update-settings { display: flex; flex-direction: column; gap: 14px; }
+.update-trust { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.update-trust > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.update-trust strong { font-size: 10px; }
+.update-trust small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.update-trusted { color: #15803d; border-color: #86efac; background: #dcfce7; }
+.update-trusted strong { color: #14532d; }
+.update-trusted small { color: #166534; }
+.update-blocked { color: #b45309; border-color: #fcd34d; background: #fef3c7; }
+.update-blocked strong { color: #78350f; }
+.update-blocked small { color: #92400e; }
+.update-channel-switch button { min-height: 70px; }
+.update-version-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.update-version-grid > div { min-width: 0; padding: 11px; }
+.update-version-grid > div + div { border-left: 1px solid var(--line); }
+.update-version-grid dt { color: var(--faint); font-size: 7px; font-weight: 800; text-transform: uppercase; }
+.update-version-grid dd { overflow: hidden; margin: 5px 0 0; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.update-progress { position: relative; overflow: hidden; height: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.update-progress > span { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #6366f1, #8b5cf6); transition: width .2s ease; }
+.update-progress > small { position: relative; z-index: 1; display: grid; height: 100%; place-items: center; color: var(--text); font-size: 7px; font-weight: 800; }
 .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .preset-grid button { display: flex; min-height: 130px; flex-direction: column; align-items: flex-start; gap: 8px; padding: 17px; color: var(--text); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: left; cursor: pointer; }
 .preset-grid button svg { color: var(--accent); }

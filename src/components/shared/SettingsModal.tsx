@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Bot, CheckCircle2, Database, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, Sun, UserRound, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, CheckCircle2, Database, Download, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, ShieldCheck, Sun, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
@@ -9,11 +9,14 @@ import { Modal } from './Modal'
 import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
+import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
 
-export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
+export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
   activeAiSource: ActiveAiSource
+  appUpdateBusy: boolean
+  appUpdateStatus: AppUpdateStatus
   aiStatus: AiStatus
   chatGPTStatus: ChatGPTSessionStatus
   connectionMode: 'demo' | 'connected'
@@ -33,6 +36,7 @@ interface SettingsModalProps {
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
+  onCheckForAppUpdate: () => Promise<AppUpdateStatus>
   onClose: () => void
   onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
   onConnectChatGPT: () => Promise<void>
@@ -40,9 +44,11 @@ interface SettingsModalProps {
   onDisconnectChatGPT: () => Promise<void>
   onEmergencyStop: () => void
   onDuplicateWorkspace: (workspaceId: string) => Promise<void>
+  onDownloadAppUpdate: () => Promise<AppUpdateStatus>
   onExportPipeline: () => void
   onExportDiagnostics: () => Promise<void>
   onImportPipeline: (file: File) => Promise<void>
+  onInstallAppUpdate: () => Promise<AppUpdateStatus>
   onLoadPreset: (preset: PipelinePresetId) => void
   onOpenWorkspace: (workspaceId: string) => Promise<void>
   onOpenDiagnosticLogs: () => Promise<void>
@@ -52,6 +58,7 @@ interface SettingsModalProps {
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
+  onSetAppUpdateChannel: (channel: AppUpdateChannel) => Promise<AppUpdateStatus>
   onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
   onSyncDataHub: () => Promise<void>
   onTestAiConnection: () => Promise<void>
@@ -71,7 +78,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onLoadPreset, onOpenDiagnosticLogs, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -80,6 +87,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [dataHubFeedback, setDataHubFeedback] = useState('')
   const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
   const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
+  const [updateFeedback, setUpdateFeedback] = useState('')
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
@@ -224,6 +232,16 @@ export function SettingsModal(props: SettingsModalProps) {
   const selectedProviderStatus = aiStatus.providers[aiSettings.provider]
   const selectedCapabilities = selectedProviderStatus.capabilities
 
+  const runUpdateAction = async (action: () => Promise<AppUpdateStatus>) => {
+    setUpdateFeedback('')
+    try {
+      const status = await action()
+      setUpdateFeedback(status.message)
+    } catch (error) {
+      setUpdateFeedback(error instanceof Error ? error.message : 'The update action was stopped safely.')
+    }
+  }
+
   const chooseActiveSource = async (source: ActiveAiSource) => {
     setAiBusy(true)
     setAiFeedback('')
@@ -252,6 +270,7 @@ export function SettingsModal(props: SettingsModalProps) {
         {menu('workspaces', 'Workspaces', 'Save, switch and recover', <FolderKanban size={17} />)}
         {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
         {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
+        {menu('updates', 'Updates', 'Signed stable and main builds', <Download size={17} />)}
         {menu('diagnostics', 'Diagnostics', 'Local, private and bounded', <Activity size={17} />)}
         {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
         {menu('pipeline', 'Pipeline', 'Layout and validation', <Network size={17} />)}
@@ -341,6 +360,23 @@ export function SettingsModal(props: SettingsModalProps) {
             <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy || !dataHubSettings.tokenConfigured} onClick={() => void removeDataHubToken()} variant="ghost">Remove saved token</ActionButton><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveAndConnectDataHub()} variant="primary">{dataHubBusy ? 'Connecting…' : 'Save & connect'}</ActionButton></div>
             {dataHubFeedback && <p aria-live="polite" className="settings-feedback">{dataHubFeedback}</p>}
           </section>
+        </article>}
+
+        {activeSection === 'updates' && <article className="settings-page">
+          <div className="settings-page-heading"><small>APPLICATION UPDATES</small><h3>Signed macOS release channels</h3><p>DATA LAB never downloads or installs an update without your explicit action.</p></div>
+          <section className="settings-section update-settings">
+            <div className="settings-section-title"><span><ShieldCheck size={15} /> Installed version</span><small>{appUpdateStatus.currentVersion}</small></div>
+            <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Apple Developer ID verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Unsigned update path blocked'}</strong><small>{appUpdateStatus.message}</small></div></div>
+            <div aria-label="Application update channel" className="theme-switch update-channel-switch" role="radiogroup">
+              <button aria-checked={appUpdateStatus.channel === 'stable'} className={appUpdateStatus.channel === 'stable' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('stable'))} role="radio" type="button"><span><strong>Stable</strong><small>Verified version tags intended for normal use.</small></span></button>
+              <button aria-checked={appUpdateStatus.channel === 'main'} className={appUpdateStatus.channel === 'main' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('main'))} role="radio" type="button"><span><strong>Main preview</strong><small>Explicit opt-in builds from main; may be less stable.</small></span></button>
+            </div>
+            <dl className="update-version-grid"><div><dt>Installed</dt><dd>{appUpdateStatus.currentVersion}</dd></div><div><dt>Available</dt><dd>{appUpdateStatus.availableVersion ?? 'Not checked'}</dd></div><div><dt>Signature policy</dt><dd>{appUpdateStatus.downloadedSignatureEnforced ? 'Enforced' : 'Unavailable'}</dd></div><div><dt>Status</dt><dd>{appUpdateStatus.phase}</dd></div></dl>
+            {appUpdateStatus.progress !== undefined && <div className="update-progress"><span style={{ width: `${appUpdateStatus.progress}%` }} /><small>{Math.round(appUpdateStatus.progress)}%</small></div>}
+            <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="primary">Restart &amp; install</ActionButton></div>
+            {(updateFeedback || appUpdateStatus.error) && <p aria-live="polite" className="settings-feedback">{appUpdateStatus.error ?? updateFeedback}</p>}
+          </section>
+          <p className="settings-note">Stable is the default. Main preview must be selected manually and never bypasses Developer ID signing, notarization, or the native installation confirmation.</p>
         </article>}
 
         {activeSection === 'presets' && <article className="settings-page">

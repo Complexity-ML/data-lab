@@ -61,6 +61,8 @@ npm run build
 npm run build:electron
 ```
 
+Signed macOS releases provide x64 and arm64 DMG/ZIP artifacts, a default Stable channel, and an explicit Main preview channel. See [macOS releases and updater security](docs/macos-releases.md).
+
 ## Connect a local DataHub Quickstart
 
 DataHub's official Quickstart requires Docker with Compose v2, Python 3.10+, and enough Docker resources. The documented tested allocation is 2 CPUs, 8 GB RAM, 2 GB swap and 13 GB disk.
