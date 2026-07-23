@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDataProfileToProposal, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh } from './data-profile'
+import { addDataProfileToProposal, canReuseDataProfile, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh } from './data-profile'
 import { compactGraph } from './ai'
 import type { DataHubAssetSummary } from './datahub'
 import type { AgentProposal } from './pipeline'
@@ -25,6 +25,8 @@ describe('bounded data profile memory', () => {
     expect(JSON.stringify(profile)).not.toContain('rawRows')
     expect(profile.tokenEstimate).toBeGreaterThan(0)
     expect(isDataProfileFresh(profile)).toBe(true)
+    expect(canReuseDataProfile(profile, false)).toBe(true)
+    expect(canReuseDataProfile(profile, true)).toBe(false)
   })
 
   it('adds one sidecar profile card and reuses it as compact evidence', () => {

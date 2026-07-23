@@ -158,6 +158,7 @@ describe('SQLite workspace persistence', () => {
       severity: 'warning',
       title: 'Customer evidence unavailable',
       detail: 'get_entities timed out',
+      fingerprint: 'warning-v1',
       cardId: 'customers-source',
     })
     expect(opened.recorded).toBe(true)
@@ -167,6 +168,7 @@ describe('SQLite workspace persistence', () => {
       severity: 'warning',
       title: 'Customer evidence unavailable',
       detail: 'same timeout',
+      fingerprint: 'warning-v1',
     }).recorded).toBe(false)
     expect(recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
@@ -174,6 +176,7 @@ describe('SQLite workspace persistence', () => {
       severity: 'critical',
       title: 'Customer evidence unavailable',
       detail: 'all metadata reads timed out',
+      fingerprint: 'critical-v1',
     }).event?.transition).toBe('worsened')
     expect(recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
@@ -181,6 +184,7 @@ describe('SQLite workspace persistence', () => {
       severity: 'info',
       title: 'Customer evidence available',
       detail: 'all required metadata reads returned',
+      fingerprint: 'healthy-v1',
     }).recorded).toBe(true)
     expect(recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
@@ -188,8 +192,18 @@ describe('SQLite workspace persistence', () => {
       severity: 'info',
       title: 'Customer evidence available',
       detail: 'still healthy',
+      fingerprint: 'healthy-v1',
     }).recorded).toBe(false)
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Customer evidence unavailable again',
+      detail: 'a later monitored fingerprint failed',
+      fingerprint: 'warning-v2',
+    }).recorded).toBe(true)
 
-    expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['recovered', 'worsened', 'opened'])
+    expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['opened', 'recovered', 'worsened', 'opened'])
+    expect(listIncidentEvents(target)[0].fingerprint).toBe('warning-v2')
   })
 })

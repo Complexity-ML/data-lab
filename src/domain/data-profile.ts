@@ -51,6 +51,10 @@ export function isDataProfileFresh(profile: DataProfileSnapshot, now = Date.now(
   return !profile.stale && Number.isFinite(expiry) && expiry > now
 }
 
+export function canReuseDataProfile(profile: DataProfileSnapshot, forcedMonitorAudit: boolean, now = Date.now()) {
+  return !forcedMonitorAudit && isDataProfileFresh(profile, now)
+}
+
 export function summarizeDataProfile(profile: DataProfileSnapshot) {
   return `${profile.fieldCount} fields · ${profile.sensitiveFieldCount} sensitive · ${profile.quality} · ${profile.stale ? 'stale' : 'fresh'} · ${profile.upstreamCount} upstream · ${profile.downstreamCount} downstream · ~${profile.tokenEstimate} tokens`
 }

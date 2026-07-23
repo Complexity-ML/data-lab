@@ -38,6 +38,33 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     return version.id
   }
 
+  const commitAutonomousProposal = (nextProposal: AgentProposal) => {
+    const next = applyProposal(nodes, edges, nextProposal)
+    const nextIssues = validatePipeline(next.nodes, next.edges)
+    const blocking = atomicTransactionBlockers(nextIssues)
+    if (blocking.length) {
+      setActivity(`Autonomous correction stopped · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed · graph unchanged`)
+      notifyToast(blocking[0]?.detail ?? 'The autonomous correction failed an atomic safety check.', 'error', 'Correction stopped')
+      recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'error', detail: { blockerIds: blocking.map((issue) => issue.id) } })
+      return undefined
+    }
+    const layouted = layoutPipeline(next.nodes, next.edges)
+    const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
+    const version = createPipelineVersion(committedNodes, next.edges, nextProposal.title, 'agent', nextIssues)
+    version.blockingIssues = 0
+    version.description = `Autonomous incident correction. Upgrade: ${nextProposal.summary} Why: ${nextProposal.rationale} Incremental diff: +${nextProposal.addedNodes.length} cards, ~${nextProposal.updatedNodes.length} cards, +${nextProposal.addedEdges.length} edges, -${nextProposal.removedEdgeIds.length} edges.`
+    version.evidence = nextProposal.evidence
+    setNodes(committedNodes)
+    setEdges(next.edges)
+    setVersions((current) => appendPipelineVersion(current, version))
+    setSelectedId(nextProposal.updatedNodes[0]?.nodeId ?? nextProposal.addedNodes[0]?.id ?? '')
+    setProposal(undefined)
+    setActivity('Low-risk incident correction committed atomically · Live Monitor will verify the next DataHub fingerprint')
+    notifyToast('The low-risk branch was committed as a restorable version. Monitoring remains active while Electron is open.', 'success', 'Incident correction applied')
+    recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'success', detail: { versionId: version.id, incidentKey: nextProposal.incidentKey } })
+    return version.id
+  }
+
   const approveProposal = () => {
     if (!proposal) {
       setActivity('Approval unavailable · the proposal is no longer pending · graph unchanged')
@@ -157,5 +184,5 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     setActivity(presetId === 'empty' ? 'Empty workspace ready' : `${preset.title} example loaded · ${preset.nodes.length} cards · not saved`)
   }
 
-  return { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
+  return { approvePendingVersion, approveProposal, commitAutonomousProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
 }

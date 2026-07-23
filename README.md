@@ -71,7 +71,23 @@ Download and open the current macOS Setup from Terminal:
 SETUP_ARCH=$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo x64); curl -fL "https://github.com/Complexity-ML/data-lab/releases/download/setup-latest/DATA-LAB-Setup-${SETUP_ARCH}.dmg" -o /tmp/DATA-LAB-Setup.dmg && open /tmp/DATA-LAB-Setup.dmg
 ```
 
+Download and launch the current Windows Setup from PowerShell:
+
+```powershell
+$setup = "$env:TEMP\DATA-LAB-Setup-x64.exe"; irm "https://github.com/Complexity-ML/data-lab/releases/download/setup-latest/DATA-LAB-Setup-x64.exe" -OutFile $setup; Start-Process $setup
+```
+
 Choose **Stable** for the latest published DATA LAB application release (recommended), or **Main** for the newest commit on the main branch. GitHub Actions only packages the small Setup installers; DATA LAB itself is built locally by Setup for the current computer.
+
+## Continuous incident lifecycle
+
+With a bound Data Source and a Live Monitor card, DATA LAB fingerprints DataHub metadata, deduplicates repeated findings, records every incident transition in local SQLite, and can ask the agent for a bounded, versioned graph correction. Low-risk branches continue autonomously; uncertain or high-risk branches wait at their own Human Review checkpoint while unrelated branches remain runnable. Recovery and recurrence are preserved as an inspectable incident history.
+
+Prompts are scoped to source labels, URNs, platforms and domains instead of silently choosing the first Data Source. A comparison may read several bounded branches and keeps their incidents independent. An explicit “new workspace” or “separate graph” request commits the current SQLite workspace, creates a blank one and resumes the preserved prompt there. Pressing **Play** on an empty workbench uses the best available governed source; without a catalog connection it may propose only an unbound Data Source and Human Review, never invented metadata. Unrelated prompts are rejected locally before a provider call.
+
+This monitoring loop lives inside the Electron session only. DATA LAB does **not** install a daemon, service, cloud worker or hidden 24/7 process: closing Electron stops every read and agent action immediately. SQLite preserves the ledger so the next launch can show what happened and resume only after the application is open again.
+
+![DATA LAB continuous incident lifecycle](docs/assets/akira-incident-lifecycle.png)
 
 Windows keeps its standard system title bar and native minimize, maximize and close controls outside the DATA LAB interface. The Windows CI workflow builds and verifies an unsigned x64 NSIS/ZIP smoke package; unsigned builds cannot use the updater. See [Windows desktop support](docs/windows-desktop.md).
 

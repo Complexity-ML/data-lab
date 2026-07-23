@@ -190,6 +190,19 @@ button { color: inherit; }
 .diagnostics-privacy small { color: #166534; font-size: 8px; line-height: 1.45; }
 .diagnostics-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .incident-title { margin-top: 2px; }
+.incident-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.incident-overview > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.incident-overview strong { font-size: 15px; }
+.incident-overview small { color: var(--muted); font-size: 7px; }
+.incident-ledger { display: grid; max-height: 240px; gap: 7px; overflow: auto; padding-right: 3px; }
+.incident-ledger article { padding: 10px 11px; border: 1px solid var(--line); border-left: 3px solid #f59e0b; border-radius: 9px; background: var(--panel); }
+.incident-ledger article.status-resolved { border-left-color: #22c55e; }
+.incident-ledger article.severity-critical:not(.status-resolved) { border-left-color: #ef4444; }
+.incident-ledger article > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.incident-ledger article strong { font-size: 9px; }
+.incident-ledger article span { padding: 3px 6px; color: var(--muted); border-radius: 999px; background: var(--soft); font: 6px ui-monospace, monospace; text-transform: uppercase; }
+.incident-ledger article p { margin: 6px 0; color: var(--muted); font-size: 8px; line-height: 1.4; }
+.incident-ledger article small { color: var(--faint); font: 7px ui-monospace, monospace; }
 .incident-timeline { display: flex; max-height: 290px; flex-direction: column; gap: 7px; overflow: auto; margin: 0; padding: 0 3px 0 0; list-style: none; }
 .incident-timeline li { display: grid; grid-template-columns: 29px minmax(0, 1fr); gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .incident-timeline li > span { display: grid; width: 27px; height: 27px; place-items: center; color: #b45309; border-radius: 8px; background: #fef3c7; }

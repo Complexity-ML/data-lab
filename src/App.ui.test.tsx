@@ -115,12 +115,33 @@ describe('visual pipeline workspace regressions', () => {
     render(<App />)
 
     expect(screen.getAllByText('0 cards', { exact: false }).length).toBeGreaterThan(0)
-    expect((screen.getByRole('button', { name: 'Run agent flow' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Run agent flow' }) as HTMLButtonElement).disabled).toBe(false)
     expect(screen.getByText('Pipeline is empty')).toBeTruthy()
     expect(screen.queryByText('All atomic checks passed')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Show agentic details' }))
     expect(screen.getByText('0 checkpoints')).toBeTruthy()
+  })
+
+  it('uses Play on an empty workbench as a governed DataHub bootstrap mission', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: { title: 'No candidate', summary: 'No governed candidate was found.', rationale: 'Do not invent a source.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+    }))
+    api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
+
+    render(<App />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Run agent flow' }))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
+      objective: expect.stringContaining('governed'),
+      graph: expect.objectContaining({ nodes: [] }),
+    }))
   })
 
   it('collapses and reopens Card Library and Inspector independently', async () => {
@@ -283,6 +304,61 @@ describe('visual pipeline workspace regressions', () => {
     expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(2)
     expect(screen.getAllByText('2 cards', { exact: false }).length).toBeGreaterThan(0)
     expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
+  })
+
+  it('creates a blank workspace only for an explicit separate-graph prompt and resumes the preserved request', async () => {
+    const user = userEvent.setup()
+    const sourceNode = {
+      id: 'billing-source',
+      type: 'pipeline' as const,
+      position: { x: 0, y: 0 },
+      data: { kind: 'source' as const, label: 'Billing', description: 'Existing graph', owner: 'Finance', status: 'healthy' as const, schema: [], datahubUrn: 'urn:billing' },
+    }
+    const initialState = {
+      activeWorkspaceId: 'existing',
+      activeWorkspace: { id: 'existing', name: 'Existing', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Existing', nodes: [sourceNode], edges: [], versions: [] } },
+      uncleanShutdown: false,
+      workspaces: [{ id: 'existing', name: 'Existing', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
+    }
+    const { api } = installElectronWorkspaceMock(initialState)
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    api.commitWorkspace = vi.fn(async () => ({ saved: true as const, workspaceId: 'existing', updatedAt: '2026-07-23T21:00:00.000Z' }))
+    api.createWorkspace = vi.fn(async (name, payload) => ({
+      activeWorkspaceId: 'separate',
+      activeWorkspace: { id: 'separate', name, archived: false, dirty: false, createdAt: '2026-07-23T21:00:01.000Z', updatedAt: '2026-07-23T21:00:01.000Z', payload },
+      uncleanShutdown: false,
+      workspaces: [...initialState.workspaces, { id: 'separate', name, archived: false, dirty: false, createdAt: '2026-07-23T21:00:01.000Z', updatedAt: '2026-07-23T21:00:01.000Z' }],
+    }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: {
+        title: 'No speculative change',
+        summary: 'Wait for a governed source.',
+        rationale: 'No DataHub source is bound yet.',
+        requires_human_review: false,
+        confidence: 1,
+        writeback: 'None.',
+        evidence: [],
+        actions: [],
+      },
+    }))
+    api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
+
+    render(<App />)
+    await screen.findByText('Billing')
+    const prompt = screen.getByRole('textbox', { name: 'What should the DATA LAB agent do?' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.type(prompt, 'Create a new separate workspace for payment incidents')
+    await user.click(screen.getByRole('button', { name: 'Send request to DATA LAB agent' }))
+
+    await waitFor(() => expect(api.commitWorkspace).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith(
+      expect.stringContaining('payment incidents'),
+      expect.objectContaining({ nodes: [], edges: [], versions: [] }),
+    ))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('Billing')).toBeNull()
   })
 })
 
