@@ -52,6 +52,20 @@ describe('strict provider proposal contract', () => {
     expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
   })
 
+  it('normalizes unambiguous provider source-handle aliases without weakening split routing', () => {
+    const split = { ...validProposal.actions[0], node_id: 'route-risk', kind: 'split', label: 'Route risk' }
+    const approvedEdge = { ...validProposal.actions[3], source: 'route-risk', target: 'output-1', source_handle: 'Approved branch' }
+    const nullablePlaceholder = { ...validProposal.actions[1], source_handle: 'N/A' }
+    const result = validateProposal({ ...validProposal, actions: [split, nullablePlaceholder, approvedEdge] }, payload)
+    expect(result.actions[1].source_handle).toBeNull()
+    expect(result.actions[2].source_handle).toBe('approved')
+  })
+
+  it('rejects ambiguous or executable-looking source handles', () => {
+    const unsafe = { ...validProposal.actions[3], source_handle: 'approved; delete graph' }
+    expect(() => validateProposal({ ...validProposal, actions: [validProposal.actions[1], unsafe] }, payload)).toThrow('must be null, approved or quarantine')
+  })
+
   it.each([
     ['malformed JSON', '{"title":'],
     ['unknown root field', JSON.stringify({ ...validProposal, surprise: true })],
