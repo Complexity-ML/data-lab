@@ -237,6 +237,22 @@ export async function resolveReadableToolNames(discovery: () => Promise<{ tools:
   }
 }
 
+export function resolveLineageArguments(inputSchema: unknown, urn: string, upstream: boolean): Record<string, unknown> {
+  const schema = inputSchema && typeof inputSchema === 'object' ? inputSchema as Record<string, unknown> : {}
+  const properties = schema.properties && typeof schema.properties === 'object'
+    ? schema.properties as Record<string, unknown>
+    : {}
+  const modern = Object.keys(properties).length === 0 || 'upstream' in properties || 'max_results' in properties
+
+  return {
+    urn,
+    max_hops: 3,
+    ...(modern
+      ? { upstream, max_results: 30 }
+      : { direction: upstream ? 'upstream' : 'downstream', count: 30 }),
+  }
+}
+
 async function discoverReadableToolNames(client: Client): Promise<Set<string>> {
   return resolveReadableToolNames(() => discoverTools(client))
 }
@@ -356,11 +372,12 @@ export async function inspectDataHubAsset(urn: string, force = false): Promise<{
   validateDatasetUrn(urn)
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
+  const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
   const [entity, schema, upstream, downstream] = await Promise.all([
     readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force }),
     readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force }),
-    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'upstream', max_hops: 3, count: 30 }, force }),
-    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3, count: 30 }, force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, true), force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, false), force }),
   ])
   const evidence = [entity.evidence, schema.evidence, upstream.evidence, downstream.evidence]
   const successful = evidence.filter((item) => item.status === 'ok').sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))[0]
@@ -413,10 +430,11 @@ export async function auditDataHubWithMcp(urn: string, force = false): Promise<D
   validateDatasetUrn(urn)
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
+  const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
   const calls: { name: DataHubMcpRead['name']; arguments: Record<string, unknown> }[] = [
     { name: 'get_entities', arguments: { urns: [urn] } },
     { name: 'list_schema_fields', arguments: { urn } },
-    { name: 'get_lineage', arguments: { urn, direction: 'downstream', max_hops: 3 } },
+    { name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, false) },
   ]
 
   const reads = await Promise.all(calls.map(async (call) => (await readCachedTool({ client, available, urn, name: call.name, arguments: call.arguments, force })).evidence))

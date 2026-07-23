@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -56,6 +56,26 @@ describe('DataHub MCP connection settings', () => {
   it('uses the discovered tool catalog when it is available', async () => {
     const names = await resolveReadableToolNames(async () => ({ tools: [{ name: 'search' }, { name: 'custom_read' }] }))
     expect([...names]).toEqual(['search', 'custom_read'])
+  })
+
+  it('uses the current official DataHub MCP lineage contract when advertised', () => {
+    const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,customers,PROD)'
+    expect(resolveLineageArguments({ properties: { urn: {}, upstream: {}, max_hops: {}, max_results: {} } }, urn, false)).toEqual({
+      urn,
+      upstream: false,
+      max_hops: 3,
+      max_results: 30,
+    })
+  })
+
+  it('keeps compatibility with the earlier direction-based lineage contract', () => {
+    const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,customers,PROD)'
+    expect(resolveLineageArguments({ properties: { urn: {}, direction: {}, max_hops: {}, count: {} } }, urn, true)).toEqual({
+      urn,
+      direction: 'upstream',
+      max_hops: 3,
+      count: 30,
+    })
   })
 
   it('supports bounded per-evidence cache TTL configuration', () => {

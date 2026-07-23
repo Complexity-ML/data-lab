@@ -73,9 +73,11 @@ datahub docker quickstart
 Then initialize the CLI and load the official showcase catalog:
 
 ```bash
-datahub init --username datahub --password datahub
+datahub init
 datahub datapack load showcase-ecommerce
 ```
+
+`datahub init` stays interactive on purpose: use the local quickstart credentials printed by DataHub instead of committing a password or copying it into shell-history examples.
 
 The DataHub UI is available at `http://localhost:9002`. Create a scoped token for the demo, then launch DATA LAB with the GMS connection owned by Electron's main process:
 
@@ -98,6 +100,8 @@ npm run electron:dev
 Do not put the token in a `VITE_*` variable: Vite variables are readable by the renderer.
 
 Official guide: [DataHub Quickstart](https://docs.datahub.com/docs/quickstart).
+
+For the complete verified OSS path, including sanitized MCP evidence, explicit external-provider disclosure, atomic approval and teardown, see [`docs/datahub-oss-e2e.md`](docs/datahub-oss-e2e.md) and [`examples/datahub-oss/`](examples/datahub-oss/).
 
 ## DataHub MCP and Skills workflow
 
