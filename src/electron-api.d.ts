@@ -3,6 +3,7 @@ import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTS
 import type { DataHubAssetSummary } from './domain/datahub'
 import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from './domain/workspace'
 import type { DiagnosticBundle, DiagnosticInput } from './domain/diagnostics'
+import type { AppUpdateChannel, AppUpdateStatus } from './domain/updates'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -95,6 +96,12 @@ declare global {
       exportDiagnostics(): Promise<DiagnosticBundle>
       openDiagnosticLogs(): Promise<{ opened: true; path: string }>
       restartApplication(): Promise<{ restarting: true }>
+      getAppUpdateStatus(): Promise<AppUpdateStatus>
+      setAppUpdateChannel(channel: AppUpdateChannel): Promise<AppUpdateStatus>
+      checkForAppUpdate(): Promise<AppUpdateStatus>
+      downloadAppUpdate(): Promise<AppUpdateStatus>
+      installAppUpdate(): Promise<AppUpdateStatus>
+      onAppUpdateStatusChanged(callback: (status: AppUpdateStatus) => void): () => void
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>
       onWindowStateChanged(callback: (state: { fullscreen: boolean }) => void): () => void

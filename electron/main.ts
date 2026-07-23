@@ -9,6 +9,8 @@ import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeW
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
 import { ensureDiagnosticLog, exportDiagnosticBundle, recordDiagnosticEvent } from './diagnostics.js'
+import { AppUpdateController } from './app-updater.js'
+import { parseUpdateChannel } from './update-policy.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -52,9 +54,16 @@ const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
 const diagnosticsExportChannel = 'data-lab:diagnostics-export'
 const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
 const applicationRestartChannel = 'data-lab:application-restart'
+const appUpdateStatusChannel = 'data-lab:app-update-status'
+const appUpdateStatusChangedChannel = 'data-lab:app-update-status-changed'
+const appUpdateSetChannel = 'data-lab:app-update-set-channel'
+const appUpdateCheckChannel = 'data-lab:app-update-check'
+const appUpdateDownloadChannel = 'data-lab:app-update-download'
+const appUpdateInstallChannel = 'data-lab:app-update-install'
 let mainWindow: BrowserWindow | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
+let appUpdates: AppUpdateController | undefined
 let workspaceSessionWasUnclean = false
 
 app.setName('DATA LAB')
@@ -190,6 +199,15 @@ function createMainWindow() {
 app.whenReady().then(() => {
   workspaceSessionWasUnclean = beginWorkspaceSession(app.getPath('userData'))
   configureApplicationMenu()
+  appUpdates = new AppUpdateController({
+    channel: parseUpdateChannel(loadAppSetting(app.getPath('userData'), 'app-update-channel')),
+    currentVersion: app.getVersion(),
+    execPath: process.execPath,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    window: () => mainWindow,
+    statusChannel: appUpdateStatusChangedChannel,
+  })
   chatGPT = new ChatGPTAgentSession((url) => shell.openExternal(url), app.getVersion(), join(app.getPath('userData'), 'chatgpt-agent'))
   ipcMain.handle(statusChannel, () => getDataHubStatus())
   ipcMain.handle(datasetChannel, (_event, payload: { urn?: unknown }) => {
@@ -278,7 +296,34 @@ app.whenReady().then(() => {
     setTimeout(() => { app.relaunch(); app.quit() }, 80)
     return { restarting: true }
   })
+  ipcMain.handle(appUpdateStatusChannel, () => appUpdates?.getStatus())
+  ipcMain.handle(appUpdateSetChannel, (_event, payload: { channel?: unknown }) => {
+    if (payload?.channel !== 'stable' && payload?.channel !== 'main') throw new Error('Invalid application update channel')
+    saveAppSetting(app.getPath('userData'), 'app-update-channel', payload.channel)
+    return appUpdates?.setChannel(payload.channel)
+  })
+  ipcMain.handle(appUpdateCheckChannel, () => appUpdates?.check())
+  ipcMain.handle(appUpdateDownloadChannel, () => appUpdates?.download())
+  ipcMain.handle(appUpdateInstallChannel, async (event) => {
+    const status = appUpdates?.getStatus()
+    if (!status?.canInstall) throw new Error('No verified update is ready to install')
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      type: 'question' as const,
+      title: 'Install verified DATA LAB update',
+      message: `Restart and install DATA LAB ${status.availableVersion ?? 'update'}?`,
+      detail: 'The application will close. macOS and electron-updater will enforce the downloaded application signature before replacement.',
+      buttons: ['Restart & install', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    }
+    const confirmation = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+    if (confirmation.response !== 0) return status
+    return appUpdates?.install()
+  })
   createMainWindow()
+  void appUpdates.initialize()
   app.on('activate', () => {
     focusMainWindow()
   })

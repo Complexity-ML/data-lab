@@ -24,6 +24,7 @@ import { usePipelineVersions } from './hooks/usePipelineVersions'
 import { useGraphHistory } from './hooks/useGraphHistory'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useWorkspacePersistence } from './hooks/useWorkspacePersistence'
+import { useAppUpdates } from './hooks/useAppUpdates'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
@@ -49,6 +50,7 @@ export default function App() {
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
+  const appUpdates = useAppUpdates(setActivity)
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
   const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
@@ -440,6 +442,8 @@ export default function App() {
       chatGPTStatus={chatGPTStatus}
       connectionMode={connectionMode}
       dataHubSettings={dataHubSettings}
+      appUpdateBusy={appUpdates.busy}
+      appUpdateStatus={appUpdates.status}
       errorCount={errors.length}
       findingCount={issues.length}
       initialSection={settingsSection}
@@ -449,6 +453,7 @@ export default function App() {
         if (approvePendingVersion(versionId)) fitCommittedGraph()
       }}
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
+      onCheckForAppUpdate={appUpdates.check}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
       onConfigureChatGPT={configureChatGPT}
@@ -457,9 +462,11 @@ export default function App() {
       onDisconnectChatGPT={disconnectChatGPT}
       onEmergencyStop={stopAgent}
       onDuplicateWorkspace={workspacePersistence.duplicateWorkspace}
+      onDownloadAppUpdate={appUpdates.download}
       onExportDiagnostics={exportDiagnosticsJson}
       onExportPipeline={exportPipelineJson}
       onImportPipeline={importPipelineJson}
+      onInstallAppUpdate={appUpdates.install}
       onLoadPreset={(presetId) => { workspacePersistence.detachWorkspace(); loadPreset(presetId); setSettingsOpen(false) }}
       onOpenDiagnosticLogs={openDiagnosticLogs}
       onOpenWorkspace={workspacePersistence.openWorkspace}
@@ -470,6 +477,7 @@ export default function App() {
       onSaveAiSettings={saveAiConnection}
       onSaveDataHubSettings={saveDataHubSettings}
       onSelectActiveAiSource={selectActiveAgentSource}
+      onSetAppUpdateChannel={appUpdates.setChannel}
       onSyncDataHub={syncDataHub}
       onTestAiConnection={testAiConnection}
       onThemeChange={setTheme}
