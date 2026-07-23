@@ -41,4 +41,22 @@ describe('active AI source recovery', () => {
     await waitFor(() => expect(result.current.activeAiSource).toBe('chatgpt'))
     expect(setActiveAiSource).toHaveBeenCalledWith('chatgpt')
   })
+
+  it('refreshes the account immediately after cancelling sign-in', async () => {
+    const cancelChatGPTLogin = vi.fn(async () => ({ cancelled: true }))
+    window.dataLab = {
+      getAiStatus: vi.fn(async () => disconnectedAiStatus as AiStatus),
+      getChatGPTStatus: vi.fn(async () => ({ available: true, connected: false })),
+      getActiveAiSource: vi.fn(async () => ({ source: 'openai' as const })),
+      cancelChatGPTLogin,
+    } as unknown as NonNullable<typeof window.dataLab>
+
+    const activity = vi.fn()
+    const { result } = renderHook(() => useAiConnections(activity))
+    await act(() => result.current.cancelChatGPTLogin())
+
+    expect(cancelChatGPTLogin).toHaveBeenCalledTimes(1)
+    expect(result.current.chatGPTStatus.connected).toBe(false)
+    expect(activity).toHaveBeenCalledWith('ChatGPT sign-in cancelled · you can retry safely')
+  })
 })

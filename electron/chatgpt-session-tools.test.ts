@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AgentToolSession } from './agent-tools.js'
-import { chatGPTDynamicTools, dynamicToolCallResponse } from './chatgpt-session.js'
+import { chatGPTDynamicTools, dynamicToolCallResponse, loginCompletionState } from './chatgpt-session.js'
 
 describe('ChatGPT Codex dynamic DATA LAB tools', () => {
   it('maps the shared strict tool surface to App Server dynamic tools', () => {
@@ -21,5 +21,12 @@ describe('ChatGPT Codex dynamic DATA LAB tools', () => {
     expect(response.success).toBe(true)
     expect(response.contentItems[0]).toMatchObject({ type: 'inputText' })
     expect(JSON.parse(response.contentItems[0].text)).toMatchObject({ ok: true, status: 'read' })
+  })
+
+  it('accepts the current login completion shapes and ignores another login', () => {
+    expect(loginCompletionState('account/login/completed', { loginId: 'login-1', success: true, error: null }, 'login-1')).toEqual({ success: true, error: undefined })
+    expect(loginCompletionState('account/login/completed', { loginId: null, success: false, error: 'cancelled' }, 'login-1')).toEqual({ success: false, error: 'cancelled' })
+    expect(loginCompletionState('account/updated', { authMode: 'chatgpt' }, 'login-1')).toEqual({ success: true })
+    expect(loginCompletionState('account/login/completed', { loginId: 'login-2', success: true }, 'login-1')).toBeUndefined()
   })
 })

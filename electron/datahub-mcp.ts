@@ -2,8 +2,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { app, safeStorage } from 'electron'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
+import { secureStorageCapability } from './secure-storage.js'
 export type { DataHubAssetSummary } from './datahub-context.js'
 
 export type DataHubMcpTransport = 'demo' | 'http' | 'stdio'
@@ -82,6 +86,41 @@ export function resolveEvidenceTtlMs(environment: NodeJS.ProcessEnv = process.en
   }
 }
 
+export function resolveDataHubMcpCommand(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+  home = homedir(),
+  pathExists: (path: string) => boolean = existsSync,
+) {
+  const configured = environment.DATAHUB_MCP_COMMAND?.trim()
+  if (configured && configured !== 'uvx' && configured !== 'uvx.exe') return configured
+  const executable = platform === 'win32' ? 'uvx.exe' : 'uvx'
+  const pathCandidates = (environment.PATH ?? '').split(delimiter).filter(Boolean).map((directory) => join(directory, executable))
+  const commonCandidates = platform === 'win32'
+    ? [
+        environment.LOCALAPPDATA ? join(environment.LOCALAPPDATA, 'Programs', 'uv', executable) : '',
+        join(home, '.local', 'bin', executable),
+        join(home, '.cargo', 'bin', executable),
+      ]
+    : [
+        join(home, '.local', 'bin', executable),
+        join(home, '.cargo', 'bin', executable),
+        '/opt/homebrew/bin/uvx',
+        '/usr/local/bin/uvx',
+        '/usr/bin/uvx',
+      ]
+  return [...pathCandidates, ...commonCandidates].find((candidate) => candidate && pathExists(candidate)) ?? executable
+}
+
+export function normalizeDataHubMcpStartupError(error: unknown, command: string) {
+  const message = error instanceof Error ? error.message : String(error)
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (code === 'ENOENT' || /\bENOENT\b/.test(message)) {
+    return new Error(`Local DataHub MCP could not start because "${command}" was not found. Install uv, restart DATA LAB, then connect again.`)
+  }
+  return error instanceof Error ? error : new Error(message)
+}
+
 const settingKeys = {
   transport: 'datahub-mcp-transport',
   url: 'datahub-mcp-url',
@@ -130,7 +169,7 @@ function configuration(resolveSecrets = false): { mode: DataHubMcpTransport; mes
     url,
     tokenConfigured,
     tokenSource: encryptedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
-    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    encryptionAvailable: secureStorageCapability(),
     writebackEnabled,
   }
 
@@ -155,7 +194,7 @@ function configuration(resolveSecrets = false): { mode: DataHubMcpTransport; mes
   }
 }
 
-function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transport: ActiveTransport } {
+function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transport: ActiveTransport; command?: string } {
   const config = configuration(true)
   if (config.mode === 'demo') throw new Error(config.message)
   if (config.mode === 'http') {
@@ -166,10 +205,12 @@ function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transp
     }
   }
 
+  const command = resolveDataHubMcpCommand()
   return {
     mode: 'stdio',
+    command,
     transport: new StdioClientTransport({
-      command: process.env.DATAHUB_MCP_COMMAND?.trim() || 'uvx',
+      command,
       args: [process.env.DATAHUB_MCP_PACKAGE?.trim() || 'mcp-server-datahub@latest'],
       env: {
         ...getDefaultEnvironment(),
@@ -211,7 +252,9 @@ async function connectClient(): Promise<Client> {
       return client
     } catch (error) {
       await configured.transport.close().catch(() => undefined)
-      throw error
+      throw configured.mode === 'stdio'
+        ? normalizeDataHubMcpStartupError(error, configured.command ?? 'uvx')
+        : error
     } finally {
       connectionPromise = undefined
     }

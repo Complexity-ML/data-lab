@@ -3,18 +3,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, decryptions: 0 }))
+const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, availabilityChecks: 0, decryptions: 0 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => electronState.directory },
   safeStorage: {
     decryptString: (buffer: Buffer) => { electronState.decryptions += 1; return buffer.toString('utf8').replace(/^encrypted:/, '') },
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
-    isEncryptionAvailable: () => electronState.encryptionAvailable,
+    isEncryptionAvailable: () => { electronState.availabilityChecks += 1; return electronState.encryptionAvailable },
   },
 }))
 
-import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -23,6 +23,7 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'data-lab-datahub-'))
   electronState.directory = directory
   electronState.encryptionAvailable = true
+  electronState.availabilityChecks = 0
   electronState.decryptions = 0
   process.env.DATAHUB_MCP_URL = ''
   process.env.DATAHUB_MCP_TOKEN = ''
@@ -36,6 +37,24 @@ afterEach(() => {
 })
 
 describe('DataHub MCP connection settings', () => {
+  it('reports startup status without probing or opening operating-system secure storage', () => {
+    const status = getDataHubMcpConfigurationStatus()
+    expect(status.settings.tokenSource).toBe('none')
+    expect(electronState.availabilityChecks).toBe(0)
+    expect(electronState.decryptions).toBe(0)
+  })
+
+  it('finds uvx in the macOS user install directory even when the app PATH is minimal', () => {
+    const expected = '/Users/data-lab/.local/bin/uvx'
+    expect(resolveDataHubMcpCommand({ PATH: '/usr/bin:/bin' }, 'darwin', '/Users/data-lab', (candidate) => candidate === expected)).toBe(expected)
+    expect(resolveDataHubMcpCommand({ DATAHUB_MCP_COMMAND: '/custom/bin/datahub-mcp' }, 'darwin', '/Users/data-lab', () => false)).toBe('/custom/bin/datahub-mcp')
+  })
+
+  it('turns a missing uvx spawn failure into an actionable desktop message', () => {
+    const error = Object.assign(new Error('spawn uvx ENOENT'), { code: 'ENOENT' })
+    expect(normalizeDataHubMcpStartupError(error, 'uvx').message).toContain('Install uv, restart DATA LAB')
+  })
+
   it('rejects oversized or non-serializable MCP responses before parsing or caching them', () => {
     expect(() => assertBoundedMcpPayload({ content: 'x'.repeat(1_001) }, 'test response', 1_000)).toThrow('safety limit')
     const circular: Record<string, unknown> = {}
@@ -98,6 +117,7 @@ describe('DataHub MCP connection settings', () => {
   it('persists endpoint metadata and an encrypted token without exposing the credential', async () => {
     await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080/', token: 'datahub-private-token' })
 
+    electronState.availabilityChecks = 0
     const status = getDataHubMcpConfigurationStatus()
     expect(status).toMatchObject({
       mode: 'demo',
@@ -105,6 +125,7 @@ describe('DataHub MCP connection settings', () => {
       settings: { transport: 'stdio', url: 'http://localhost:8080', tokenConfigured: true, tokenSource: 'encrypted' },
     })
     expect(JSON.stringify(status)).not.toContain('datahub-private-token')
+    expect(electronState.availabilityChecks).toBe(0)
     expect(electronState.decryptions).toBe(0)
     expect(readFileSync(join(directory, 'data-lab.sqlite')).toString('utf8')).not.toContain('datahub-private-token')
   })

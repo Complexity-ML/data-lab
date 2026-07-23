@@ -87,7 +87,7 @@ export default function App() {
   }
 
   const appUpdates = useAppUpdates(setActivity)
-  const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
+  const { active, activeAiSource, aiStatus, cancelChatGPTLogin, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writebackAvailable: dataHubWritebackAvailable, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
   const { approvePendingVersion, approveProposal, commitAutonomousProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({
     edges,
@@ -815,6 +815,7 @@ export default function App() {
       onCheckForAppUpdate={appUpdates.check}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
+      onCancelChatGPTLogin={cancelChatGPTLogin}
       onConfigureChatGPT={configureChatGPT}
       onConnectChatGPT={connectChatGPT}
       onCreateWorkspace={workspacePersistence.createWorkspace}

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { parseAndValidateProposal } from './proposal-contract.js'
 import { proposalSchema } from './proposal-schema.js'
 import { AgentToolSession, agentToolDefinitions, type AgentToolTrace } from './agent-tools.js'
+import { secureStorageCapability } from './secure-storage.js'
 
 export { proposalSchema } from './proposal-schema.js'
 
@@ -97,7 +98,7 @@ export async function getAiStatus() {
     credentialSource: providerStatus[config.selectedProvider].credentialSource,
     selectedProvider: config.selectedProvider,
     providers: providerStatus,
-    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    encryptionAvailable: secureStorageCapability(),
     settings: { provider: config.selectedProvider, model: config.providers[config.selectedProvider].model, reasoningEffort: config.reasoningEffort, verbosity: config.verbosity, serviceTier: config.serviceTier },
   }
 }

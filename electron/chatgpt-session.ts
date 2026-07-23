@@ -16,10 +16,22 @@ type OpenExternal = (url: string) => Promise<unknown>
 const require = createRequire(import.meta.url)
 const requestTimeoutMs = 30_000
 const loginTimeoutMs = 5 * 60_000
+const loginPollMs = 1_000
+const loginStatusTimeoutMs = 5_000
 const turnTimeoutMs = 3 * 60_000
 
 function record(value: unknown): JsonRecord { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {} }
 function errorMessage(value: unknown) { const detail = record(value); return typeof detail.message === 'string' ? detail.message : String(value) }
+
+export function loginCompletionState(method: string, params: unknown, loginId: string) {
+  const value = record(params)
+  if (method === 'account/updated' && value.authMode === 'chatgpt') return { success: true }
+  if (method !== 'account/login/completed' || (value.loginId !== loginId && value.loginId !== null)) return undefined
+  return {
+    success: value.success === true,
+    error: typeof value.error === 'string' ? value.error : undefined,
+  }
+}
 
 export const chatGPTDynamicTools = agentToolDefinitions.map((tool) => ({
   type: 'function',
@@ -73,6 +85,7 @@ export class ChatGPTAgentSession {
   private readonly pending = new Map<number, { resolve(value: unknown): void; reject(reason: Error): void; timeout: NodeJS.Timeout }>()
   private readonly listeners = new Set<(method: string, params: unknown) => void>()
   private readonly toolSessions = new Map<string, AgentToolSession>()
+  private activeLogin?: { loginId: string; cancel(error: Error): void }
   constructor(private readonly openExternal: OpenExternal, private readonly version: string, private readonly codexHome: string) {}
 
   private start() {
@@ -114,6 +127,44 @@ export class ChatGPTAgentSession {
   private waitFor(method: string, predicate: (params: JsonRecord) => boolean, timeoutMs: number) {
     return new Promise<JsonRecord>((resolve, reject) => { const timeout = setTimeout(() => { this.listeners.delete(listener); reject(new Error(`${method} timed out`)) }, timeoutMs); const listener = (candidate: string, params: unknown) => { const value = record(params); if (candidate !== method || !predicate(value)) return; clearTimeout(timeout); this.listeners.delete(listener); resolve(value) }; this.listeners.add(listener) })
   }
+  private waitForLogin(loginId: string) {
+    let cancel: (error: Error) => void = () => undefined
+    const promise = new Promise<JsonRecord>((resolve, reject) => {
+      let settled = false
+      let reading = false
+      const finish = (error?: Error, value?: JsonRecord) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        clearInterval(poll)
+        this.listeners.delete(listener)
+        if (error) reject(error)
+        else resolve(value ?? { success: true })
+      }
+      const listener = (method: string, params: unknown) => {
+        const state = loginCompletionState(method, params, loginId)
+        if (!state) return
+        if (state.success) finish(undefined, { success: true })
+        else finish(new Error(state.error ?? 'ChatGPT sign-in was cancelled'))
+      }
+      const readAccount = async () => {
+        if (settled || reading) return
+        reading = true
+        try {
+          const account = record(record(await this.request('account/read', { refreshToken: false }, loginStatusTimeoutMs)).account)
+          if (account.type === 'chatgpt') finish(undefined, { success: true })
+        } catch { /* the completion notification or next poll may still succeed */ }
+        finally { reading = false }
+      }
+      const timeout = setTimeout(() => finish(new Error('ChatGPT sign-in timed out. You can retry safely.')), loginTimeoutMs)
+      const poll = setInterval(() => void readAccount(), loginPollMs)
+      cancel = (error) => finish(error)
+      this.listeners.add(listener)
+      void readAccount()
+    })
+    void promise.catch(() => undefined)
+    return { promise, cancel }
+  }
   private collect(threadId: string) {
     let output = ''
     const listener = (method: string, params: unknown) => { const value = record(params); if (value.threadId !== threadId) return; const item = record(value.item); if (method === 'item/completed' && item.type === 'agentMessage' && typeof item.text === 'string') output = item.text; if (method === 'item/agentMessage/delta' && typeof value.delta === 'string') output += value.delta }
@@ -128,13 +179,35 @@ export class ChatGPTAgentSession {
       const account = record(record(await this.request('account/read', { refreshToken: false })).account)
       if (account.type !== 'chatgpt') return { available: true, connected: false }
       let models: ChatGPTModelOption[] = []
-      try { const result = record(await this.request('model/list', { limit: 100, includeHidden: false })); models = (Array.isArray(result.data) ? result.data : []).map((item) => { const model = record(item); const efforts = (Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : []).map((effort) => record(effort).reasoningEffort).filter((effort): effort is string => typeof effort === 'string'); return { id: typeof model.model === 'string' ? model.model : String(model.id ?? ''), label: typeof model.displayName === 'string' ? model.displayName : String(model.model ?? ''), description: typeof model.description === 'string' ? model.description : undefined, efforts, defaultEffort: typeof model.defaultReasoningEffort === 'string' ? model.defaultReasoningEffort : undefined, isDefault: model.isDefault === true } }).filter((model) => model.id) } catch { /* keep session */ }
+      try { const result = record(await this.request('model/list', { limit: 100, includeHidden: false }, loginStatusTimeoutMs)); models = (Array.isArray(result.data) ? result.data : []).map((item) => { const model = record(item); const efforts = (Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : []).map((effort) => record(effort).reasoningEffort).filter((effort): effort is string => typeof effort === 'string'); return { id: typeof model.model === 'string' ? model.model : String(model.id ?? ''), label: typeof model.displayName === 'string' ? model.displayName : String(model.model ?? ''), description: typeof model.description === 'string' ? model.description : undefined, efforts, defaultEffort: typeof model.defaultReasoningEffort === 'string' ? model.defaultReasoningEffort : undefined, isDefault: model.isDefault === true } }).filter((model) => model.id) } catch { /* keep the connected session even when the catalog is slow */ }
       const selected = models.find((model) => model.id === this.selectedModel) ?? models.find((model) => model.isDefault) ?? models[0]
       if (selected && !this.selectedModel) { this.selectedModel = selected.id; this.selectedEffort = selected.defaultEffort ?? selected.efforts[0] }
       return { available: true, connected: true, email: typeof account.email === 'string' ? account.email : undefined, planType: typeof account.planType === 'string' ? account.planType : undefined, models, selectedModel: this.selectedModel, selectedEffort: this.selectedEffort }
     } catch (error) { return { available: false, connected: false, error: error instanceof Error ? error.message : String(error) } }
   }
-  async connect() { await this.start(); const result = record(await this.request('account/login/start', { type: 'chatgpt', useHostedLoginSuccessPage: true, appBrand: 'chatgpt' })); if (result.type !== 'chatgpt' || typeof result.loginId !== 'string' || typeof result.authUrl !== 'string') throw new Error('Codex did not return a ChatGPT sign-in URL'); const completed = this.waitFor('account/login/completed', (params) => params.loginId === result.loginId, loginTimeoutMs); await this.openExternal(result.authUrl); const notification = await completed; if (notification.success !== true) throw new Error(typeof notification.error === 'string' ? notification.error : 'ChatGPT sign-in was not completed'); return this.status() }
+  async connect() {
+    if (this.activeLogin) throw new Error('A ChatGPT sign-in is already in progress')
+    await this.start()
+    const result = record(await this.request('account/login/start', { type: 'chatgpt', useHostedLoginSuccessPage: true, appBrand: 'chatgpt' }))
+    if (result.type !== 'chatgpt' || typeof result.loginId !== 'string' || typeof result.authUrl !== 'string') throw new Error('Codex did not return a ChatGPT sign-in URL')
+    const waiter = this.waitForLogin(result.loginId)
+    this.activeLogin = { loginId: result.loginId, cancel: waiter.cancel }
+    try {
+      await this.openExternal(result.authUrl)
+      await waiter.promise
+      return this.status()
+    } finally {
+      if (this.activeLogin?.loginId === result.loginId) this.activeLogin = undefined
+    }
+  }
+  cancelLogin() {
+    const login = this.activeLogin
+    if (!login) return { cancelled: false }
+    login.cancel(new Error('ChatGPT sign-in cancelled'))
+    this.activeLogin = undefined
+    void this.request('account/login/cancel', { loginId: login.loginId }, loginStatusTimeoutMs).catch(() => undefined)
+    return { cancelled: true }
+  }
   async disconnect() { await this.start(); await this.request('account/logout'); this.selectedModel = undefined; this.selectedEffort = undefined; return { available: true, connected: false } as ChatGPTSessionStatus }
   async configure(payload: { model?: unknown; effort?: unknown }) { const status = await this.status(); const model = status.models?.find((item) => item.id === payload.model); if (!model) throw new Error('Choose a model available to this ChatGPT account'); this.selectedModel = model.id; this.selectedEffort = typeof payload.effort === 'string' && model.efforts.includes(payload.effort) ? payload.effort : model.defaultEffort ?? model.efforts[0]; return this.status() }
 

@@ -22,6 +22,7 @@ const aiCancelChannel = 'data-lab:ai-cancel'
 const humanReviewOpenedChannel = 'data-lab:human-review-opened'
 const chatGPTStatusChannel = 'data-lab:chatgpt-status'
 const chatGPTConnectChannel = 'data-lab:chatgpt-connect'
+const chatGPTLoginCancelChannel = 'data-lab:chatgpt-login-cancel'
 const chatGPTDisconnectChannel = 'data-lab:chatgpt-disconnect'
 const chatGPTConfigureChannel = 'data-lab:chatgpt-configure'
 const chatGPTProposalChannel = 'data-lab:chatgpt-proposal'
@@ -73,6 +74,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   cancelAiProposal: () => ipcRenderer.invoke(aiCancelChannel),
   getChatGPTStatus: () => ipcRenderer.invoke(chatGPTStatusChannel),
   connectChatGPT: () => ipcRenderer.invoke(chatGPTConnectChannel),
+  cancelChatGPTLogin: () => ipcRenderer.invoke(chatGPTLoginCancelChannel),
   disconnectChatGPT: () => ipcRenderer.invoke(chatGPTDisconnectChannel),
   configureChatGPT: (payload: { model: string; effort: string }) => ipcRenderer.invoke(chatGPTConfigureChannel, payload),
   runChatGPTProposal: (payload: unknown) => ipcRenderer.invoke(chatGPTProposalChannel, payload),
