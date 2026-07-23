@@ -137,6 +137,7 @@ See [DataHub MCP Server](https://docs.datahub.com/docs/features/feature-guides/m
 - [Importable approved pipeline and evidence checkpoint](examples/datahub-oss/reviewed-pipeline.json)
 - [Atomic validation and replay report](examples/datahub-oss/validation-report.json)
 - [Final application screenshots](docs/hackathon-submission.md#application-screenshots)
+- [Captioned 2:20 demo draft](docs/assets/data-lab-demo-draft.mp4)
 
 ## Security model
 
