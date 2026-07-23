@@ -36,6 +36,7 @@
     "shortDescription": "Install and update DATA LAB from source",
     "longDescription": "A source-first bootstrap installer that fetches the latest DATA LAB release and builds it locally.",
     "icon": [
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],
