@@ -70,7 +70,7 @@ describe('bounded DATA LAB agent tools', () => {
       description: 'Agent-proposed Data Profile awaiting graph review.',
       owner: 'DATA LAB Agent',
     })
-    expect(session.proposal?.actions[1].rule).toContain('on_approve=resume_next_atom')
+    expect(session.proposal?.actions[1].rule).toContain('on_approve=resume_next_iteration')
     expect(session.trace.map((item) => item.tool)).toEqual([
       'add_card',
       'add_card',

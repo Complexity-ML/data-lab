@@ -82,11 +82,13 @@ function compactGraph(payload: unknown) {
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error('Agent request graph must contain node and edge arrays')
   if (graph.nodes.length > maximumNodes || graph.edges.length > maximumEdges) throw new Error('Agent request graph exceeds the DATA LAB safety limits')
   const nodeIds = new Set<string>()
+  const reviewNodeIds = new Set<string>()
   for (const [index, item] of graph.nodes.entries()) {
     const node = record(item, `Graph node ${index + 1}`)
     const id = identifier(node.id, `Graph node ${index + 1} id`)!
     if (nodeIds.has(id)) throw new Error(`Graph contains duplicate node id ${id}`)
     nodeIds.add(id)
+    if (node.kind === 'review') reviewNodeIds.add(id)
   }
   const edgeIds = new Set<string>()
   for (const [index, item] of graph.edges.entries()) {
@@ -95,7 +97,7 @@ function compactGraph(payload: unknown) {
     if (edgeIds.has(id)) throw new Error(`Graph contains duplicate edge id ${id}`)
     edgeIds.add(id)
   }
-  return { nodeIds, edgeIds }
+  return { nodeIds, edgeIds, reviewNodeIds }
 }
 
 function validateAction(value: unknown, index: number): ValidatedProposalAction {
@@ -130,7 +132,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (!Array.isArray(proposal.evidence) || proposal.evidence.length > 12) throw new Error('evidence must contain at most 12 entries')
   if (!Array.isArray(proposal.actions) || proposal.actions.length > 20) throw new Error('actions must contain at most 20 entries')
 
-  const { nodeIds, edgeIds } = compactGraph(payload)
+  const { nodeIds, edgeIds, reviewNodeIds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
   const aliases = new Set<string>()
   const removedEdges = new Set<string>()
@@ -166,21 +168,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   }
 
   if (nodeIds.size + aliases.size > maximumNodes || edgeIds.size - removedEdges.size + addedEdgeCount > maximumEdges) throw new Error('Proposal would grow the graph beyond the DATA LAB safety limits')
-  const includesReview = actions.some((action) => action.kind === 'review')
+  const includesReview = actions.some((action) => action.kind === 'review' || (action.type === 'update_card' && Boolean(action.node_id && reviewNodeIds.has(action.node_id))))
   if (proposal.requires_human_review && !includesReview) throw new Error('Human Review was requested without a Human Review card action')
+  if (!proposal.requires_human_review && includesReview) throw new Error('Human Review card actions require requires_human_review=true')
   const request = record(payload, 'Agent request')
-  const iterationPolicy = request.iterationPolicy
-  if (iterationPolicy && typeof iterationPolicy === 'object' && !Array.isArray(iterationPolicy)) {
-    const policy = iterationPolicy as JsonRecord
-    if (policy.strategy === 'one-card-at-a-time') {
-      const primaryCardMutations = actions.filter((action) =>
-        (action.type === 'add_card' || action.type === 'update_card') && action.kind !== 'review')
-      const reviewCardMutations = actions.filter((action) =>
-        (action.type === 'add_card' || action.type === 'update_card') && action.kind === 'review')
-      if (primaryCardMutations.length > 1) throw new Error('Autonomous iterations may mutate only one primary card; commit it, reread the graph, then start the next step')
-      if (reviewCardMutations.length > 1) throw new Error('Autonomous iterations may include at most one Human Review checkpoint')
-    }
-  }
   if (request.mode === 'review-assistant' && actions.length) throw new Error('Human Review assistant responses must contain zero graph actions')
   if (request.mode === 'review-assistant' && proposal.requires_human_review) throw new Error('Human Review assistant responses cannot request another review')
 

@@ -2,7 +2,7 @@ import type { SchemaField } from './domain/pipeline'
 import type { ActiveAiSource, AiProposalResponse, AiSettings, AiStatus, ChatGPTSessionStatus } from './domain/ai'
 import type { DataHubAssetSummary } from './domain/datahub'
 import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from './domain/workspace'
-import type { DiagnosticBundle, DiagnosticInput } from './domain/diagnostics'
+import type { DiagnosticBundle, DiagnosticInput, DiagnosticSettings } from './domain/diagnostics'
 import type { AppUpdateChannel, AppUpdateStatus } from './domain/updates'
 import type { IncidentEvent, IncidentEventInput, IncidentRecordResult } from './domain/incidents'
 
@@ -89,15 +89,18 @@ declare global {
       renameWorkspace(workspaceId: string, name: string): Promise<WorkspaceSummary[]>
       duplicateWorkspace(workspaceId: string, name?: string): Promise<WorkspaceManagerState>
       archiveWorkspace(workspaceId: string): Promise<WorkspaceManagerState>
+      deleteWorkspace(workspaceId: string): Promise<WorkspaceManagerState>
       openWorkspace(workspaceId: string): Promise<WorkspaceManagerState>
       autosaveWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string } | { saved: false; reason: 'no-active-workspace' }>
       commitWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string }>
       resolveWorkspaceRecovery(action: 'recover' | 'discard'): Promise<WorkspaceManagerState>
       getActiveAiSource(): Promise<{ source: ActiveAiSource }>
       setActiveAiSource(source: ActiveAiSource): Promise<{ source: ActiveAiSource }>
-      recordDiagnostic(event: DiagnosticInput): Promise<DiagnosticInput & { id: string; timestamp: string }>
+      recordDiagnostic(event: DiagnosticInput): Promise<(DiagnosticInput & { id: string; timestamp: string }) | undefined>
       exportDiagnostics(): Promise<DiagnosticBundle>
       openDiagnosticLogs(): Promise<{ opened: true; path: string }>
+      getDiagnosticSettings(): Promise<DiagnosticSettings>
+      saveDiagnosticSettings(settings: DiagnosticSettings): Promise<DiagnosticSettings>
       listIncidentEvents(): Promise<IncidentEvent[]>
       recordIncidentEvent(event: IncidentEventInput): Promise<IncidentRecordResult>
       restartApplication(): Promise<{ restarting: true }>

@@ -145,6 +145,14 @@ export function useWorkspacePersistence(options: WorkspacePersistenceOptions) {
     setActivity('Workspace archived · blank workbench ready')
   }
 
+  const remove = async (workspaceId: string) => {
+    if (!window.dataLab) return
+    const state = await window.dataLab.deleteWorkspace(workspaceId)
+    setManager(state)
+    setActivity('Archived workspace deleted permanently')
+    recordDiagnostic({ category: 'workspace', action: 'workspace.delete', status: 'info', detail: { workspaceId } })
+  }
+
   const open = async (workspaceId: string) => {
     if (!window.dataLab) return
     const state = await window.dataLab.openWorkspace(workspaceId)
@@ -196,6 +204,7 @@ export function useWorkspacePersistence(options: WorkspacePersistenceOptions) {
     activeWorkspaceId: manager.activeWorkspaceId,
     archiveWorkspace: archive,
     createWorkspace: create,
+    deleteWorkspace: remove,
     detachWorkspace: detach,
     duplicateWorkspace: duplicate,
     openWorkspace: open,

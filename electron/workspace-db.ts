@@ -289,7 +289,12 @@ export function duplicateWorkspace(userDataDirectory: string, workspaceId: unkno
   const source = readWorkspaceRow(target, workspaceId)
   if (!source) throw new Error('Workspace not found')
   const payload = parsePayload(source.draft_payload) ?? parsePayload(source.payload)
-  return createWorkspace(userDataDirectory, name ?? `${source.name} copy`, payload)
+  const existingNames = new Set((target.prepare('SELECT name FROM workspaces').all() as unknown as { name: string }[]).map((workspace) => workspace.name.toLocaleLowerCase()))
+  const baseName = source.name.replace(/\s+copy(?:\s+\d+)?$/i, '').trim() || 'Workspace'
+  let copyName = `${baseName} copy`
+  let copyIndex = 2
+  while (existingNames.has(copyName.toLocaleLowerCase())) copyName = `${baseName} copy ${copyIndex++}`
+  return createWorkspace(userDataDirectory, name ?? copyName, payload)
 }
 
 export function archiveWorkspace(userDataDirectory: string, workspaceId: unknown) {
@@ -299,6 +304,15 @@ export function archiveWorkspace(userDataDirectory: string, workspaceId: unknown
   const result = target.prepare('UPDATE workspaces SET archived = 1, updated_at = ? WHERE id = ?').run(new Date().toISOString(), workspaceId)
   if (Number(result.changes) !== 1) throw new Error('Workspace not found')
   if (readSetting(target, ACTIVE_WORKSPACE_KEY) === workspaceId) clearActiveWorkspace(target)
+  return currentState(target, false)
+}
+
+export function deleteWorkspace(userDataDirectory: string, workspaceId: unknown) {
+  if (typeof workspaceId !== 'string') throw new Error('Invalid workspace ID')
+  const target = db(userDataDirectory)
+  if (readSetting(target, ACTIVE_WORKSPACE_KEY) === workspaceId) throw new Error('The active workspace cannot be deleted')
+  const result = target.prepare('DELETE FROM workspaces WHERE id = ? AND archived = 1').run(workspaceId)
+  if (Number(result.changes) !== 1) throw new Error('Only an archived workspace can be deleted')
   return currentState(target, false)
 }
 

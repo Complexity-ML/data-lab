@@ -45,25 +45,21 @@ describe('strict provider proposal contract', () => {
     expect(result.actions[0]).toMatchObject({ node_id: 'customers-profile', kind: 'profile' })
   })
 
+  it('rejects a Human Review checkpoint when the provider forgets the review flag', () => {
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [validProposal.actions[1]] }, payload)).toThrow('require requires_human_review=true')
+  })
+
+  it('rejects an existing Human Review update when the provider forgets the review flag', () => {
+    const graphWithReview = { graph: { nodes: [...payload.graph.nodes, { id: 'review-existing', kind: 'review' }], edges: payload.graph.edges } }
+    const update = { ...validProposal.actions[0], type: 'update_card', node_id: 'review-existing', kind: null }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [update] }, graphWithReview)).toThrow('require requires_human_review=true')
+  })
+
   it('accepts multiple scoped Impact Analysis atoms', () => {
     const featureImpact = { ...validProposal.actions[0], node_id: 'feature-impact', kind: 'impact', label: 'Feature impact', rule: 'scope(customer_age) → customer_features' }
     const modelImpact = { ...validProposal.actions[0], node_id: 'model-impact', kind: 'impact', label: 'Model impact', rule: 'scope(customer_features) → churn_prediction_v3' }
     const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [featureImpact, modelImpact] }, payload)
     expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
-  })
-
-  it('enforces one primary card mutation per autonomous iteration', () => {
-    const incrementalPayload = {
-      ...payload,
-      iterationPolicy: { strategy: 'one-card-at-a-time', maxPrimaryCardMutations: 1 },
-    }
-    const featureImpact = { ...validProposal.actions[0], node_id: 'feature-impact', kind: 'impact', label: 'Feature impact', rule: 'scope(customer_age) → customer_features' }
-    const modelImpact = { ...validProposal.actions[0], node_id: 'model-impact', kind: 'impact', label: 'Model impact', rule: 'scope(customer_features) → churn_prediction_v3' }
-
-    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [featureImpact, modelImpact] }, incrementalPayload))
-      .toThrow('only one primary card')
-    expect(validateProposal(validProposal, incrementalPayload).actions.map((action) => action.kind))
-      .toEqual(['transform', 'review', null, null])
   })
 
   it('accepts graph-only patches, live monitors, parallel agents and incident diagrams', () => {
