@@ -40,6 +40,8 @@ const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
 const diagnosticsExportChannel = 'data-lab:diagnostics-export'
 const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
+const incidentsListChannel = 'data-lab:incidents-list'
+const incidentsRecordChannel = 'data-lab:incidents-record'
 const applicationRestartChannel = 'data-lab:application-restart'
 const appUpdateStatusChannel = 'data-lab:app-update-status'
 const appUpdateStatusChangedChannel = 'data-lab:app-update-status-changed'
@@ -47,6 +49,7 @@ const appUpdateSetChannel = 'data-lab:app-update-set-channel'
 const appUpdateCheckChannel = 'data-lab:app-update-check'
 const appUpdateDownloadChannel = 'data-lab:app-update-download'
 const appUpdateInstallChannel = 'data-lab:app-update-install'
+const appUpdateOpenSetupChannel = 'data-lab:app-update-open-setup'
 
 contextBridge.exposeInMainWorld('dataLab', {
   runtime: 'electron',
@@ -88,12 +91,15 @@ contextBridge.exposeInMainWorld('dataLab', {
   recordDiagnostic: (event: unknown) => ipcRenderer.invoke(diagnosticsRecordChannel, event),
   exportDiagnostics: () => ipcRenderer.invoke(diagnosticsExportChannel),
   openDiagnosticLogs: () => ipcRenderer.invoke(diagnosticsOpenChannel),
+  listIncidentEvents: () => ipcRenderer.invoke(incidentsListChannel),
+  recordIncidentEvent: (event: unknown) => ipcRenderer.invoke(incidentsRecordChannel, event),
   restartApplication: () => ipcRenderer.invoke(applicationRestartChannel),
   getAppUpdateStatus: () => ipcRenderer.invoke(appUpdateStatusChannel),
   setAppUpdateChannel: (channel: 'stable' | 'main') => ipcRenderer.invoke(appUpdateSetChannel, { channel }),
   checkForAppUpdate: () => ipcRenderer.invoke(appUpdateCheckChannel),
   downloadAppUpdate: () => ipcRenderer.invoke(appUpdateDownloadChannel),
   installAppUpdate: () => ipcRenderer.invoke(appUpdateInstallChannel),
+  openAppSetupUpdater: () => ipcRenderer.invoke(appUpdateOpenSetupChannel),
   onAppUpdateStatusChanged: (callback: (status: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status)
     ipcRenderer.on(appUpdateStatusChangedChannel, listener)

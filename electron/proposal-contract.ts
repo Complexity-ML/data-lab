@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>
 
 export type ProposalActionType = 'add_card' | 'update_card' | 'add_edge' | 'remove_edge'
-export type ProposalCardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type ProposalCardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 
 export interface ValidatedProposalAction {
   type: ProposalActionType
@@ -30,9 +30,9 @@ export interface ValidatedProposal {
 
 const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'confidence', 'writeback', 'evidence', 'actions'] as const
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
-const kinds = new Set<ProposalCardKind>(['source', 'profile', 'analysis', 'impact', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<ProposalCardKind>(['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
-const cardNames: Record<ProposalCardKind, string> = { source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
+const cardNames: Record<ProposalCardKind, string> = { source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
@@ -63,17 +63,17 @@ function identifier(value: unknown, label: string, nullable = false): string | n
   return result
 }
 
-function sourceHandle(value: unknown, label: string): 'approved' | 'quarantine' | null {
+function sourceHandle(value: unknown, label: string): 'approved' | 'quarantine' | 'feedback' | null {
   if (value === null) return null
   if (typeof value !== 'string') throw new Error(`${label} must be text or null`)
   const normalized = value.trim().toLowerCase().replace(/[\s_]+/g, '-')
   if (['', 'n/a', 'na', 'none', 'null', 'not-applicable'].includes(normalized)) return null
-  if (normalized === 'approved' || normalized === 'quarantine') return normalized
+  if (normalized === 'approved' || normalized === 'quarantine' || normalized === 'feedback') return normalized
   const suffix = normalized.match(/^(approved|quarantine)-(?:branch|path|output|handle)$/)
   if (suffix) return suffix[1] as 'approved' | 'quarantine'
   const prefix = normalized.match(/^(?:branch|path|output|handle)-(approved|quarantine)$/)
   if (prefix) return prefix[1] as 'approved' | 'quarantine'
-  throw new Error(`${label} must be null, approved or quarantine`)
+  throw new Error(`${label} must be null, approved, quarantine or feedback`)
 }
 
 function compactGraph(payload: unknown) {
@@ -161,7 +161,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
     if (!action.source || !action.target || action.source === action.target) throw new Error(`Proposal action ${index + 1} has invalid edge endpoints`)
     requireNull(action, ['node_id', 'kind', 'label', 'description', 'owner', 'rule'], index)
     if ((!nodeIds.has(action.source) && !aliases.has(action.source)) || (!nodeIds.has(action.target) && !aliases.has(action.target))) throw new Error(`Proposal action ${index + 1} contains a dangling edge`)
-    if (action.source_handle && !['approved', 'quarantine'].includes(action.source_handle)) throw new Error(`Proposal action ${index + 1} has an invalid source handle`)
+    if (action.source_handle && !['approved', 'quarantine', 'feedback'].includes(action.source_handle)) throw new Error(`Proposal action ${index + 1} has an invalid source handle`)
     addedEdgeCount += 1
   }
 

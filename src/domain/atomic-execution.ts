@@ -51,7 +51,7 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
   if (nodes.length === 0) return { started: false, state: 'idle', nodeStates, events: [], branches: [], reason: 'A pipeline requires at least one card.' }
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
-  for (const edge of edges) if (byId.has(edge.source) && byId.has(edge.target)) incoming.get(edge.target)!.push(edge.source)
+  for (const edge of edges) if (edge.sourceHandle !== 'feedback' && byId.has(edge.source) && byId.has(edge.target)) incoming.get(edge.target)!.push(edge.source)
   const events: AtomicExecutionEvent[] = []
   const completed: string[] = []
   let sequence = 0
@@ -89,7 +89,14 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
       } else {
         nodeStates[node.id] = 'completed'
         completed.push(node.id)
-        events.push({ nodeId: node.id, sequence: ++sequence, state: 'completed', message: node.data.kind === 'impact' ? 'Impact Analysis atom committed from its versioned evidence snapshot.' : 'Atomic card commit completed.' })
+        const message = node.data.kind === 'impact'
+          ? 'Impact Analysis atom committed from its versioned evidence snapshot.'
+          : node.data.kind === 'monitor'
+            ? 'Live Monitor evaluated one bounded evidence iteration.'
+            : node.data.kind === 'parallel'
+              ? 'Independent agent branches released with branch-only context; token usage remains observable and uncapped.'
+            : 'Atomic card commit completed.'
+        events.push({ nodeId: node.id, sequence: ++sequence, state: 'completed', message })
       }
       progressed = true
     }

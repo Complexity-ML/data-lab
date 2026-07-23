@@ -2,7 +2,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
 import { scenarioPresets } from './presets'
 
-export type CardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -50,6 +50,10 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubUpstream?: { urn: string; name: string; sensitive: boolean }[]
   datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
   profile?: DataProfileSnapshot
+  patchScope?: 'graph-only'
+  monitorMode?: 'event-loop'
+  parallelMode?: 'branch-fanout'
+  diagramMode?: 'incident-workstream'
   rule?: string
   agentAdded?: boolean
   pinned?: boolean
@@ -90,6 +94,10 @@ export const cardLabels: Record<CardKind, string> = {
   profile: 'Data Profile',
   analysis: 'Data Analysis',
   impact: 'Impact Analysis',
+  patch: 'Compatibility Patch',
+  monitor: 'Live Monitor',
+  parallel: 'Parallel Agents',
+  diagram: 'Incident Diagram',
   split: 'Split',
   decision: 'Agent Decision',
   transform: 'Transform',
@@ -275,7 +283,23 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
       owner: 'Unassigned',
       status: 'draft',
       schema: [],
-      rule: kind === 'split' ? 'condition = true' : kind === 'impact' ? 'scope(change) → DataHub lineage → ranked risks → recommended actions' : undefined,
+      rule: kind === 'split'
+        ? 'condition = true'
+        : kind === 'impact'
+          ? 'scope(change) → DataHub lineage → ranked risks → recommended actions'
+          : kind === 'patch'
+            ? 'graph_only: map incompatible fields without mutating the source dataset'
+            : kind === 'monitor'
+              ? 'on_change(metadata_fingerprint) | cooldown=60s | max_iterations=10 | alert=severity_increase'
+              : kind === 'parallel'
+                ? 'max_concurrency=3 | context=branch_only | merge=atomic'
+                : kind === 'diagram'
+                  ? 'group=incident | inputs=parallel_diffs | merge=atomic'
+            : undefined,
+      patchScope: kind === 'patch' ? 'graph-only' : undefined,
+      monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
+      parallelMode: kind === 'parallel' ? 'branch-fanout' : undefined,
+      diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
     },
   }
 }

@@ -15,6 +15,7 @@ export interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  writebackAvailable: boolean
   settings: DataHubMcpPublicSettings
 }
 
@@ -63,6 +64,11 @@ const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_lineage: 90_000,
 }
 
+export function hasExplicitDataHubWritebackTool(catalog: ToolCatalog | undefined): boolean {
+  const tool = catalog?.tools.find((candidate) => candidate.name === 'save_document')
+  return Boolean(tool && tool.annotations?.readOnlyHint === false)
+}
+
 function boundedTtl(value: string | undefined, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.min(60 * 60_000, Math.max(5_000, Math.round(parsed))) : fallback
@@ -104,11 +110,12 @@ function decryptStoredToken(encrypted: string | null): string | undefined {
   try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')).trim() || undefined } catch { return undefined }
 }
 
-function configuration(): { mode: DataHubMcpTransport; message: string; url?: string; token?: string; settings: DataHubMcpPublicSettings } {
+function configuration(resolveSecrets = false): { mode: DataHubMcpTransport; message: string; url?: string; token?: string; settings: DataHubMcpPublicSettings } {
   const userData = app.getPath('userData')
   const storedTransport = loadAppSetting(userData, settingKeys.transport)
   const storedUrl = loadAppSetting(userData, settingKeys.url)?.trim()
-  const storedToken = decryptStoredToken(loadAppSetting(userData, settingKeys.token))
+  const encryptedToken = loadAppSetting(userData, settingKeys.token)
+  const storedToken = resolveSecrets ? decryptStoredToken(encryptedToken) : undefined
   const transport = storedTransport === 'stdio' || storedTransport === 'http' ? storedTransport : undefined
   const environmentHttpUrl = process.env.DATAHUB_MCP_URL?.trim()
   const environmentGmsUrl = process.env.DATAHUB_GMS_URL?.trim()
@@ -116,12 +123,13 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
   const selectedTransport = transport ?? (environmentHttpUrl ? 'http' : 'stdio')
   const url = storedUrl || (selectedTransport === 'http' ? environmentHttpUrl : environmentGmsUrl) || ''
   const token = storedToken || environmentToken
+  const tokenConfigured = Boolean(encryptedToken || environmentToken)
   const writebackEnabled = loadAppSetting(userData, settingKeys.writeback) === 'true'
   const settings: DataHubMcpPublicSettings = {
     transport: selectedTransport,
     url,
-    tokenConfigured: Boolean(token),
-    tokenSource: storedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
+    tokenConfigured,
+    tokenSource: encryptedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
     writebackEnabled,
   }
@@ -134,7 +142,7 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
 
   if (selectedTransport === 'stdio' && url) return {
     mode: 'stdio',
-    message: token ? 'Local DataHub MCP is ready with token authentication' : 'Local DataHub OSS MCP is ready without token authentication',
+    message: tokenConfigured ? 'Local DataHub MCP is ready with token authentication' : 'Local DataHub OSS MCP is ready without token authentication',
     url,
     token,
     settings,
@@ -148,7 +156,7 @@ function configuration(): { mode: DataHubMcpTransport; message: string; url?: st
 }
 
 function createTransport(): { mode: Exclude<DataHubMcpTransport, 'demo'>; transport: ActiveTransport } {
-  const config = configuration()
+  const config = configuration(true)
   if (config.mode === 'demo') throw new Error(config.message)
   if (config.mode === 'http') {
     const headers = config.token ? { Authorization: `Bearer ${config.token}` } : undefined
@@ -259,9 +267,17 @@ async function discoverReadableToolNames(client: Client): Promise<Set<string>> {
 
 export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
   const config = configuration()
-  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], settings: config.settings }
+  if (config.mode === 'demo') return { mode: 'demo', transport: 'demo', message: config.message, toolCount: 0, tools: [], writebackAvailable: false, settings: config.settings }
   const tools = toolCatalog?.tools.map((tool) => tool.name).filter(safeToolName).sort() ?? []
-  return { mode: activeClient ? 'connected' : 'demo', transport: config.mode, message: activeClient ? `DataHub MCP connected${tools.length ? ` · ${tools.length} tools available` : ''}` : config.message, toolCount: tools.length, tools, settings: config.settings }
+  return {
+    mode: activeClient ? 'connected' : 'demo',
+    transport: config.mode,
+    message: activeClient ? `DataHub MCP connected${tools.length ? ` · ${tools.length} tools available` : ''}` : config.message,
+    toolCount: tools.length,
+    tools,
+    writebackAvailable: Boolean(activeClient) && hasExplicitDataHubWritebackTool(toolCatalog),
+    settings: config.settings,
+  }
 }
 
 export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubMcpStatus> {
@@ -300,6 +316,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
     serverVersion: client.getServerVersion()?.version,
     toolCount: names.length,
     tools: names,
+    writebackAvailable: hasExplicitDataHubWritebackTool(tools),
     settings: config.settings,
   }
 }
@@ -418,8 +435,7 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
   const { revisionId, title, rationale, author, relatedAssets } = parseDataHubDecisionRequest(payload)
   const client = await connectClient()
   const listed = await discoverTools(client, 'DataHub MCP mutation discovery')
-  const tool = listed.tools.find((candidate) => candidate.name === 'save_document')
-  if (!tool || tool.annotations?.readOnlyHint !== false) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
+  if (!hasExplicitDataHubWritebackTool(listed)) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
   const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
   const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }), 20_000, 'save_document'), 'save_document response')
   if (result.isError) throw new Error(summarizeResult(result))

@@ -4,6 +4,7 @@ import type { DataHubAssetSummary } from './domain/datahub'
 import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from './domain/workspace'
 import type { DiagnosticBundle, DiagnosticInput } from './domain/diagnostics'
 import type { AppUpdateChannel, AppUpdateStatus } from './domain/updates'
+import type { IncidentEvent, IncidentEventInput, IncidentRecordResult } from './domain/incidents'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -28,6 +29,7 @@ interface DataHubMcpStatus {
   serverVersion?: string
   toolCount: number
   tools: string[]
+  writebackAvailable: boolean
   settings: {
     transport: 'http' | 'stdio'
     url: string
@@ -95,12 +97,15 @@ declare global {
       recordDiagnostic(event: DiagnosticInput): Promise<DiagnosticInput & { id: string; timestamp: string }>
       exportDiagnostics(): Promise<DiagnosticBundle>
       openDiagnosticLogs(): Promise<{ opened: true; path: string }>
+      listIncidentEvents(): Promise<IncidentEvent[]>
+      recordIncidentEvent(event: IncidentEventInput): Promise<IncidentRecordResult>
       restartApplication(): Promise<{ restarting: true }>
       getAppUpdateStatus(): Promise<AppUpdateStatus>
       setAppUpdateChannel(channel: AppUpdateChannel): Promise<AppUpdateStatus>
       checkForAppUpdate(): Promise<AppUpdateStatus>
       downloadAppUpdate(): Promise<AppUpdateStatus>
       installAppUpdate(): Promise<AppUpdateStatus>
+      openAppSetupUpdater(): Promise<{ opened: true; channel: AppUpdateChannel; path: string }>
       onAppUpdateStatusChanged(callback: (status: AppUpdateStatus) => void): () => void
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>

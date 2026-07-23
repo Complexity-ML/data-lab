@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, GitBranch, LoaderCircle, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
@@ -7,6 +7,10 @@ const icons = {
   profile: ChartColumn,
   analysis: BrainCircuit,
   impact: ChartNetwork,
+  patch: FileDiff,
+  monitor: Radar,
+  parallel: Network,
+  diagram: LayoutDashboard,
   split: GitBranch,
   decision: Dices,
   transform: WandSparkles,
@@ -20,14 +24,17 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
-  const isProfile = data.kind === 'profile'
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
-    {!isSource && !isProfile && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
+    {!isSource && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
     <header>
       <span className="card-icon"><Icon size={16} /></span>
       <span className="card-kind">{data.kind}</span>
       {data.agentAdded && <span className="agent-badge"><Sparkles size={11} /> Agent</span>}
+      {data.kind === 'patch' && <span className="patch-scope-badge">Graph only</span>}
+      {data.kind === 'monitor' && <span className="monitor-mode-badge">Live loop</span>}
+      {data.kind === 'parallel' && <span className="parallel-mode-badge">Fan out</span>}
+      {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
       {data.runState === 'waiting' && <span className="run-badge is-waiting"><CirclePause size={10} /> Review</span>}
@@ -48,7 +55,11 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
       <span>{data.owner}</span>
       {data.datahubUrn && <span className="datahub-badge">DataHub</span>}
     </footer>
-    {!isOutput && !isSplit && !isProfile && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
+    {!isOutput && !isSplit && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
+    {isOutput && <>
+      <Handle className="pipeline-handle output-feedback" id="feedback" position={Position.Right} type="source" />
+      <span className="feedback-label">feedback</span>
+    </>}
     {isSplit && <>
       <Handle className="pipeline-handle split-approved" id="approved" position={Position.Right} type="source" />
       <Handle className="pipeline-handle split-quarantine" id="quarantine" position={Position.Right} type="source" />

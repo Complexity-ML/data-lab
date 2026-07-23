@@ -3,18 +3,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true }))
+const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, decryptions: 0 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => electronState.directory },
   safeStorage: {
-    decryptString: (buffer: Buffer) => buffer.toString('utf8').replace(/^encrypted:/, ''),
+    decryptString: (buffer: Buffer) => { electronState.decryptions += 1; return buffer.toString('utf8').replace(/^encrypted:/, '') },
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
     isEncryptionAvailable: () => electronState.encryptionAvailable,
   },
 }))
 
-import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -23,6 +23,7 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'data-lab-datahub-'))
   electronState.directory = directory
   electronState.encryptionAvailable = true
+  electronState.decryptions = 0
   process.env.DATAHUB_MCP_URL = ''
   process.env.DATAHUB_MCP_TOKEN = ''
   process.env.DATAHUB_GMS_URL = ''
@@ -51,6 +52,14 @@ describe('DataHub MCP connection settings', () => {
     const names = await resolveReadableToolNames(async () => { throw new Error('tool discovery timed out') })
     expect([...names].sort()).toEqual(['get_entities', 'get_lineage', 'list_schema_fields', 'search'])
     expect(names.has('save_document')).toBe(false)
+  })
+
+  it('advertises write-back only for an explicit non-read-only save_document tool', () => {
+    expect(hasExplicitDataHubWritebackTool(undefined)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document' }] } as never)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document', annotations: { readOnlyHint: true } }] } as never)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document', annotations: { readOnlyHint: false } }] } as never)).toBe(true)
+    expect(getDataHubMcpConfigurationStatus().writebackAvailable).toBe(false)
   })
 
   it('uses the discovered tool catalog when it is available', async () => {
@@ -96,6 +105,7 @@ describe('DataHub MCP connection settings', () => {
       settings: { transport: 'stdio', url: 'http://localhost:8080', tokenConfigured: true, tokenSource: 'encrypted' },
     })
     expect(JSON.stringify(status)).not.toContain('datahub-private-token')
+    expect(electronState.decryptions).toBe(0)
     expect(readFileSync(join(directory, 'data-lab.sqlite')).toString('utf8')).not.toContain('datahub-private-token')
   })
 

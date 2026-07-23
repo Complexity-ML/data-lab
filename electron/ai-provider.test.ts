@@ -3,12 +3,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true }))
+const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, decryptions: 0 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => electronState.directory },
   safeStorage: {
-    decryptString: (buffer: Buffer) => buffer.toString('utf8').replace(/^encrypted:/, ''),
+    decryptString: (buffer: Buffer) => { electronState.decryptions += 1; return buffer.toString('utf8').replace(/^encrypted:/, '') },
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
     isEncryptionAvailable: () => electronState.encryptionAvailable,
   },
@@ -22,6 +22,7 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'data-lab-ai-provider-'))
   electronState.directory = directory
   electronState.encryptionAvailable = true
+  electronState.decryptions = 0
   process.env.OPENAI_API_KEY = ''
   process.env.ANTHROPIC_API_KEY = ''
   process.env.MOONSHOT_API_KEY = ''
@@ -42,6 +43,7 @@ describe('secure provider credential lifecycle', () => {
     expect(status.providers.openai).toMatchObject({ connected: true, credentialSource: 'encrypted' })
     expect(status.providers.anthropic).toMatchObject({ connected: true, credentialSource: 'encrypted' })
     expect(JSON.stringify(status)).not.toContain('secret')
+    expect(electronState.decryptions).toBe(0)
 
     const stored = readFileSync(join(directory, 'ai-provider.json'), 'utf8')
     expect(stored).not.toContain('sk-rotated-secret')

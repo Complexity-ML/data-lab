@@ -46,6 +46,37 @@ type WorkspaceRow = {
   updated_at: string
 }
 
+export interface IncidentEventInput {
+  incidentKey: string
+  transition: 'opened' | 'worsened' | 'agent-action' | 'human-review' | 'recovered'
+  severity: 'info' | 'warning' | 'critical'
+  title: string
+  detail: string
+  cardId?: string
+  branchId?: string
+  versionId?: string
+}
+
+export interface IncidentEvent extends IncidentEventInput {
+  id: string
+  workspaceId?: string
+  createdAt: string
+}
+
+type IncidentRow = {
+  id: string
+  workspace_id: string | null
+  incident_key: string
+  transition: IncidentEventInput['transition']
+  severity: IncidentEventInput['severity']
+  title: string
+  detail: string
+  card_id: string | null
+  branch_id: string | null
+  version_id: string | null
+  created_at: string
+}
+
 function parsePayload(serialized: unknown): unknown | null {
   if (typeof serialized !== 'string') return null
   try { return JSON.parse(serialized) } catch { return null }
@@ -122,6 +153,22 @@ function db(userDataDirectory: string) {
       draft_updated_at TEXT
     );
     CREATE INDEX IF NOT EXISTS workspaces_archived_updated_idx ON workspaces (archived, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS incident_events (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      incident_key TEXT NOT NULL,
+      transition TEXT NOT NULL CHECK (transition IN ('opened', 'worsened', 'agent-action', 'human-review', 'recovered')),
+      severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      card_id TEXT,
+      branch_id TEXT,
+      version_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS incident_events_workspace_time_idx ON incident_events (workspace_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS incident_events_key_time_idx ON incident_events (incident_key, created_at DESC);
   `)
   migrateLegacyWorkspace(database)
   return database
@@ -323,6 +370,88 @@ export function loadAppSetting(userDataDirectory: string, key: string): string |
 export function saveAppSetting(userDataDirectory: string, key: string, value: string) {
   if (!/^[a-z0-9-]{1,80}$/.test(key) || value.length > 4_000) throw new Error('Invalid application setting')
   writeSetting(db(userDataDirectory), key, value)
+}
+
+function boundedIncidentText(value: unknown, label: string, maximum: number) {
+  if (typeof value !== 'string') throw new Error(`${label} is required`)
+  const clean = value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/((?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*["']?)[^\s,"'}&]+/gi, '$1[REDACTED]')
+    .trim()
+    .slice(0, maximum)
+  if (!clean) throw new Error(`${label} is required`)
+  return clean
+}
+
+function incidentFromRow(row: IncidentRow): IncidentEvent {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id ?? undefined,
+    incidentKey: row.incident_key,
+    transition: row.transition,
+    severity: row.severity,
+    title: row.title,
+    detail: row.detail,
+    cardId: row.card_id ?? undefined,
+    branchId: row.branch_id ?? undefined,
+    versionId: row.version_id ?? undefined,
+    createdAt: row.created_at,
+  }
+}
+
+export function listIncidentEvents(userDataDirectory: string, limit = 200): IncidentEvent[] {
+  const target = db(userDataDirectory)
+  const workspaceId = activeWorkspaceId(target)
+  const boundedLimit = Math.max(1, Math.min(500, Math.round(limit)))
+  const rows = workspaceId
+    ? target.prepare('SELECT * FROM incident_events WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?').all(workspaceId, boundedLimit)
+    : target.prepare('SELECT * FROM incident_events WHERE workspace_id IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ?').all(boundedLimit)
+  return (rows as unknown as IncidentRow[]).map(incidentFromRow)
+}
+
+export function recordIncidentEvent(userDataDirectory: string, payload: unknown): { recorded: boolean; event?: IncidentEvent } {
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid incident event')
+  const value = payload as Record<string, unknown>
+  const transitions = new Set(['opened', 'worsened', 'agent-action', 'human-review', 'recovered'])
+  const severities = new Set(['info', 'warning', 'critical'])
+  if (typeof value.transition !== 'string' || !transitions.has(value.transition)) throw new Error('Invalid incident transition')
+  if (typeof value.severity !== 'string' || !severities.has(value.severity)) throw new Error('Invalid incident severity')
+  const incidentKey = boundedIncidentText(value.incidentKey, 'Incident key', 180)
+  const title = boundedIncidentText(value.title, 'Incident title', 180)
+  const detail = boundedIncidentText(value.detail, 'Incident detail', 1_000)
+  const optional = (entry: unknown) => typeof entry === 'string' && entry.trim() ? entry.trim().slice(0, 180) : undefined
+  const target = db(userDataDirectory)
+  const workspaceId = activeWorkspaceId(target) ?? undefined
+  const last = target.prepare(`
+    SELECT * FROM incident_events
+    WHERE incident_key = ? AND ${workspaceId ? 'workspace_id = ?' : 'workspace_id IS NULL'}
+    ORDER BY created_at DESC, rowid DESC LIMIT 1
+  `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as IncidentRow | undefined
+  const transition = value.transition as IncidentEventInput['transition']
+  if (transition === 'recovered' && (!last || last.transition === 'recovered')) return { recorded: false }
+  if (transition === 'opened' && last && last.transition !== 'recovered') {
+    const rank = { info: 0, warning: 1, critical: 2 }
+    if (rank[value.severity as IncidentEventInput['severity']] <= rank[last.severity]) return { recorded: false }
+  }
+  const event: IncidentEvent = {
+    id: `incident-${randomUUID()}`,
+    workspaceId,
+    incidentKey,
+    transition: transition === 'opened' && last && last.transition !== 'recovered' ? 'worsened' : transition,
+    severity: value.severity as IncidentEventInput['severity'],
+    title,
+    detail,
+    cardId: optional(value.cardId),
+    branchId: optional(value.branchId),
+    versionId: optional(value.versionId),
+    createdAt: new Date().toISOString(),
+  }
+  target.prepare(`
+    INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, card_id, branch_id, version_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(event.id, event.workspaceId ?? null, event.incidentKey, event.transition, event.severity, event.title, event.detail, event.cardId ?? null, event.branchId ?? null, event.versionId ?? null, event.createdAt)
+  target.prepare("DELETE FROM incident_events WHERE julianday(created_at) < julianday('now', '-30 days')").run()
+  return { recorded: true, event }
 }
 
 export function closeWorkspaceDatabase() { database?.close(); database = undefined }

@@ -94,6 +94,51 @@ describe('atomic pipeline validation', () => {
     ]))
   })
 
+  it('accepts a replayable graph-only patch only after a context-reading card', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const analysis = { ...newCard('analysis', 1), id: 'analysis' }
+    const patch = { ...newCard('patch', 2), id: 'patch' }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const findings = validatePipeline([source, analysis, patch, output], [
+      { id: 'source-analysis', source: source.id, target: analysis.id },
+      { id: 'analysis-patch', source: analysis.id, target: patch.id },
+      { id: 'patch-output', source: patch.id, target: output.id },
+    ])
+    expect(findings.some((finding) => finding.id.startsWith('patch-'))).toBe(false)
+  })
+
+  it('keeps feedback loops bounded and rejects feedback outside Output-to-Monitor', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const monitor = { ...newCard('monitor', 1), id: 'monitor' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const valid = validatePipeline([source, monitor, output], [
+      { id: 'source-monitor', source: source.id, target: monitor.id },
+      { id: 'monitor-output', source: monitor.id, target: output.id },
+      { id: 'feedback', source: output.id, target: monitor.id, sourceHandle: 'feedback' },
+    ])
+    expect(valid.some((finding) => finding.id === 'cycle')).toBe(false)
+    expect(valid.some((finding) => finding.id === 'output-edge-output')).toBe(false)
+
+    const invalid = validatePipeline([source, monitor, output], [
+      { id: 'invalid-feedback', source: source.id, target: monitor.id, sourceHandle: 'feedback' },
+      { id: 'monitor-output', source: monitor.id, target: output.id },
+    ])
+    expect(invalid).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'feedback-contract-invalid-feedback', severity: 'error' })]))
+  })
+
+  it('requires Parallel Agents to fan out with branch-only context and atomic merge', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const parallel = { ...newCard('parallel', 1), id: 'parallel' }
+    const left = { ...newCard('output', 2), id: 'left' }
+    const right = { ...newCard('output', 3), id: 'right' }
+    const findings = validatePipeline([source, parallel, left, right], [
+      { id: 'source-parallel', source: source.id, target: parallel.id },
+      { id: 'parallel-left', source: parallel.id, target: left.id },
+      { id: 'parallel-right', source: parallel.id, target: right.id },
+    ])
+    expect(findings.some((finding) => finding.id.startsWith('parallel-'))).toBe(false)
+  })
+
   it('treats a Data Profile as sidecar memory rather than an executable orphan', () => {
     const profile = { ...newCard('profile', 9), id: 'profile-memory' }
     const findings = validatePipeline([...initialNodes, profile], initialEdges)

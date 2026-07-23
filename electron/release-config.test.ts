@@ -34,7 +34,7 @@ describe('macOS release configuration', () => {
     expect(packageJson.build.publish).toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'github', owner: 'Complexity-ML', repo: 'data-lab' })]))
   })
 
-  it('keeps the ad-hoc escape hatch limited to the local directory package', () => {
+  it('keeps the ad-hoc app packaging escape hatch limited to local builds', () => {
     expect(packageJson.scripts['package:mac:dir']).toContain('-c.forceCodeSigning=false')
     expect(packageJson.scripts['package:mac:dir']).toContain('-c.mac.notarize=false')
     expect(packageJson.scripts['package:mac:release']).not.toContain('forceCodeSigning=false')
@@ -50,6 +50,27 @@ describe('macOS release configuration', () => {
     expect(workflow).toContain('codesign --verify --deep --strict')
     expect(workflow).toContain('spctl --assess --type execute')
     expect(workflow).toContain('stapler validate')
+  })
+
+  it('publishes the source-first Setup for native macOS and Windows runners', () => {
+    const workflow = readFileSync(join(root, '.github/workflows/setup-preview.yml'), 'utf8')
+    const setupCore = readFileSync(join(root, 'apps/bootstrap-installer/src-tauri/src/lib.rs'), 'utf8')
+    const setupUi = readFileSync(join(root, 'apps/bootstrap-installer/ui/components/hero-section.js'), 'utf8')
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain('runner: macos-15')
+    expect(workflow).toContain('runner: macos-15-intel')
+    expect(workflow).toContain('runner: windows-2022')
+    expect(workflow).toContain('DATA-LAB-Setup-arm64.dmg')
+    expect(workflow).toContain('DATA-LAB-Setup-x64.exe')
+    expect(workflow).toContain('gh release create')
+    expect(workflow).toContain('--prerelease')
+    expect(setupCore).toContain('Complexity-ML/data-lab')
+    expect(setupCore).toContain('package:mac:dir')
+    expect(setupCore).toContain('package:win:dir')
+    expect(setupCore).toContain('Installing locked JavaScript dependencies')
+    expect(setupCore).not.toContain('runtime:setup')
+    expect(setupUi).toContain('Building Release')
+    expect(setupUi).toContain('Building Main')
   })
 
   it('builds a Windows installer and portable updater archive without weakening production signing', () => {

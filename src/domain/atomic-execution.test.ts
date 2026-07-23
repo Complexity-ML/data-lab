@@ -50,6 +50,20 @@ describe('atomic pipeline execution state machine', () => {
     expect(replay.events.filter((event) => event.message.startsWith('Impact Analysis atom'))).toHaveLength(2)
   })
 
+  it('treats Output feedback as a next-iteration boundary instead of an in-run cycle', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const monitor = { ...newCard('monitor', 1), id: 'monitor' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const run = executePipelineAtomically([source, monitor, output], [
+      { id: 'source-monitor', source: source.id, target: monitor.id },
+      { id: 'monitor-output', source: monitor.id, target: output.id },
+      { id: 'output-feedback', source: output.id, target: monitor.id, sourceHandle: 'feedback' },
+    ])
+    expect(run.state).toBe('completed')
+    expect(run.nodeStates).toMatchObject({ source: 'completed', monitor: 'completed', output: 'completed' })
+    expect(run.events.some((event) => event.message.startsWith('Live Monitor'))).toBe(true)
+  })
+
   it('materializes inspectable card states and a deterministic review trace', () => {
     const run = executePipelineAtomically(customerActivationNodes, customerActivationEdges)
     const rendered = applyAtomicRunState(customerActivationNodes, run)

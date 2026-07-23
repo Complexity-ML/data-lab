@@ -48,5 +48,20 @@ export function useAppUpdates(reportActivity: (message: string) => void) {
     return perform(() => window.dataLab!.installAppUpdate(), 'Update installation requested')
   }
 
-  return { busy, check, download, install, setChannel, status }
+  const openSetup = async () => {
+    if (!window.dataLab?.openAppSetupUpdater) throw new Error('DATA LAB Setup requires the Electron application')
+    setBusy(true)
+    try {
+      const result = await window.dataLab.openAppSetupUpdater()
+      reportActivity(`DATA LAB Setup opened on the ${result.channel} channel`)
+      return result
+    } catch (error) {
+      notifyError(error, 'Unable to open DATA LAB Setup')
+      throw error
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return { busy, check, download, install, openSetup, setChannel, status }
 }

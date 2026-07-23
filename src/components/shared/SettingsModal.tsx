@@ -10,6 +10,7 @@ import { VersionBrowser, type VersionSummary } from './VersionBrowser'
 import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
+import type { IncidentEvent } from '../../domain/incidents'
 
 export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
@@ -33,6 +34,7 @@ interface SettingsModalProps {
   mcpMessage: string
   mcpTransport: 'demo' | 'http' | 'stdio'
   initialSection?: SettingsSection
+  incidentEvents: IncidentEvent[]
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
@@ -52,6 +54,7 @@ interface SettingsModalProps {
   onLoadPreset: (preset: PipelinePresetId) => void
   onOpenWorkspace: (workspaceId: string) => Promise<void>
   onOpenDiagnosticLogs: () => Promise<void>
+  onOpenSetupUpdater: () => Promise<{ opened: true; channel: AppUpdateChannel; path: string }>
   onRefreshAiModelCatalog: (provider: ApiProvider) => Promise<AiStatus>
   onRejectPendingReview: (versionId: string) => void
   onRemindHumanReview: (version: VersionSummary) => void
@@ -78,7 +81,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -232,11 +235,11 @@ export function SettingsModal(props: SettingsModalProps) {
   const selectedProviderStatus = aiStatus.providers[aiSettings.provider]
   const selectedCapabilities = selectedProviderStatus.capabilities
 
-  const runUpdateAction = async (action: () => Promise<AppUpdateStatus>) => {
+  const runUpdateAction = async (action: () => Promise<AppUpdateStatus | { opened: true; channel: AppUpdateChannel; path: string }>) => {
     setUpdateFeedback('')
     try {
       const status = await action()
-      setUpdateFeedback(status.message)
+      setUpdateFeedback('message' in status ? status.message : `DATA LAB Setup opened on ${status.channel === 'main' ? 'Main' : 'Stable'}.`)
     } catch (error) {
       setUpdateFeedback(error instanceof Error ? error.message : 'The update action was stopped safely.')
     }
@@ -307,6 +310,11 @@ export function SettingsModal(props: SettingsModalProps) {
           <section className="settings-section diagnostics-settings">
             <div className="settings-section-title"><span>Local diagnostics</span><small>7 days · 500 events maximum</small></div>
             <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>External telemetry disabled</strong><small>Tokens, authorization headers and sensitive prompts are redacted before storage and export.</small></div></div>
+            <div className="settings-section-title incident-title"><span>Incident timeline</span><small>{incidentEvents.length} local event{incidentEvents.length === 1 ? '' : 's'}</small></div>
+            {incidentEvents.length ? <ol className="incident-timeline">{incidentEvents.map((event) => <li className={`incident-${event.transition} severity-${event.severity}`} key={event.id}>
+              <span>{event.transition === 'recovered' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}</span>
+              <div><strong>{event.title}</strong><p>{event.detail}</p><small>{event.transition.replace('-', ' ')} · {event.severity} · {new Date(event.createdAt).toLocaleString()}{event.cardId ? ` · card ${event.cardId}` : ''}{event.versionId ? ` · revision ${event.versionId}` : ''}</small></div>
+            </li>)}</ol> : <div className="incident-empty"><CheckCircle2 size={17} /><div><strong>No incident recorded</strong><small>Live Monitor changes, agent actions, human reviews and returns to normal will appear here.</small></div></div>}
             <div className="diagnostics-actions"><ActionButton icon={<FolderOpen size={15} />} onClick={() => void onOpenDiagnosticLogs()}>Open local logs</ActionButton><ActionButton icon={<FileDown size={15} />} onClick={() => void onExportDiagnostics()} variant="primary">Export sanitized bundle</ActionButton></div>
           </section>
         </article>}
@@ -368,15 +376,15 @@ export function SettingsModal(props: SettingsModalProps) {
             <div className="settings-section-title"><span><ShieldCheck size={15} /> Installed version</span><small>{appUpdateStatus.currentVersion}</small></div>
             <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Desktop signature verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Unsigned update path blocked'}</strong><small>{appUpdateStatus.message}</small></div></div>
             <div aria-label="Application update channel" className="theme-switch update-channel-switch" role="radiogroup">
-              <button aria-checked={appUpdateStatus.channel === 'stable'} className={appUpdateStatus.channel === 'stable' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('stable'))} role="radio" type="button"><span><strong>Stable</strong><small>Verified version tags intended for normal use.</small></span></button>
-              <button aria-checked={appUpdateStatus.channel === 'main'} className={appUpdateStatus.channel === 'main' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('main'))} role="radio" type="button"><span><strong>Main preview</strong><small>Explicit opt-in builds from main; may be less stable.</small></span></button>
+              <button aria-checked={appUpdateStatus.channel === 'stable'} className={appUpdateStatus.channel === 'stable' ? 'is-active' : ''} disabled={appUpdateBusy} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('stable'))} role="radio" type="button"><span><strong>Stable</strong><small>Latest published DATA LAB application release.</small></span></button>
+              <button aria-checked={appUpdateStatus.channel === 'main'} className={appUpdateStatus.channel === 'main' ? 'is-active' : ''} disabled={appUpdateBusy} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('main'))} role="radio" type="button"><span><strong>Main preview</strong><small>Newest main commit; locally rebuilt by Setup.</small></span></button>
             </div>
             <dl className="update-version-grid"><div><dt>Installed</dt><dd>{appUpdateStatus.currentVersion}</dd></div><div><dt>Available</dt><dd>{appUpdateStatus.availableVersion ?? 'Not checked'}</dd></div><div><dt>Signature policy</dt><dd>{appUpdateStatus.downloadedSignatureEnforced ? 'Enforced' : 'Unavailable'}</dd></div><div><dt>Status</dt><dd>{appUpdateStatus.phase}</dd></div></dl>
             {appUpdateStatus.progress !== undefined && <div className="update-progress"><span style={{ width: `${appUpdateStatus.progress}%` }} /><small>{Math.round(appUpdateStatus.progress)}%</small></div>}
-            <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="primary">Restart &amp; install</ActionButton></div>
+            <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy} icon={<FolderOpen size={14} />} onClick={() => void runUpdateAction(onOpenSetupUpdater)} variant="primary">Open Setup updater</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check signed feed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download signed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="ghost">Restart &amp; install</ActionButton></div>
             {(updateFeedback || appUpdateStatus.error) && <p aria-live="polite" className="settings-feedback">{appUpdateStatus.error ?? updateFeedback}</p>}
           </section>
-          <p className="settings-note">Stable is the default. Main preview must be selected manually and never bypasses platform signing, notarization where applicable, or the native installation confirmation.</p>
+          <p className="settings-note">The selected channel is passed to DATA LAB Setup. Setup locally builds Stable or Main and remembers the same channel for its next launch. Signed automatic feeds remain a separate production-only path.</p>
         </article>}
 
         {activeSection === 'presets' && <article className="settings-page">

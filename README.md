@@ -63,6 +63,16 @@ npm run build:electron
 
 Signed macOS releases provide x64 and arm64 DMG/ZIP artifacts, a default Stable channel, and an explicit Main preview channel. See [macOS releases and updater security](docs/macos-releases.md).
 
+DATA LAB Setup is a lightweight Tauri bootstrap window for macOS and Windows. It shows whether it is building the latest GitHub Release or Main, downloads a verified managed Node.js runtime once, builds Electron locally for the current machine, installs atomically and keeps one rollback copy. Setup previews are unsigned and unnotarized until platform certificates are configured.
+
+Download and open the current macOS Setup from Terminal:
+
+```bash
+SETUP_ARCH=$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo x64); curl -fL "https://github.com/Complexity-ML/data-lab/releases/download/setup-latest/DATA-LAB-Setup-${SETUP_ARCH}.dmg" -o /tmp/DATA-LAB-Setup.dmg && open /tmp/DATA-LAB-Setup.dmg
+```
+
+Choose **Stable** for the latest published DATA LAB application release (recommended), or **Main** for the newest commit on the main branch. GitHub Actions only packages the small Setup installers; DATA LAB itself is built locally by Setup for the current computer.
+
 Windows keeps its standard system title bar and native minimize, maximize and close controls outside the DATA LAB interface. The Windows CI workflow builds and verifies an unsigned x64 NSIS/ZIP smoke package; unsigned builds cannot use the updater. See [Windows desktop support](docs/windows-desktop.md).
 
 ## Connect a local DataHub Quickstart

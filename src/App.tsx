@@ -29,6 +29,8 @@ import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
 import { useLanguage } from './i18n'
+import type { IncidentEvent, IncidentEventInput } from './domain/incidents'
+import { incidentDiagramNodeIds } from './domain/incident-diagram'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 export default function App() {
@@ -51,16 +53,17 @@ export default function App() {
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
+  const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
   const appUpdates = useAppUpdates(setActivity)
   const { active, activeAiSource, aiStatus, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
-  const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
+  const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writebackAvailable: dataHubWritebackAvailable, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
   const { approvePendingVersion, approveProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId })
   const workspacePersistence = useWorkspacePersistence({ edges, inspectorOpen, libraryOpen, nodes, projectTitle, setActivity, setEdges, setInspectorOpen, setLibraryOpen, setNodes, setProjectTitle, setSelectedId, setVersions, versions })
   const graphHistory = useGraphHistory({ edges, nodes, setActivity, setEdges, setNodes })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
   const agentRunId = useRef(0)
   const proposalApprovalRunning = useRef(false)
-  const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
+  const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
   const errors = issues.filter((issue) => issue.severity === 'error')
@@ -73,6 +76,11 @@ export default function App() {
   useEffect(() => {
     window.localStorage.removeItem('data-lab-versions')
   }, [])
+
+  useEffect(() => {
+    if (!window.dataLab?.listIncidentEvents) return
+    void window.dataLab.listIncidentEvents().then(setIncidentEvents).catch(() => undefined)
+  }, [workspacePersistence.activeWorkspaceId])
 
   useEffect(() => {
     if (!window.dataLab) return
@@ -91,8 +99,9 @@ export default function App() {
 
   const onConnect = (connection: Connection) => {
     if (!connection.source || !connection.target) return
-    setEdges((current) => addEdge({ ...connection, id: `e-${connection.source}-${connection.target}-${Date.now()}`, type: 'elastic' }, current))
-    setActivity('Manual lineage connection added · run validation before publishing')
+    const feedback = connection.sourceHandle === 'feedback'
+    setEdges((current) => addEdge({ ...connection, id: `e-${connection.source}-${connection.target}-${Date.now()}`, type: 'elastic', label: feedback ? 'next iteration' : undefined }, current))
+    setActivity(feedback ? 'Feedback boundary added · each trigger starts a new bounded atomic iteration' : 'Manual lineage connection added · run validation before publishing')
   }
 
   const addCard = (kind: CardKind, position?: { x: number; y: number }) => {
@@ -113,6 +122,16 @@ export default function App() {
 
   const updateSelected = (patch: Partial<PipelineNode['data']>) => {
     setNodes((current) => current.map((node) => node.id === selectedId ? { ...node, data: { ...node.data, ...patch } } : node))
+  }
+
+  const focusIncidentDiagram = (diagramId: string) => {
+    const nodeIds = incidentDiagramNodeIds(diagramId, nodes, edges)
+    if (!nodeIds.length) {
+      setActivity('Incident Diagram unavailable · no connected workstream found')
+      return
+    }
+    void flowInstance.current?.fitView({ duration: 260, padding: 0.24, nodes: nodeIds.map((id) => ({ id })) })
+    setActivity(`Incident workstream focused · ${nodeIds.length} cards across its parallel branches`)
   }
 
   const bindDataHubSource = (asset: DataHubAssetSummary) => {
@@ -141,6 +160,12 @@ export default function App() {
     if (previousUrn && previousUrn !== asset.urn) void invalidateDataHubContext(previousUrn)
     void invalidateDataHubContext(asset.urn)
     setActivity(`${asset.name} bound atomically · ${asset.fields.length} fields · ${asset.downstream.length} downstream assets · fresh MCP read required before agent execution`)
+  }
+
+  const logIncident = async (event: IncidentEventInput) => {
+    if (!window.dataLab?.recordIncidentEvent) return
+    const result = await window.dataLab.recordIncidentEvent(event).catch(() => ({ recorded: false as const }))
+    if (result.recorded && result.event) setIncidentEvents((current) => [result.event!, ...current.filter((candidate) => candidate.id !== result.event!.id)].slice(0, 200))
   }
 
   const auditWithAgent = async (agentRequest = 'Analyze this pipeline and propose the smallest evidence-backed improvement.') => {
@@ -184,6 +209,15 @@ export default function App() {
           const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
           datahubEvidence = audit.reads.map((read) => `${read.name} · ${read.status} · ${read.summary}`)
           evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
+          const failedReads = audit.reads.filter((read) => read.status !== 'ok')
+          void logIncident({
+            incidentKey: `datahub-evidence:${source.data.datahubUrn}`,
+            transition: failedReads.length ? 'opened' : 'recovered',
+            severity: failedReads.length === audit.reads.length ? 'critical' : failedReads.length ? 'warning' : 'info',
+            title: `DataHub evidence · ${source.data.label}`,
+            detail: failedReads.length ? `${failedReads.length}/${audit.reads.length} metadata reads failed: ${failedReads.map((read) => read.name).join(', ')}.` : 'All required DataHub metadata reads returned to normal.',
+            cardId: source.id,
+          })
           recordAudit(audit.transport, successfulReads, audit.reads.length)
           const inspection = await inspectDataHubAsset(source.data.datahubUrn).catch(() => undefined)
           profileCandidate = inspection?.asset
@@ -250,7 +284,10 @@ export default function App() {
       setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
-      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
+      if (nextProposal.requiresHumanReview) {
+        void logIncident({ incidentKey: `human-review:${reviewVersionId}`, transition: 'human-review', severity: 'warning', title: nextProposal.title, detail: nextProposal.summary, versionId: reviewVersionId })
+        void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
+      }
     } catch (error) {
       notifyError(error, 'Agent run failed')
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: error instanceof Error ? error.message : 'unknown error' } })
@@ -397,6 +434,7 @@ export default function App() {
         return false
       }
       if (!approveProposal()) return false
+      void logIncident({ incidentKey: `revision:${revisionId ?? currentProposal.id}`, transition: 'agent-action', severity: 'info', title: currentProposal.title, detail: currentProposal.summary, versionId: revisionId })
       fitCommittedGraph()
       if (!writebackRequested) return true
       if (!revisionId) {
@@ -449,7 +487,7 @@ export default function App() {
       proposal={proposal}
       relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
       revisionId={pendingVersionId}
-      writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled}
+      writebackAvailable={connectionMode === 'connected' && dataHubSettings.writebackEnabled && dataHubWritebackAvailable}
       onApply={(writebackRequested) => { void approveAgentProposal(writebackRequested).then((applied) => { if (applied) setProposalReviewOpen(false) }) }}
       onClose={() => setProposalReviewOpen(false)}
       onDiscard={() => { setProposalReviewOpen(false); rejectProposal() }}
@@ -466,6 +504,7 @@ export default function App() {
       appUpdateStatus={appUpdates.status}
       errorCount={errors.length}
       findingCount={issues.length}
+      incidentEvents={incidentEvents}
       initialSection={settingsSection}
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
@@ -489,6 +528,7 @@ export default function App() {
       onInstallAppUpdate={appUpdates.install}
       onLoadPreset={(presetId) => { workspacePersistence.detachWorkspace(); loadPreset(presetId); setSettingsOpen(false) }}
       onOpenDiagnosticLogs={openDiagnosticLogs}
+      onOpenSetupUpdater={appUpdates.openSetup}
       onOpenWorkspace={workspacePersistence.openWorkspace}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
       onRejectPendingReview={rejectPendingVersionById}
@@ -538,7 +578,7 @@ export default function App() {
       />
 
       <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
-        <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
+        <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={focusIncidentDiagram} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
       </aside>
     </section>
 

@@ -7,7 +7,7 @@ function issue(atomId: string, value: Omit<ValidationIssue, 'atomId'>): Validati
 
 function containsCycle({ nodes, edges }: ValidationContext): boolean {
   const adjacency = new Map(nodes.map((node) => [node.id, [] as string[]]))
-  for (const edge of edges) adjacency.get(edge.source)?.push(edge.target)
+  for (const edge of edges) if (edge.sourceHandle !== 'feedback') adjacency.get(edge.source)?.push(edge.target)
   const visiting = new Set<string>()
   const visited = new Set<string>()
   const visit = (nodeId: string): boolean => {
@@ -53,11 +53,18 @@ export const edgeIntegrityAtom: ValidationAtom = {
   id: 'edge-integrity',
   label: 'Edge integrity',
   run({ nodes, edges }) {
-    const nodeIds = new Set(nodes.map((node) => node.id))
+    const byId = new Map(nodes.map((node) => [node.id, node]))
     return edges.flatMap((edge) => {
       const findings: ValidationIssue[] = []
-      if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) findings.push(issue(this.id, { id: `dangling-${edge.id}`, severity: 'error', title: 'Dangling connection', detail: `${edge.source} → ${edge.target} references a missing card.` }))
+      if (!byId.has(edge.source) || !byId.has(edge.target)) findings.push(issue(this.id, { id: `dangling-${edge.id}`, severity: 'error', title: 'Dangling connection', detail: `${edge.source} → ${edge.target} references a missing card.` }))
       if (edge.source === edge.target) findings.push(issue(this.id, { id: `self-${edge.id}`, severity: 'error', nodeId: edge.source, title: 'Invalid direction', detail: 'A card cannot send data to itself.' }))
+      if (edge.sourceHandle === 'feedback' && (byId.get(edge.source)?.data.kind !== 'output' || byId.get(edge.target)?.data.kind !== 'monitor')) findings.push(issue(this.id, {
+        id: `feedback-contract-${edge.id}`,
+        severity: 'error',
+        nodeId: edge.target,
+        title: 'Invalid feedback boundary',
+        detail: 'A feedback edge must connect an Output to a Live Monitor and represents a new atomic iteration.',
+      }))
       return findings
     })
   },
@@ -73,6 +80,24 @@ export const acyclicLineageAtom: ValidationAtom = {
 
 type CardContract = (context: ValidationContext, nodeId: string) => ValidationIssue[]
 
+function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: string): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
+  for (const edge of edges) if (edge.sourceHandle !== 'feedback') incoming.get(edge.target)?.push(edge.source)
+  const queue = [...(incoming.get(nodeId) ?? [])]
+  const visited = new Set<string>()
+  while (queue.length) {
+    const currentId = queue.shift()!
+    if (visited.has(currentId)) continue
+    visited.add(currentId)
+    const current = byId.get(currentId)
+    if (!current) continue
+    if (['profile', 'analysis', 'impact'].includes(current.data.kind)) return true
+    queue.push(...(incoming.get(currentId) ?? []))
+  }
+  return false
+}
+
 const cardContracts: Partial<Record<CardKind, CardContract>> = {
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
   split: ({ edges }, nodeId) => {
@@ -87,8 +112,126 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
     for (const edge of outgoing) if (!['approved', 'quarantine'].includes(edge.sourceHandle ?? '')) findings.push(issue('card-contracts', { id: `split-handle-unknown-${edge.id}`, severity: 'error', nodeId, title: 'Unknown split handle', detail: `${edge.id} must use the approved or quarantine source handle.` }))
     return findings
   },
+  patch: (context, nodeId) => {
+    const node = context.nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const findings: ValidationIssue[] = []
+    if (node.data.patchScope !== 'graph-only') findings.push(issue('card-contracts', {
+      id: `patch-scope-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Patch scope is unsafe',
+      detail: 'A Compatibility Patch must be graph-only and must never mutate the source DataHub dataset.',
+    }))
+    if (!/^graph[_ -]?only\s*:/i.test(node.data.rule?.trim() ?? '')) findings.push(issue('card-contracts', {
+      id: `patch-rule-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Patch rule is not explicit',
+      detail: 'Declare a deterministic rule beginning with “graph_only:” so the compatibility overlay is replayable and reversible.',
+    }))
+    if (!hasUpstreamContextReader(context, nodeId)) findings.push(issue('card-contracts', {
+      id: `patch-evidence-${nodeId}`,
+      severity: 'warning',
+      nodeId,
+      title: 'Patch lacks upstream context evidence',
+      detail: 'Place Data Profile, Data Analysis or Impact Analysis upstream so the patch is based on a complete versioned metadata reading.',
+    }))
+    return findings
+  },
+  monitor: ({ nodes, edges }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const findings: ValidationIssue[] = []
+    if (node.data.monitorMode !== 'event-loop') findings.push(issue('card-contracts', {
+      id: `monitor-mode-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Monitor mode is unsafe',
+      detail: 'Live Monitor must open a new bounded iteration instead of creating an in-run cycle.',
+    }))
+    if (!/on_change\(metadata_fingerprint\)/i.test(node.data.rule ?? '')
+      || !/cooldown=\d+s/i.test(node.data.rule ?? '')
+      || !/max_iterations=\d+/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+      id: `monitor-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Monitor policy is incomplete',
+      detail: 'Declare metadata fingerprint, cooldown and max_iterations so repeated agent runs remain bounded.',
+    }))
+    if (!edges.some((edge) => edge.source === nodeId && edge.sourceHandle !== 'feedback')) findings.push(issue('card-contracts', {
+      id: `monitor-output-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Monitor has no work branch',
+      detail: 'Connect Live Monitor to the first card of the bounded iteration.',
+    }))
+    return findings
+  },
+  parallel: ({ nodes, edges }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const outgoing = edges.filter((edge) => edge.source === nodeId && edge.sourceHandle !== 'feedback')
+    const findings: ValidationIssue[] = []
+    if (node.data.parallelMode !== 'branch-fanout') findings.push(issue('card-contracts', {
+      id: `parallel-mode-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Parallel agent mode is unsafe',
+      detail: 'Parallel Agents must isolate each branch and merge only reviewed diffs.',
+    }))
+    if (outgoing.length < 2) findings.push(issue('card-contracts', {
+      id: `parallel-branch-count-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Parallel work needs independent branches',
+      detail: 'Connect at least two downstream branches before launching parallel agents.',
+    }))
+    if (!/max_concurrency=\d+/i.test(node.data.rule ?? '')
+      || !/context=branch_only/i.test(node.data.rule ?? '')
+      || !/merge=atomic/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+      id: `parallel-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Parallel policy is incomplete',
+      detail: 'Declare max_concurrency, branch-only context and atomic merge. Token usage is observed but not capped.',
+    }))
+    return findings
+  },
+  diagram: ({ nodes, edges }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const incoming = edges.filter((edge) => edge.target === nodeId && edge.sourceHandle !== 'feedback')
+    const findings: ValidationIssue[] = []
+    if (node.data.diagramMode !== 'incident-workstream') findings.push(issue('card-contracts', {
+      id: `diagram-mode-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Incident Diagram mode is invalid',
+      detail: 'Incident Diagram must relate branch results without mutating their evidence or source data.',
+    }))
+    if (incoming.length < 2) findings.push(issue('card-contracts', {
+      id: `diagram-input-count-${nodeId}`,
+      severity: 'warning',
+      nodeId,
+      title: 'Incident Diagram has fewer than two branches',
+      detail: 'Connect parallel incident branches here to compare and merge their reviewed diffs.',
+    }))
+    if (!/group=incident/i.test(node.data.rule ?? '')
+      || !/inputs=parallel_diffs/i.test(node.data.rule ?? '')
+      || !/merge=atomic/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+      id: `diagram-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Incident Diagram merge policy is incomplete',
+      detail: 'Declare incident grouping, parallel diff inputs and atomic merge.',
+    }))
+    return findings
+  },
   review: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) && edges.some((edge) => edge.source === nodeId) ? [] : [issue('card-contracts', { id: `review-path-${nodeId}`, severity: 'warning', nodeId, title: 'Review is not gating a path', detail: 'A Human Review card must have an input and an output.' })],
-  output: ({ edges }, nodeId) => edges.some((edge) => edge.source === nodeId) ? [issue('card-contracts', { id: `output-edge-${nodeId}`, severity: 'error', nodeId, title: 'Output has a downstream edge', detail: 'Output cards must end a lineage path.' })] : [],
+  output: ({ nodes, edges }, nodeId) => edges.some((edge) => edge.source === nodeId && (edge.sourceHandle !== 'feedback' || nodes.find((candidate) => candidate.id === edge.target)?.data.kind !== 'monitor'))
+    ? [issue('card-contracts', { id: `output-edge-${nodeId}`, severity: 'error', nodeId, title: 'Output has an invalid downstream edge', detail: 'Output may only emit a feedback edge to Live Monitor for the next atomic iteration.' })]
+    : [],
 }
 
 export const cardContractsAtom: ValidationAtom = {
@@ -98,8 +241,8 @@ export const cardContractsAtom: ValidationAtom = {
     return context.nodes.flatMap((node) => {
       if (node.data.kind === 'profile') return []
       const findings: ValidationIssue[] = []
-      if (node.data.kind !== 'source' && !context.edges.some((edge) => edge.target === node.id)) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
-      if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id)) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
+      if (node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
+      if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
     })
   },
@@ -111,7 +254,7 @@ export const schemaContractAtom: ValidationAtom = {
   run({ nodes, edges }) {
     const byId = new Map(nodes.map((node) => [node.id, node]))
     const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
-    for (const edge of edges) incoming.get(edge.target)?.push(edge.source)
+    for (const edge of edges) if (edge.sourceHandle !== 'feedback') incoming.get(edge.target)?.push(edge.source)
     return nodes.flatMap((contract) => {
       if (contract.data.kind !== 'validation') return []
       const declaration = contract.data.rule?.match(/schema_contract\s*:\s*(.+)/i)?.[1]
@@ -148,7 +291,7 @@ export const sensitiveDataAtom: ValidationAtom = {
   run({ nodes, edges }) {
     const byId = new Map(nodes.map((node) => [node.id, node]))
     const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
-    for (const edge of edges) outgoing.get(edge.source)?.push(edge.target)
+    for (const edge of edges) if (edge.sourceHandle !== 'feedback') outgoing.get(edge.source)?.push(edge.target)
     const sensitiveSources = nodes.filter((node) => node.data.kind === 'source' && (node.data.datahubTags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)) || node.data.schema.some((field) => field.tags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)))))
     const unsafeOutputs = new Map<string, string>()
     for (const source of sensitiveSources) {
