@@ -52,6 +52,20 @@ describe('strict provider proposal contract', () => {
     expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
   })
 
+  it('enforces one primary card mutation per autonomous iteration', () => {
+    const incrementalPayload = {
+      ...payload,
+      iterationPolicy: { strategy: 'one-card-at-a-time', maxPrimaryCardMutations: 1 },
+    }
+    const featureImpact = { ...validProposal.actions[0], node_id: 'feature-impact', kind: 'impact', label: 'Feature impact', rule: 'scope(customer_age) → customer_features' }
+    const modelImpact = { ...validProposal.actions[0], node_id: 'model-impact', kind: 'impact', label: 'Model impact', rule: 'scope(customer_features) → churn_prediction_v3' }
+
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [featureImpact, modelImpact] }, incrementalPayload))
+      .toThrow('only one primary card')
+    expect(validateProposal(validProposal, incrementalPayload).actions.map((action) => action.kind))
+      .toEqual(['transform', 'review', null, null])
+  })
+
   it('accepts graph-only patches, live monitors, parallel agents and incident diagrams', () => {
     const patch = { ...validProposal.actions[0], node_id: 'compatibility-patch', kind: 'patch', label: 'Map legacy customer age', rule: 'graph_only: cast customer_age to number' }
     const monitor = { ...validProposal.actions[0], node_id: 'live-monitor', kind: 'monitor', label: 'Watch metadata drift', rule: 'on_change(metadata_fingerprint) | cooldown=60s | max_iterations=10' }

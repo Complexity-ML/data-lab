@@ -14,9 +14,36 @@ function sourceLabel(source: ActiveAiSource) {
   return source === 'chatgpt' ? 'ChatGPT' : source === 'anthropic' ? 'Claude' : source === 'moonshot' ? 'Kimi' : 'OpenAI'
 }
 
+const connectionPollDelay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+export async function observeChatGPTConnection(
+  connect: () => Promise<ChatGPTSessionStatus>,
+  readStatus: () => Promise<ChatGPTSessionStatus>,
+  onObserved: (status: ChatGPTSessionStatus, pollCount: number) => void,
+  wait: (milliseconds: number) => Promise<unknown> = connectionPollDelay,
+) {
+  const connection = connect()
+  let pollCount = 0
+  while (true) {
+    const outcome = await Promise.race([
+      connection.then((status) => ({ kind: 'connection' as const, status })),
+      wait(500).then(() => ({ kind: 'poll' as const })),
+    ])
+    if (outcome.kind === 'connection') return outcome.status
+    pollCount += 1
+    const status = await readStatus().catch(() => disconnectedChatGPTStatus)
+    onObserved(status, pollCount)
+    if (status.connected) {
+      void connection.catch(() => undefined)
+      return status
+    }
+  }
+}
+
 export function useAiConnections(reportActivity: (message: string) => void) {
   const [aiStatus, setAiStatus] = useState<AiStatus>(disconnectedAiStatus)
   const [chatGPTStatus, setChatGPTStatus] = useState<ChatGPTSessionStatus>(disconnectedChatGPTStatus)
+  const [chatGPTConnecting, setChatGPTConnecting] = useState(false)
   const [activeAiSource, setActiveAiSource] = useState<ActiveAiSource>('openai')
   const sourceSelectionEpoch = useRef(0)
 
@@ -72,19 +99,40 @@ export function useAiConnections(reportActivity: (message: string) => void) {
   const connectChatGPT = async () => {
     if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
     sourceSelectionEpoch.current += 1
-    const status = await window.dataLab.connectChatGPT()
-    recordDiagnostic({ category: 'provider', action: 'chatgpt.connect', status: status.connected ? 'success' : 'warning', detail: { model: status.selectedModel } })
-    setChatGPTStatus(status)
-    if (status.connected) {
-      const selection = await window.dataLab.setActiveAiSource('chatgpt')
-      setActiveAiSource(selection.source)
+    setChatGPTConnecting(true)
+    recordDiagnostic({ category: 'provider', action: 'chatgpt.connect.start', status: 'info', detail: { source: 'account' } })
+    reportActivity('ChatGPT sign-in opened · waiting for browser approval…')
+    try {
+      const status = await observeChatGPTConnection(
+        () => window.dataLab!.connectChatGPT(),
+        () => window.dataLab!.getChatGPTStatus(),
+        (observed, pollCount) => {
+          setChatGPTStatus(observed)
+          if (pollCount === 2) {
+            recordDiagnostic({ category: 'provider', action: 'chatgpt.connect.waiting', status: 'info', detail: { stage: 'browser-approval' } })
+            reportActivity('ChatGPT sign-in · waiting for browser approval…')
+          } else if (pollCount === 10) {
+            recordDiagnostic({ category: 'provider', action: 'chatgpt.connect.observing', status: 'info', detail: { stage: 'session-detection' } })
+            reportActivity('ChatGPT sign-in approved? DATA LAB is checking the local account session…')
+          }
+        },
+      )
+      recordDiagnostic({ category: 'provider', action: 'chatgpt.connect', status: status.connected ? 'success' : 'warning', detail: { model: status.selectedModel } })
+      setChatGPTStatus(status)
+      if (status.connected) {
+        const selection = await window.dataLab.setActiveAiSource('chatgpt')
+        setActiveAiSource(selection.source)
+      }
+      reportActivity(status.connected ? `ChatGPT connected and active · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
+    } finally {
+      setChatGPTConnecting(false)
     }
-    reportActivity(status.connected ? `ChatGPT connected and active · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
   }
 
   const cancelChatGPTLogin = async () => {
     if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
     await window.dataLab.cancelChatGPTLogin()
+    setChatGPTConnecting(false)
     const status = await window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)
     setChatGPTStatus(status)
     if (status.connected) {
@@ -122,6 +170,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
     activeAiSource,
     aiStatus,
     cancelChatGPTLogin,
+    chatGPTConnecting,
     chatGPTStatus,
     configureChatGPT,
     connectChatGPT,

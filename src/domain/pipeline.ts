@@ -2,7 +2,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
 import { scenarioPresets } from './presets'
 
-export type CardKind = 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -54,6 +54,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   monitorMode?: 'event-loop'
   parallelMode?: 'branch-fanout'
   diagramMode?: 'incident-workstream'
+  controlMode?: 'autonomous-player'
   rule?: string
   agentAdded?: boolean
   pinned?: boolean
@@ -92,6 +93,7 @@ export interface AgentProposal {
 }
 
 export const cardLabels: Record<CardKind, string> = {
+  control: 'DATA LAB Control',
   source: 'Data Source',
   profile: 'Data Profile',
   analysis: 'Data Analysis',
@@ -297,11 +299,14 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
                 ? 'max_concurrency=3 | context=branch_only | merge=atomic'
                 : kind === 'diagram'
                   ? 'group=incident | inputs=parallel_diffs | merge=atomic'
+                  : kind === 'control'
+                    ? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
             : undefined,
       patchScope: kind === 'patch' ? 'graph-only' : undefined,
       monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
       parallelMode: kind === 'parallel' ? 'branch-fanout' : undefined,
       diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
+      controlMode: kind === 'control' ? 'autonomous-player' : undefined,
     },
   }
 }

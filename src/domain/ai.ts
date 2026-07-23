@@ -62,7 +62,7 @@ export interface AiProposalResponse {
   toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
-const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
@@ -80,6 +80,7 @@ function nodePatch(action: AiAction): Partial<PipelineNodeData> {
   if (action.kind === 'monitor') patch.monitorMode = 'event-loop'
   if (action.kind === 'parallel') patch.parallelMode = 'branch-fanout'
   if (action.kind === 'diagram') patch.diagramMode = 'incident-workstream'
+  if (action.kind === 'control') patch.controlMode = 'autonomous-player'
   if (text(action.label)) patch.label = text(action.label, '', 120)
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
@@ -125,6 +126,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         monitorMode: action.kind === 'monitor' ? 'event-loop' : undefined,
         parallelMode: action.kind === 'parallel' ? 'branch-fanout' : undefined,
         diagramMode: action.kind === 'diagram' ? 'incident-workstream' : undefined,
+        controlMode: action.kind === 'control' ? 'autonomous-player' : undefined,
       },
     })
   }

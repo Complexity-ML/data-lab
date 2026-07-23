@@ -29,9 +29,21 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
   const nextRead = useRef(new Map<string, number>())
   const reading = useRef(new Set<string>())
   const triggering = useRef(false)
+  const pendingTriggers = useRef(new Map<string, LiveIncidentTrigger>())
+  blocked.current = agentBlocked
 
   useEffect(() => { callbacks.current = { audit, onIncident, onTrigger } }, [audit, onIncident, onTrigger])
-  useEffect(() => { blocked.current = agentBlocked }, [agentBlocked])
+
+  useEffect(() => {
+    if (!active) {
+      pendingTriggers.current.clear()
+      return
+    }
+    const activeBindings = new Set(monitors.map(liveMonitorBindingKey))
+    for (const bindingKey of pendingTriggers.current.keys()) {
+      if (!activeBindings.has(bindingKey)) pendingTriggers.current.delete(bindingKey)
+    }
+  }, [active, monitors])
 
   useEffect(() => {
     if (!active || monitors.length === 0) return
@@ -39,6 +51,7 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
 
     const tick = async () => {
       const now = Date.now()
+      let agentTriggered = false
       for (const monitor of monitors) {
         const bindingKey = liveMonitorBindingKey(monitor)
         if (disposed || reading.current.has(bindingKey) || (nextRead.current.get(bindingKey) ?? 0) > now) continue
@@ -65,10 +78,16 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
             cardId: monitor.monitorId,
             branchId: monitor.monitorId,
           })
-          if (decision.triggerAgent && !blocked.current && !triggering.current) {
-            triggering.current = true
-            try { await callbacks.current.onTrigger({ audit: auditResult, incidentKey, monitor }) }
-            finally { triggering.current = false }
+          if (decision.triggerAgent) {
+            const trigger = { audit: auditResult, incidentKey, monitor }
+            if (blocked.current || triggering.current || agentTriggered) {
+              pendingTriggers.current.set(bindingKey, trigger)
+            } else {
+              triggering.current = true
+              agentTriggered = true
+              try { await callbacks.current.onTrigger(trigger) }
+              finally { triggering.current = false }
+            }
           }
         } catch (error) {
           if (!disposed) {
@@ -87,6 +106,16 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
           }
         } finally {
           reading.current.delete(bindingKey)
+        }
+      }
+      if (!disposed && !blocked.current && !triggering.current && !agentTriggered) {
+        const deferred = pendingTriggers.current.entries().next().value as [string, LiveIncidentTrigger] | undefined
+        if (deferred) {
+          const [bindingKey, trigger] = deferred
+          pendingTriggers.current.delete(bindingKey)
+          triggering.current = true
+          try { await callbacks.current.onTrigger(trigger) }
+          finally { triggering.current = false }
         }
       }
     }

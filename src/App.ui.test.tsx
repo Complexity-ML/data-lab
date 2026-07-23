@@ -308,6 +308,25 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('ChatGPT sign-in cancelled. You can retry safely.')).toBeTruthy()
   })
 
+  it('shows sanitized connection stages in the Settings activity logger', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.exportDiagnostics = vi.fn(async () => ({
+      schemaVersion: 1 as const,
+      generatedAt: '2026-07-23T23:00:00.000Z',
+      telemetryEnabled: false as const,
+      retention: { days: 7, maximumEvents: 500 },
+      events: [{ id: 'event-1', timestamp: '2026-07-23T22:59:59.000Z', category: 'provider' as const, action: 'chatgpt.connect.waiting', status: 'info' as const, detail: { stage: 'browser-approval' } }],
+    }))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    await user.click(await screen.findByRole('button', { name: 'DiagnosticsLocal, private and bounded' }))
+
+    expect(await screen.findByText('chatgpt.connect.waiting')).toBeTruthy()
+    expect(screen.getByText('{"stage":"browser-approval"}')).toBeTruthy()
+  })
+
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)

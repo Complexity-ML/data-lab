@@ -99,6 +99,36 @@ function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: s
 }
 
 const cardContracts: Partial<Record<CardKind, CardContract>> = {
+  control: ({ nodes, edges }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const findings: ValidationIssue[] = []
+    if (nodes.filter((candidate) => candidate.data.kind === 'control').length > 1) findings.push(issue('card-contracts', {
+      id: `control-duplicate-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Multiple DATA LAB controllers',
+      detail: 'Keep exactly one DATA LAB Control card so the autonomous player has one persistent policy.',
+    }))
+    if (edges.some((edge) => edge.source === nodeId || edge.target === nodeId)) findings.push(issue('card-contracts', {
+      id: `control-edge-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Control card is connected to data lineage',
+      detail: 'DATA LAB Control configures the player globally and must remain outside the dataset lineage path.',
+    }))
+    if (node.data.controlMode !== 'autonomous-player'
+      || !/objective=/i.test(node.data.rule ?? '')
+      || !/on_review=/i.test(node.data.rule ?? '')
+      || !/on_idle=/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+      id: `control-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Control policy is incomplete',
+      detail: 'Declare objective, on_review and on_idle so Play, review resume and monitoring remain deterministic.',
+    }))
+    return findings
+  },
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
   split: ({ edges }, nodeId) => {
     const outgoing = edges.filter((edge) => edge.source === nodeId)
@@ -241,8 +271,9 @@ export const cardContractsAtom: ValidationAtom = {
     return context.nodes.flatMap((node) => {
       if (node.data.kind === 'profile') return []
       const findings: ValidationIssue[] = []
-      if (node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
-      if (node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
+      const globalControl = node.data.kind === 'control'
+      if (!globalControl && node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
+      if (!globalControl && node.data.kind !== 'output' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
     })
   },

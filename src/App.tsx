@@ -62,11 +62,15 @@ export default function App() {
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
   const [pendingWorkspacePrompt, setPendingWorkspacePrompt] = useState<string>()
+  const [autonomousStepRequest, setAutonomousStepRequest] = useState<{ objective: string; sessionId: number }>()
   const agentRunId = useRef(0)
   const playerSessionId = useRef(0)
+  const playerStartupBlocked = useRef(false)
   const reviewAssistantRunId = useRef(0)
   const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
   const proposalApprovalRunning = useRef(false)
+  const monitorBootstrapAttempted = useRef(false)
+  const autonomousStepTimer = useRef<number | undefined>(undefined)
   const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
 
   const resolveAtomicReview = (candidateNodes: PipelineNode[], candidateEdges: typeof edges, decision: 'approved' | 'rejected') => {
@@ -87,7 +91,7 @@ export default function App() {
   }
 
   const appUpdates = useAppUpdates(setActivity)
-  const { active, activeAiSource, aiStatus, cancelChatGPTLogin, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
+  const { active, activeAiSource, aiStatus, cancelChatGPTLogin, chatGPTConnecting, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
   const { connectionMode, inspectAsset: inspectDataHubAsset, invalidateContext: invalidateDataHubContext, mcpMessage, mcpTransport, recordAudit, saveSettings: saveDataHubSettings, searchAssets: searchDataHubAssets, settings: dataHubSettings, syncDataHub, writebackAvailable: dataHubWritebackAvailable, writeDecision: writeDataHubDecision } = useDataHubConnection(setActivity)
   const { approvePendingVersion, approveProposal, commitAutonomousProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions } = usePipelineVersions({
     edges,
@@ -215,6 +219,16 @@ export default function App() {
     const result = await window.dataLab.recordIncidentEvent(event).catch(() => ({ recorded: false as const }))
     if (result.recorded && result.event) setIncidentEvents((current) => [result.event!, ...current.filter((candidate) => candidate.id !== result.event!.id)].slice(0, 200))
   }, [])
+
+  const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current) => {
+    if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
+    setActivity('Atomic step committed · rereading the graph before the next autonomous step…')
+    autonomousStepTimer.current = window.setTimeout(() => {
+      autonomousStepTimer.current = undefined
+      if (playerSessionId.current !== sessionId) return
+      setAutonomousStepRequest({ objective, sessionId })
+    }, 650)
+  }
 
   const auditWithAgent = async (agentRequest = defaultBlankObjective, monitored?: LiveIncidentTrigger, expectedPlayerSessionId?: number) => {
     const routingPreview: SourceSelection = monitored
@@ -405,24 +419,40 @@ export default function App() {
       const preview = applyProposal(nodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
       if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
-        setActivity(`Agent proposal blocked as equivalent to ${equivalentVersion ? `${equivalentVersion.label} (${equivalentVersion.status ?? 'committed'})` : 'the current graph'} · no revision created`)
+        const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
+        const hasMonitor = nodes.some((node) => node.data.kind === 'monitor')
+        if (autonomousSessionActive && !hasMonitor && !monitorBootstrapAttempted.current) {
+          monitorBootstrapAttempted.current = true
+          setActivity('Graph is already current · no duplicate revision created · preparing the missing Live Monitor…')
+          queueAutonomousStep('The previous atomic proposal is already committed. Do not repeat it. Choose only the next smallest missing step toward continuous incident handling; if the governed path is otherwise complete, add one correctly configured Live Monitor and feedback boundary.', expectedPlayerSessionId)
+        } else {
+          setActivity(hasMonitor
+            ? 'Graph is already current · no duplicate revision created · Live Monitor remains armed'
+            : `Graph is already current · no duplicate revision created${autonomousSessionActive ? ' · monitoring needs a Live Monitor card' : ''}`)
+        }
         return
       }
       nextProposal.evidence = evidenceEntries
-      if (monitored && !nextProposal.requiresHumanReview) {
+      const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
+      if ((monitored || autonomousSessionActive) && !nextProposal.requiresHumanReview) {
         const autonomousVersionId = commitAutonomousProposal(nextProposal)
+        if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))
         if (autonomousVersionId) {
-          await logIncident({
-            incidentKey: monitored.incidentKey,
-            transition: 'agent-action',
-            severity: 'info',
-            title: nextProposal.title,
-            detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version; Live Monitor will verify the next fingerprint.`,
-            fingerprint: monitored.audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
-            cardId: monitored.monitor.monitorId,
-            branchId: monitored.monitor.monitorId,
-            versionId: autonomousVersionId,
-          })
+          if (monitored) {
+            await logIncident({
+              incidentKey: monitored.incidentKey,
+              transition: 'agent-action',
+              severity: 'info',
+              title: nextProposal.title,
+              detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version; Live Monitor will verify the next fingerprint.`,
+              fingerprint: monitored.audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
+              cardId: monitored.monitor.monitorId,
+              branchId: monitored.monitor.monitorId,
+              versionId: autonomousVersionId,
+            })
+          } else {
+            queueAutonomousStep(`Atomic step "${nextProposal.title}" is committed. Reread the current graph and version memory, then propose only the next smallest useful missing step toward a self-monitoring incident workflow. Return no action when the graph is complete.`, expectedPlayerSessionId)
+          }
         }
         return
       }
@@ -448,6 +478,17 @@ export default function App() {
     setPendingWorkspacePrompt(undefined)
     void auditWithAgent(preservedPrompt)
   }, [nodes.length, pendingWorkspacePrompt, versions.length, workspacePersistence.activeWorkspaceId])
+
+  useEffect(() => {
+    if (!autonomousStepRequest || playerState !== 'running' || proposal || agentRunning || playerStarting) return
+    const request = autonomousStepRequest
+    setAutonomousStepRequest(undefined)
+    void auditWithAgent(request.objective, undefined, request.sessionId)
+  }, [agentRunning, autonomousStepRequest, playerStarting, playerState, proposal])
+
+  useEffect(() => () => {
+    if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
+  }, [])
 
   const reworkSelectedWithAgent = async () => {
     if (!selected) return
@@ -512,12 +553,24 @@ export default function App() {
       return
     }
     const sessionId = ++playerSessionId.current
+    monitorBootstrapAttempted.current = false
+    setAutonomousStepRequest(undefined)
+    playerStartupBlocked.current = true
     setPlayerStarting(true)
     setPlayerState('running')
-    setActivity(nodes.length ? 'Autonomous player started · auditing the current graph before monitoring changes…' : 'Autonomous player started · discovering the best governed starting point…')
-    void auditWithAgent(defaultBlankObjective, undefined, sessionId)
+    const controller = nodes.find((node) => node.data.kind === 'control' && node.data.controlMode === 'autonomous-player')
+    const objective = controller?.data.rule?.trim()
+      ? `Execute the persistent DATA LAB Control policy exactly and incrementally: ${controller.data.rule}`
+      : defaultBlankObjective
+    setActivity(controller
+      ? `Autonomous player started · following ${controller.data.label}…`
+      : nodes.length ? 'Autonomous player started · auditing the current graph before monitoring changes…' : 'Autonomous player started · discovering the best governed starting point…')
+    void auditWithAgent(objective, undefined, sessionId)
       .finally(() => {
-        if (playerSessionId.current === sessionId) setPlayerStarting(false)
+        if (playerSessionId.current === sessionId) {
+          playerStartupBlocked.current = false
+          setPlayerStarting(false)
+        }
       })
   }
 
@@ -536,6 +589,12 @@ export default function App() {
     agentRunId.current += 1
     reviewAssistantRunId.current += 1
     setPlayerStarting(false)
+    setAutonomousStepRequest(undefined)
+    if (autonomousStepTimer.current !== undefined) {
+      window.clearTimeout(autonomousStepTimer.current)
+      autonomousStepTimer.current = undefined
+    }
+    playerStartupBlocked.current = false
     setAgentRunning(false)
     setReviewAssistantBusy(false)
     if (cancellingActiveRun) {
@@ -629,6 +688,7 @@ export default function App() {
     },
     onIncident: logIncident,
     onTrigger: async (trigger) => {
+      if (playerStartupBlocked.current) return
       await auditWithAgent(
         `Live Monitor detected a DataHub metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, update only the affected branch, and propose the smallest versioned correction.`,
         trigger,
@@ -676,6 +736,11 @@ export default function App() {
     try { await window.dataLab.openDiagnosticLogs() } catch (error) { notifyError(error, 'Unable to open diagnostic logs') }
   }
 
+  const loadDiagnosticBundle = async () => {
+    if (!window.dataLab) throw new Error('Diagnostics require the Electron application')
+    return window.dataLab.exportDiagnostics()
+  }
+
   const importPipelineJson = async (file: File) => {
     try {
       const artifact = parsePipelineExport(await file.text())
@@ -712,11 +777,17 @@ export default function App() {
         return false
       }
       if (!approveProposal()) return false
+      if (projectTitle === 'Untitled pipeline') setProjectTitle(currentProposal.title.slice(0, 72))
+      if (playerState === 'running') setActivity('Human Review approved · player remains Running · the committed graph is waiting for the next monitored change')
       void logIncident({ incidentKey: currentProposal.incidentKey ?? `revision:${revisionId ?? currentProposal.id}`, transition: 'agent-action', severity: 'info', title: currentProposal.title, detail: currentProposal.summary, versionId: revisionId })
       fitCommittedGraph()
-      if (!writebackRequested) return true
+      if (!writebackRequested) {
+        if (playerState === 'running') queueAutonomousStep(`Human Review approved "${currentProposal.title}". Reread the committed graph and version memory, then propose only the next smallest safe step. Do not repeat the approved diff.`, playerSessionId.current)
+        return true
+      }
       if (!revisionId) {
         setActivity('Revision committed locally · DataHub write-back skipped because the pending revision ID was unavailable')
+        if (playerState === 'running') queueAutonomousStep(`Human Review approved "${currentProposal.title}". Reread the committed graph and propose only the next smallest safe step.`, playerSessionId.current)
         return true
       }
       try {
@@ -733,6 +804,7 @@ export default function App() {
         notifyError(error, 'DataHub write-back failed')
         setActivity(`Revision committed locally · DataHub write-back failed · ${error instanceof Error ? error.message : 'unknown error'} · local graph was not rolled back`)
       }
+      if (playerState === 'running') queueAutonomousStep(`Human Review approved "${currentProposal.title}". Reread the committed graph and version memory, then propose only the next smallest safe step.`, playerSessionId.current)
       return true
     } catch (error) {
       notifyError(error, 'Unable to apply the reviewed graph')
@@ -809,7 +881,13 @@ export default function App() {
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
       onApprovePendingReview={(versionId) => {
-        if (approvePendingVersion(versionId)) fitCommittedGraph()
+        const reviewedVersion = versions.find((version) => version.id === versionId)
+        const approved = approvePendingVersion(versionId)
+        if (approved) {
+          if (projectTitle === 'Untitled pipeline' && reviewedVersion) setProjectTitle(reviewedVersion.label.replace(/^Review · /, '').slice(0, 72))
+          fitCommittedGraph()
+          if (playerState === 'running') queueAutonomousStep('A stored Human Review version was approved. Reread the committed graph and version memory, then propose only the next smallest safe step.', playerSessionId.current)
+        }
       }}
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
       onCheckForAppUpdate={appUpdates.check}
@@ -827,6 +905,7 @@ export default function App() {
       onExportPipeline={exportPipelineJson}
       onImportPipeline={importPipelineJson}
       onInstallAppUpdate={appUpdates.install}
+      onLoadDiagnostics={loadDiagnosticBundle}
       onLoadPreset={(presetId) => { workspacePersistence.detachWorkspace(); loadPreset(presetId); setSettingsOpen(false) }}
       onOpenDiagnosticLogs={openDiagnosticLogs}
       onOpenSetupUpdater={appUpdates.openSetup}
@@ -858,6 +937,8 @@ export default function App() {
       <div aria-hidden={!libraryOpen} className={`library-panel-shell ${libraryOpen ? '' : 'is-closed'}`} id="data-lab-library" inert={!libraryOpen} tabIndex={-1}><CardLibraryView onAddCard={addCard} onClose={() => setLibraryOpen(false)} /></div>
 
       <PipelineCanvasView
+        activity={activity}
+        activityBusy={agentRunning || playerStarting || chatGPTConnecting || appUpdates.busy}
         contextMenu={contextMenu}
         edges={edges}
         inspectorOpen={inspectorOpen}
@@ -873,6 +954,7 @@ export default function App() {
         onNodesChange={onNodesChange}
         onOpenInspector={() => setInspectorOpen(true)}
         onOpenLibrary={() => setLibraryOpen(true)}
+        onOpenActivity={() => { setSettingsSection('diagnostics'); setSettingsOpen(true) }}
         onPaneClick={() => setContextMenu(undefined)}
         onSelectNode={setSelectedId}
         theme={theme}

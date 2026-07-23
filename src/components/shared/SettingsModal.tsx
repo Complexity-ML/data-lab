@@ -11,6 +11,7 @@ import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
 import type { IncidentEvent, IncidentSummary } from '../../domain/incidents'
+import type { DiagnosticBundle, DiagnosticCategory, DiagnosticStatus } from '../../domain/diagnostics'
 
 export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
@@ -53,6 +54,7 @@ interface SettingsModalProps {
   onExportDiagnostics: () => Promise<void>
   onImportPipeline: (file: File) => Promise<void>
   onInstallAppUpdate: () => Promise<AppUpdateStatus>
+  onLoadDiagnostics: () => Promise<DiagnosticBundle>
   onLoadPreset: (preset: PipelinePresetId) => void
   onOpenWorkspace: (workspaceId: string) => Promise<void>
   onOpenDiagnosticLogs: () => Promise<void>
@@ -83,26 +85,59 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
   const [chatGPTConnecting, setChatGPTConnecting] = useState(false)
+  const [chatGPTElapsed, setChatGPTElapsed] = useState(0)
   const [aiFeedback, setAiFeedback] = useState('')
   const [dataHubBusy, setDataHubBusy] = useState(false)
   const [dataHubFeedback, setDataHubFeedback] = useState('')
   const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
   const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
   const [updateFeedback, setUpdateFeedback] = useState('')
+  const [diagnosticBundle, setDiagnosticBundle] = useState<DiagnosticBundle>()
+  const [diagnosticCategory, setDiagnosticCategory] = useState<DiagnosticCategory | 'all'>('all')
+  const [diagnosticStatus, setDiagnosticStatus] = useState<DiagnosticStatus | 'all'>('all')
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
   const dataHubTokenRef = useRef<HTMLInputElement>(null)
   const chatGPTConnectEpoch = useRef(0)
+  const diagnosticLoaderRef = useRef(onLoadDiagnostics)
 
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
   useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
   useEffect(() => { setDataHubWriteback(dataHubSettings.writebackEnabled) }, [dataHubSettings.writebackEnabled])
+  useEffect(() => { diagnosticLoaderRef.current = onLoadDiagnostics }, [onLoadDiagnostics])
+  useEffect(() => {
+    if (!chatGPTConnecting) { setChatGPTElapsed(0); return }
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => setChatGPTElapsed(Math.floor((Date.now() - startedAt) / 1_000)), 1_000)
+    return () => window.clearInterval(timer)
+  }, [chatGPTConnecting])
+  useEffect(() => {
+    if (activeSection !== 'diagnostics') return
+    let active = true
+    const refresh = async () => {
+      try {
+        const bundle = await diagnosticLoaderRef.current()
+        if (active) setDiagnosticBundle(bundle)
+      } catch { /* The existing diagnostics actions surface filesystem errors. */ }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 2_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [activeSection])
+
+  const refreshDiagnostics = async () => {
+    setDiagnosticsBusy(true)
+    try { setDiagnosticBundle(await onLoadDiagnostics()) }
+    catch (error) { notifyError(error, 'Unable to refresh local diagnostics') }
+    finally { setDiagnosticsBusy(false) }
+  }
 
   const saveAndConnectDataHub = async () => {
     setDataHubBusy(true)
@@ -261,6 +296,11 @@ export function SettingsModal(props: SettingsModalProps) {
   const activeSourceModel = activeAiSource === 'chatgpt' ? chatGPTStatus.selectedModel ?? 'ChatGPT' : aiStatus.providers[activeAiSource].model
   const selectedProviderStatus = aiStatus.providers[aiSettings.provider]
   const selectedCapabilities = selectedProviderStatus.capabilities
+  const visibleDiagnostics = [...(diagnosticBundle?.events ?? [])]
+    .reverse()
+    .filter((event) => diagnosticCategory === 'all' || event.category === diagnosticCategory)
+    .filter((event) => diagnosticStatus === 'all' || event.status === diagnosticStatus)
+    .slice(0, 120)
 
   const runUpdateAction = async (action: () => Promise<AppUpdateStatus | { opened: true; channel: AppUpdateChannel; path: string }>) => {
     setUpdateFeedback('')
@@ -337,6 +377,16 @@ export function SettingsModal(props: SettingsModalProps) {
           <section className="settings-section diagnostics-settings">
             <div className="settings-section-title"><span>Local diagnostics</span><small>7 days · 500 events maximum</small></div>
             <div className="diagnostics-privacy"><CheckCircle2 size={18} /><div><strong>External telemetry disabled</strong><small>Tokens, authorization headers and sensitive prompts are redacted before storage and export.</small></div></div>
+            <div className="settings-section-title incident-title"><span>Activity logger</span><small>{diagnosticBundle?.events.length ?? 0} sanitized event{diagnosticBundle?.events.length === 1 ? '' : 's'}</small></div>
+            <div className="diagnostic-toolbar">
+              <label><span>Category</span><select onChange={(event) => setDiagnosticCategory(event.target.value as DiagnosticCategory | 'all')} value={diagnosticCategory}><option value="all">All</option><option value="provider">AI provider</option><option value="mcp">DataHub MCP</option><option value="validation">Validation</option><option value="revision">Revisions</option><option value="workspace">Workspace</option><option value="renderer">Interface</option></select></label>
+              <label><span>Status</span><select onChange={(event) => setDiagnosticStatus(event.target.value as DiagnosticStatus | 'all')} value={diagnosticStatus}><option value="all">All</option><option value="info">Info</option><option value="success">Success</option><option value="warning">Warning</option><option value="error">Error</option></select></label>
+              <ActionButton disabled={diagnosticsBusy} icon={<RefreshCw className={diagnosticsBusy ? 'agent-context-wheel' : ''} size={14} />} onClick={() => void refreshDiagnostics()} variant="ghost">{diagnosticsBusy ? 'Refreshing…' : 'Refresh'}</ActionButton>
+            </div>
+            {visibleDiagnostics.length ? <ol aria-live="polite" className="diagnostic-event-list">{visibleDiagnostics.map((event) => <li className={`diagnostic-${event.status}`} key={event.id}>
+              <span className="diagnostic-event-dot" />
+              <div><header><strong>{event.action}</strong><span>{event.category} · {event.status}</span><time>{new Date(event.timestamp).toLocaleTimeString()}</time></header>{event.detail !== undefined && <code>{typeof event.detail === 'string' ? event.detail : JSON.stringify(event.detail)}</code>}</div>
+            </li>)}</ol> : <div className="incident-empty"><Activity size={17} /><div><strong>No matching activity yet</strong><small>Connection stages, MCP reads, revisions, validation and SQLite saves will appear here automatically.</small></div></div>}
             <div className="incident-overview">
               <div><strong>{incidentSummaries.filter((incident) => incident.status !== 'resolved').length}</strong><small>Active incidents</small></div>
               <div><strong>{incidentSummaries.filter((incident) => incident.severity === 'critical' && incident.status !== 'resolved').length}</strong><small>Critical</small></div>
@@ -374,7 +424,10 @@ export function SettingsModal(props: SettingsModalProps) {
               <div className="chatgpt-account-status"><CheckCircle2 size={19} /><div><strong>{chatGPTStatus.email ?? 'ChatGPT account connected'}</strong><small>{chatGPTStatus.planType ? `${chatGPTStatus.planType} plan` : 'Codex account session'} · no API key required</small></div></div>
               {chatGPTModel && <div className="ai-option-grid"><label className="settings-field"><span>ChatGPT model</span><select onChange={(event) => { const model = chatGPTStatus.models?.find((item) => item.id === event.target.value); if (model) void onConfigureChatGPT({ model: model.id, effort: model.defaultEffort ?? model.efforts[0] ?? '' }) }} value={chatGPTModel.id}>{chatGPTStatus.models?.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label className="settings-field"><span>Reasoning</span><select disabled={!chatGPTModel.efforts.length} onChange={(event) => void onConfigureChatGPT({ model: chatGPTModel.id, effort: event.target.value })} value={chatGPTEffort}>{chatGPTModel.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label></div>}
               <div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogOut size={14} />} onClick={() => void disconnectChatGPTAccount()} variant="ghost">Disconnect ChatGPT</ActionButton></div>
-            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions">{chatGPTConnecting
+            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p>{chatGPTConnecting && <div aria-live="polite" className="connection-progress">
+              <header><RefreshCw className="agent-context-wheel" size={15} /><div><strong>Connecting ChatGPT</strong><small>{chatGPTElapsed}s · this panel updates from the real Electron session</small></div></header>
+              <ol><li className="is-complete"><CheckCircle2 size={13} /><span><strong>Session opened</strong><small>Dedicated local Codex process started</small></span></li><li className="is-active"><span className="connection-pulse" /><span><strong>Browser approval</strong><small>Waiting for or detecting your ChatGPT approval</small></span></li><li className={chatGPTStatus.connected ? 'is-complete' : ''}><span className="connection-step-dot" /><span><strong>Account &amp; models</strong><small>Status is polled every 500 ms</small></span></li></ol>
+            </div>}<div className="ai-connection-actions">{chatGPTConnecting
               ? <ActionButton icon={<X size={14} />} onClick={() => void cancelChatGPTAccountLogin()} variant="ghost">Cancel ChatGPT sign-in</ActionButton>
               : <ActionButton disabled={aiBusy} icon={<LogIn size={14} />} onClick={() => void connectChatGPTAccount()} variant="primary">Continue with ChatGPT</ActionButton>}</div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error} · You can retry the connection.</p>}</>}
           </section>
@@ -411,20 +464,25 @@ export function SettingsModal(props: SettingsModalProps) {
         </article>}
 
         {activeSection === 'updates' && <article className="settings-page">
-          <div className="settings-page-heading"><small>APPLICATION UPDATES</small><h3>Signed desktop release channels</h3><p>DATA LAB never downloads or installs an update without your explicit action.</p></div>
+          <div className="settings-page-heading"><small>APPLICATION UPDATES</small><h3>Setup and signed updates</h3><p>Source-built Setup remains usable on unsigned builds. Automatic binary updates keep strict signature enforcement.</p></div>
           <section className="settings-section update-settings">
-            <div className="settings-section-title"><span><ShieldCheck size={15} /> Installed version</span><small>{appUpdateStatus.currentVersion}</small></div>
-            <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Desktop signature verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Unsigned update path blocked'}</strong><small>{appUpdateStatus.message}</small></div></div>
+            <div className="settings-section-title"><span><FolderOpen size={15} /> Source-built Setup</span><small>Available</small></div>
+            <div className="update-trust update-trusted"><CheckCircle2 size={19} /><div><strong>Setup updater is available</strong><small>Choose Stable or Main, then let Setup rebuild locally. This path does not weaken the signed binary policy.</small></div></div>
             <div aria-label="Application update channel" className="theme-switch update-channel-switch" role="radiogroup">
               <button aria-checked={appUpdateStatus.channel === 'stable'} className={appUpdateStatus.channel === 'stable' ? 'is-active' : ''} disabled={appUpdateBusy} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('stable'))} role="radio" type="button"><span><strong>Stable</strong><small>Latest published DATA LAB application release.</small></span></button>
               <button aria-checked={appUpdateStatus.channel === 'main'} className={appUpdateStatus.channel === 'main' ? 'is-active' : ''} disabled={appUpdateBusy} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('main'))} role="radio" type="button"><span><strong>Main preview</strong><small>Newest main commit; locally rebuilt by Setup.</small></span></button>
             </div>
+            <div className="ai-connection-actions"><ActionButton icon={<FolderOpen size={14} />} onClick={() => void runUpdateAction(onOpenSetupUpdater)} variant="primary">Open Setup updater</ActionButton></div>
+          </section>
+          <section className="settings-section update-settings">
+            <div className="settings-section-title"><span><ShieldCheck size={15} /> Signed automatic feed</span><small>Installed {appUpdateStatus.currentVersion}</small></div>
+            <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Desktop signature verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Signed feed unavailable for this build'}</strong><small>{appUpdateStatus.message}</small></div></div>
             <dl className="update-version-grid"><div><dt>Installed</dt><dd>{appUpdateStatus.currentVersion}</dd></div><div><dt>Available</dt><dd>{appUpdateStatus.availableVersion ?? 'Not checked'}</dd></div><div><dt>Signature policy</dt><dd>{appUpdateStatus.downloadedSignatureEnforced ? 'Enforced' : 'Unavailable'}</dd></div><div><dt>Status</dt><dd>{appUpdateStatus.phase}</dd></div></dl>
             {appUpdateStatus.progress !== undefined && <div className="update-progress"><span style={{ width: `${appUpdateStatus.progress}%` }} /><small>{Math.round(appUpdateStatus.progress)}%</small></div>}
-            <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy} icon={<FolderOpen size={14} />} onClick={() => void runUpdateAction(onOpenSetupUpdater)} variant="primary">Open Setup updater</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check signed feed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download signed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="ghost">Restart &amp; install</ActionButton></div>
+            <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check signed feed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download signed</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="ghost">Restart &amp; install</ActionButton></div>
             {(updateFeedback || appUpdateStatus.error) && <p aria-live="polite" className="settings-feedback">{appUpdateStatus.error ?? updateFeedback}</p>}
           </section>
-          <p className="settings-note">The selected channel is passed to DATA LAB Setup. Setup locally builds Stable or Main and remembers the same channel for its next launch. Signed automatic feeds remain a separate production-only path.</p>
+          <p className="settings-note">Setup locally builds the selected channel and remembers it. Only the separate automatic feed requires a signed and notarized production build.</p>
         </article>}
 
         {activeSection === 'presets' && <article className="settings-page">

@@ -9,7 +9,7 @@ export interface AgentToolTrace {
   summary: string
 }
 
-const kinds = ['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
+const kinds = ['control', 'source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
 const nullableText = { type: ['string', 'null'] }
 const objectSchema = (properties: JsonRecord) => ({
   type: 'object',
@@ -114,6 +114,7 @@ export const agentToolDefinitions = [
 ] as const
 
 const cardRoles: Record<ProposalCardKind, string> = {
+  control: 'Persist the autonomous objective and player resume/monitor policy.',
   source: 'Resolve a governed DataHub dataset.',
   profile: 'Keep compact versioned schema, quality and freshness memory without raw rows.',
   analysis: 'Read trusted metadata and produce findings.',
@@ -208,6 +209,7 @@ export class AgentToolSession {
 
   private normalizedRule(kind: ProposalCardKind, value: unknown): string | null {
     const supplied = text(value, 2_000)
+    if (kind === 'control') return supplied ?? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
     if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_atom | on_reject=repair_loop'
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
     return supplied
@@ -254,6 +256,9 @@ export class AgentToolSession {
         }
         if (kind === 'parallel' && (!rule?.includes('context=branch_only') || !rule.includes('merge=atomic'))) {
           throw new Error('Parallel Agents requires context=branch_only and merge=atomic')
+        }
+        if (kind === 'control' && (!rule?.includes('objective=') || !rule.includes('on_review=') || !rule.includes('on_idle='))) {
+          throw new Error('DATA LAB Control requires objective, on_review and on_idle policies')
         }
         return this.validateCandidate(tool, {
           type: 'add_card',
