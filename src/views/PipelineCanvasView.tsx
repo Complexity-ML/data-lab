@@ -1,4 +1,4 @@
-import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes, type OnReconnect } from '@xyflow/react'
 import { FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, ScrollText, Trash2 } from 'lucide-react'
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
@@ -26,6 +26,7 @@ interface PipelineCanvasViewProps {
   reportCount: number
   reportsOpen: boolean
   onConnect(connection: Connection): void
+  onReconnect: OnReconnect<Edge>
   onDeleteCard(nodeId: string): void
   onDrop(event: DragEvent<HTMLDivElement>): void
   onEdgesChange(changes: EdgeChange<Edge>[]): void
@@ -44,7 +45,7 @@ interface PipelineCanvasViewProps {
 }
 
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
-  const { activityBusy, actionsOpen, contextMenu, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onPaneClick, onSelectNode, reportCount, reportsOpen, theme } = props
+  const { activityBusy, actionsOpen, contextMenu, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onPaneClick, onReconnect, onSelectNode, reportCount, reportsOpen, theme } = props
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
@@ -66,6 +67,7 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onReconnect={onReconnect}
       onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
       onDrop={onDrop}
       onInit={onFlowInit}
@@ -80,6 +82,8 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       onlyRenderVisibleElements
       snapToGrid={false}
       defaultEdgeOptions={{ type: 'elastic' }}
+      edgesReconnectable
+      reconnectRadius={18}
       deleteKeyCode={['Backspace', 'Delete']}
     >
       <Background color={theme === 'dark' ? '#2a3950' : '#e5eaf0'} gap={24} size={1} variant={BackgroundVariant.Lines} />

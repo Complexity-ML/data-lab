@@ -37,6 +37,38 @@ describe('AI proposal materialization', () => {
     expect(monitor?.data.rule).toContain('max_iterations=10')
   })
 
+  it('deduplicates minute-based Live Monitor cooldowns', () => {
+    const response: AiProposalResponse = {
+      model: 'test-model',
+      proposal: {
+        title: 'Monitor governed metadata',
+        summary: 'Use one bounded cadence.',
+        rationale: 'The first explicit cooldown remains authoritative.',
+        requires_human_review: false,
+        confidence: 0.95,
+        writeback: 'none',
+        evidence: [],
+        actions: [{
+          type: 'add_card',
+          node_id: 'monitor-orders',
+          kind: 'monitor',
+          label: 'Watch orders',
+          description: 'Watch metadata changes.',
+          owner: 'DATA LAB Agent',
+          rule: 'on_change(metadata_fingerprint) | cooldown=30m | max_iterations=1 | cooldown=60s',
+          source: null,
+          target: null,
+          source_handle: null,
+          reason: 'Monitor the governed source.',
+        }],
+      },
+    }
+
+    const rule = materializeAiProposal(response, [], []).addedNodes[0]?.data.rule ?? ''
+    expect(rule).toContain('cooldown=30m')
+    expect(rule.match(/cooldown=/g)).toHaveLength(1)
+  })
+
   it('accepts an update to an existing Human Review checkpoint', () => {
     const review: PipelineNode = {
       id: 'review-existing',

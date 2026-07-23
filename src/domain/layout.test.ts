@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { elasticHorizontalPath } from '../components/shared/ElasticEdge'
+import { elasticFeedbackPath, elasticHorizontalPath } from '../components/shared/ElasticEdge'
 import { layoutPipeline } from './layout'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from './pipeline'
 
@@ -45,6 +45,14 @@ describe('pipeline XY layout', () => {
     expect(new Set(paths).size).toBe(frames.length)
   })
 
+  it('routes feedback cables below the bounded iteration instead of through its cards', () => {
+    const path = elasticFeedbackPath(900, 180, 420, 320)
+    expect(path.match(/ C /g)).toHaveLength(2)
+    expect(path).toContain('452')
+    expect(path).toMatch(/^M 900 180 L 918 180/)
+    expect(path).toMatch(/L 420 320$/)
+  })
+
   it('preserves pinned manual card positions while arranging the surrounding graph', () => {
     const pinned = initialNodes.map((node) => node.id === 'region-split' ? { ...node, position: { x: 777, y: 555 }, data: { ...node.data, pinned: true } } : node)
     const arranged = layoutPipeline(pinned, initialEdges)
@@ -63,5 +71,23 @@ describe('pipeline XY layout', () => {
     const sourceOrder = positions.get('top-left')!.y - positions.get('bottom-left')!.y
     const targetOrder = positions.get('bottom-right')!.y - positions.get('top-right')!.y
     expect(sourceOrder * targetOrder).toBeGreaterThanOrEqual(0)
+  })
+
+  it('reserves a floating lane for the orphaned DATA LAB Controller', () => {
+    const control = { ...newCard('control', 0), id: 'data-lab-control' }
+    const source = { ...newCard('source', 1), id: 'governed-source' }
+    const validation = { ...newCard('validation', 2), id: 'governed-validation' }
+    const output = { ...newCard('output', 3), id: 'governed-output' }
+    const edges = [
+      { id: 'source-validation', source: source.id, target: validation.id },
+      { id: 'validation-output', source: validation.id, target: output.id },
+    ]
+
+    const arranged = layoutPipeline([control, source, validation, output], edges)
+    const controlPosition = arranged.find((node) => node.id === control.id)!.position
+    const lineageTop = Math.min(...arranged.filter((node) => node.id !== control.id).map((node) => node.position.y))
+
+    expect(controlPosition.y).toBeLessThan(lineageTop)
+    expect(lineageTop - controlPosition.y).toBeGreaterThanOrEqual(240)
   })
 })

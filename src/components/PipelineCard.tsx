@@ -1,5 +1,6 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
@@ -20,12 +21,17 @@ const icons = {
   output: Send,
 }
 
-export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
+export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
+  const updateNodeInternals = useUpdateNodeInternals()
   const Icon = icons[data.kind]
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
   const isControl = data.kind === 'control'
+
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [data.kind, id, updateNodeInternals])
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
     {!isSource && !isControl && <Handle className="pipeline-handle" position={Position.Left} type="target" />}

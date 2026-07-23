@@ -120,6 +120,24 @@ describe('bounded DATA LAB agent tools', () => {
     ])
   })
 
+  it('deduplicates cooldown clauses while preserving the first explicit cadence', () => {
+    const session = new AgentToolSession(payload)
+    const result = session.execute('add_card', {
+      node_id: 'monitor-hourly-orders',
+      kind: 'monitor',
+      label: 'Watch hourly orders',
+      description: 'Watch metadata changes.',
+      owner: 'DATA LAB Agent',
+      rule: 'on_change(metadata_fingerprint) | cooldown=30m | max_iterations=1 | cooldown=60s',
+      reason: 'Use the first explicitly selected monitoring cadence.',
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      action: { rule: 'on_change(metadata_fingerprint) | cooldown=30m | max_iterations=1' },
+    })
+  })
+
   it('preserves an existing Live Monitor rule during metadata-only updates', () => {
     const session = new AgentToolSession({
       ...payload,

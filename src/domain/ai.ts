@@ -75,9 +75,22 @@ function text(value: unknown, fallback = '', limit = 800) {
 
 function completeMonitorRule(value: unknown, fallback?: unknown) {
   let rule = text(value, text(fallback, '', 2_000), 2_000)
+  const seen = new Set<string>()
+  rule = rule.split(/\s*\|\s*/).filter(Boolean).filter((clause) => {
+    const key = /^cooldown\s*=/i.test(clause)
+      ? 'cooldown'
+      : /^max_iterations\s*=/i.test(clause)
+        ? 'max_iterations'
+        : /^on_change\(metadata_fingerprint\)/i.test(clause)
+          ? 'on_change'
+          : clause
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).join(' | ')
   const clauses: string[] = []
   if (!/on_change\(metadata_fingerprint\)/i.test(rule)) clauses.push('on_change(metadata_fingerprint)')
-  if (!/cooldown=\d+s/i.test(rule)) clauses.push('cooldown=60s')
+  if (!/cooldown\s*=\s*\d+\s*(?:s|m|h)?\b/i.test(rule)) clauses.push('cooldown=60s')
   if (!/max_iterations=\d+/i.test(rule)) clauses.push('max_iterations=10')
   if (clauses.length) rule = [rule, ...clauses].filter(Boolean).join(' | ')
   return rule

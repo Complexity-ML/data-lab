@@ -1,4 +1,4 @@
-import { addEdge, useEdgesState, useNodesState, type Connection } from '@xyflow/react'
+import { addEdge, reconnectEdge, useEdgesState, useNodesState, type Connection, type Edge } from '@xyflow/react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { AppFooter } from './components/AppFooter'
 import { AppHeader, type AgentPlayerState } from './components/AppHeader'
@@ -175,6 +175,15 @@ export default function App() {
     const feedback = connection.sourceHandle === 'feedback'
     setEdges((current) => addEdge({ ...connection, id: `e-${connection.source}-${connection.target}-${Date.now()}`, type: 'elastic', label: feedback ? 'next iteration' : undefined }, current))
     setActivity(feedback ? 'Feedback boundary added · each trigger starts a new bounded atomic iteration' : 'Manual lineage connection added · run validation before publishing')
+  }
+
+  const onReconnect = (oldEdge: Edge, connection: Connection) => {
+    if (!connection.source || !connection.target) return
+    const feedback = connection.sourceHandle === 'feedback'
+    setEdges((current) => reconnectEdge(oldEdge, connection, current, { shouldReplaceId: false }).map((edge) => edge.id === oldEdge.id
+      ? { ...edge, type: 'elastic', label: feedback ? 'next iteration' : undefined }
+      : edge))
+    setActivity(feedback ? 'Feedback cable reconnected · next bounded iteration preserved' : 'Elastic cable reconnected · lineage validation refreshed')
   }
 
   const addCard = (kind: CardKind, position?: { x: number; y: number }) => {
@@ -1119,6 +1128,7 @@ export default function App() {
         reportCount={reportCount}
         reportsOpen={reportsOpen}
         onConnect={onConnect}
+        onReconnect={onReconnect}
         onDeleteCard={deleteCard}
         onDrop={dropLibraryCard}
         onEdgesChange={onEdgesChange}

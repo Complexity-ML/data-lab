@@ -23,8 +23,29 @@ describe('atomic proposal transactions', () => {
     const issues = validatePipeline([source, review], edges)
 
     expect(issues.some((issue) => issue.id === 'missing-output')).toBe(true)
-    expect(issues.some((issue) => issue.id === `orphan-output-${review.id}`)).toBe(true)
+    expect(issues.some((issue) => issue.id === `orphan-output-${review.id}`)).toBe(false)
     expect(atomicTransactionBlockers(issues)).toEqual([])
+  })
+
+  it('blocks a proposal that leaves a lineage card disconnected', () => {
+    const analysis: PipelineNode = {
+      id: 'orphan-analysis',
+      type: 'pipeline',
+      position: { x: 250, y: 250 },
+      data: { kind: 'analysis', label: 'Orphan analysis', description: 'No connectors.', owner: 'Agent', status: 'draft', schema: [] },
+    }
+    const output: PipelineNode = {
+      id: 'connected-output',
+      type: 'pipeline',
+      position: { x: 500, y: 100 },
+      data: { kind: 'output', label: 'Output', description: 'Connected output.', owner: 'Agent', status: 'draft', schema: [] },
+    }
+    const issues = validatePipeline([source, analysis, output], [{ id: 'source-output', source: source.id, target: output.id }])
+
+    expect(atomicTransactionBlockers(issues).map((issue) => issue.id)).toEqual(expect.arrayContaining([
+      `orphan-input-${analysis.id}`,
+      `orphan-output-${analysis.id}`,
+    ]))
   })
 
   it('still rejects unsafe graph topology', () => {
