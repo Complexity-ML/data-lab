@@ -3,6 +3,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { Modal } from './shared/Modal'
 
 interface ProposalReviewModalProps {
+  assistant?: import('./ReviewPanel').ReviewAssistantProps
   applying?: boolean
   proposal: AgentProposal
   relatedAssets: string[]

@@ -1,13 +1,13 @@
 import { addEdge, useEdgesState, useNodesState, type Connection } from '@xyflow/react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { AppFooter } from './components/AppFooter'
-import { AppHeader } from './components/AppHeader'
+import { AppHeader, type AgentPlayerState } from './components/AppHeader'
 import { ProposalReviewModal } from './components/ProposalReviewModal'
 import type { SettingsSection } from './components/shared/SettingsModal'
 import { KeyboardShortcutsModal } from './components/shared/KeyboardShortcutsModal'
 import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
 import { materializeAiProposal } from './domain/ai'
-import { buildCardReworkRequest, buildPipelineAgentRequest } from './domain/agent-context'
+import { buildCardReworkRequest, buildPipelineAgentRequest, buildReviewAssistantRequest } from './domain/agent-context'
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, resumePipelineAtomically, type AtomicPipelineRun } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { addDataProfileToProposal, canReuseDataProfile, dataProfileEvidence } from './domain/data-profile'
@@ -48,6 +48,9 @@ export default function App() {
   const [requestedVersionId, setRequestedVersionId] = useState<string>()
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; label: string; x: number; y: number }>()
   const [agentRunning, setAgentRunning] = useState(false)
+  const [playerState, setPlayerState] = useState<AgentPlayerState>('stopped')
+  const [reviewAssistantBusy, setReviewAssistantBusy] = useState(false)
+  const [reviewAssistantAnswer, setReviewAssistantAnswer] = useState<{ summary: string; rationale: string; evidence: string[]; model: string }>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
@@ -59,6 +62,7 @@ export default function App() {
   const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
   const [pendingWorkspacePrompt, setPendingWorkspacePrompt] = useState<string>()
   const agentRunId = useRef(0)
+  const reviewAssistantRunId = useRef(0)
   const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
   const proposalApprovalRunning = useRef(false)
   const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
@@ -112,6 +116,12 @@ export default function App() {
   useEffect(() => {
     window.localStorage.removeItem('data-lab-versions')
   }, [])
+
+  useEffect(() => {
+    setReviewAssistantAnswer(undefined)
+    setReviewAssistantBusy(false)
+    reviewAssistantRunId.current += 1
+  }, [proposal?.id])
 
   useEffect(() => {
     if (!window.dataLab?.listIncidentEvents) return
@@ -490,14 +500,90 @@ export default function App() {
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
   }
 
+  const playAgent = () => {
+    if (agentRunning || reviewAssistantBusy || proposal) return
+    if (!active.connected) {
+      setSettingsSection('ai')
+      setSettingsOpen(true)
+      setActivity(`${active.label} is not connected · autonomous player remains stopped`)
+      return
+    }
+    setPlayerState('running')
+    setActivity(nodes.length ? 'Autonomous player started · auditing the current graph before monitoring changes…' : 'Autonomous player started · discovering the best governed starting point…')
+    void auditWithAgent()
+  }
+
+  const pauseAgent = () => {
+    if (playerState !== 'running') return
+    setPlayerState('paused')
+    setActivity(agentRunning
+      ? 'Autonomous player pause armed · current atomic iteration may finish · no next iteration will start'
+      : 'Autonomous player paused · monitoring and new iterations are suspended')
+  }
+
   const stopAgent = () => {
+    setPlayerState('stopped')
     agentRunId.current += 1
+    reviewAssistantRunId.current += 1
     setAgentRunning(false)
+    setReviewAssistantBusy(false)
     setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
     activeAtomicRun.current = undefined
     setActivity('Emergency stop · current agent run cancelled · active branch unchanged')
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
+  }
+
+  const stopReviewAssistant = () => {
+    reviewAssistantRunId.current += 1
+    setReviewAssistantBusy(false)
+    setActivity('Human Review assistant stopped · proposal and graph unchanged')
+    if (window.dataLab) void window.dataLab.cancelAiProposal()
+    if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
+  }
+
+  const askReviewAssistant = async (question: string) => {
+    if (!proposal || reviewAssistantBusy || !window.dataLab) return
+    if (!active.connected) {
+      setSettingsSection('ai')
+      setSettingsOpen(true)
+      setActivity(`${active.label} is not connected · Human Review remains fully manual`)
+      return
+    }
+    const runId = ++reviewAssistantRunId.current
+    setReviewAssistantBusy(true)
+    setActivity(`${active.model} is reading the pending review · read-only assistant turn…`)
+    try {
+      const payload = buildReviewAssistantRequest({
+        edges,
+        incidentContext: incidentSummaries,
+        issues,
+        nodes,
+        proposal,
+        question,
+        responseLanguage: language === 'fr' ? 'French' : 'English',
+        versions,
+      })
+      const response = activeAiSource === 'chatgpt'
+        ? await window.dataLab.runChatGPTProposal(payload)
+        : await window.dataLab.runAiProposal(payload)
+      if (reviewAssistantRunId.current !== runId) return
+      setReviewAssistantAnswer({
+        summary: response.proposal.summary,
+        rationale: response.proposal.rationale,
+        evidence: response.proposal.evidence,
+        model: response.model,
+      })
+      setActivity(`${response.model} answered the reviewer · zero graph actions accepted`)
+      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'success', detail: { source: activeAiSource, model: response.model, actionCount: response.proposal.actions.length } })
+    } catch (error) {
+      if (reviewAssistantRunId.current !== runId) return
+      notifyError(error, 'Human Review assistant failed')
+      setActivity(`Human Review assistant failed · ${error instanceof Error ? error.message : 'unknown provider error'} · proposal unchanged`)
+      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'error', detail: { source: activeAiSource, message: error instanceof Error ? error.message : 'unknown error' } })
+    } finally {
+      if (reviewAssistantRunId.current === runId) setReviewAssistantBusy(false)
+    }
   }
 
   const rejectAgentProposal = () => {
@@ -513,12 +599,12 @@ export default function App() {
       versionId: pendingVersionId,
     })
     window.setTimeout(() => {
-      if (!agentRunning) void auditWithAgent(`Repair the rejected incident proposal "${rejected.title}". Preserve the reviewer rejection in version memory, change only the affected branch, and do not repeat the rejected diff.`)
+      if (playerState === 'running' && !agentRunning) void auditWithAgent(`Repair the rejected incident proposal "${rejected.title}". Preserve the reviewer rejection in version memory, change only the affected branch, and do not repeat the rejected diff.`)
     }, 250)
   }
 
   useLiveIncidentMonitor({
-    active: Boolean(window.dataLab) && connectionMode === 'connected',
+    active: Boolean(window.dataLab) && connectionMode === 'connected' && playerState === 'running',
     agentBlocked: agentRunning || Boolean(proposal),
     nodes,
     edges,
@@ -655,12 +741,33 @@ export default function App() {
   })
 
   return <main className={`app-shell ${platformClass}${nativeFullscreen ? ' native-fullscreen' : ''}`}>
-    <AppHeader agentRunning={agentRunning} cardCount={nodes.length} onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }} onRun={() => void auditWithAgent()} projectTitle={projectTitle} saveState={workspacePersistence.saveState} />
+    <AppHeader
+      agentBusy={agentRunning}
+      cardCount={nodes.length}
+      onOpenSettings={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}
+      onPause={pauseAgent}
+      onPlay={playAgent}
+      onStop={stopAgent}
+      playerState={playerState}
+      projectTitle={projectTitle}
+      reviewPending={Boolean(proposal)}
+      saveState={workspacePersistence.saveState}
+    />
 
     {workspacePersistence.recovery && <WorkspaceRecoveryModal onDiscard={() => void workspacePersistence.resolveRecovery('discard')} onRecover={() => void workspacePersistence.resolveRecovery('recover')} updatedAt={workspacePersistence.recovery.updatedAt} />}
     {shortcutsOpen && <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />}
     {proposal && proposalReviewOpen && <ProposalReviewModal
       applying={proposalApprovalBusy}
+      assistant={{
+        activity,
+        answer: reviewAssistantAnswer,
+        busy: reviewAssistantBusy,
+        connected: active.connected,
+        context: { ai: active.connected ? `${active.label} ready` : `${active.label} offline`, cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport} connected` : 'MCP offline', model: `${active.label} · ${active.model}` },
+        onAsk: (question) => { void askReviewAssistant(question) },
+        onOpenSettings: () => { setSettingsSection('ai'); setSettingsOpen(true) },
+        onStop: stopReviewAssistant,
+      }}
       proposal={proposal}
       relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
       revisionId={pendingVersionId}
@@ -762,6 +869,6 @@ export default function App() {
 
     {proposal && !proposalReviewOpen && <button className="proposal-review-reopen" onClick={() => setProposalReviewOpen(true)} type="button"><span aria-hidden="true">✦</span> Review agent proposal</button>}
 
-    <AppFooter activity={activity} agentRunning={agentRunning} connected={active.connected} context={{ ai: active.connected ? `${active.label} ready` : `${active.label} offline`, cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport} connected` : 'MCP offline', model: `${active.label} · ${active.model}` }} onOpenAiSettings={() => { setSettingsSection('ai'); setSettingsOpen(true) }} onStop={stopAgent} onSubmit={(prompt) => void auditWithAgent(prompt)} />
+    <AppFooter activity={activity} playerState={playerState} />
   </main>
 }

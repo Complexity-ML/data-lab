@@ -1,21 +1,16 @@
-import { AgentPrompt } from './shared/AgentPrompt'
 import { useLanguage } from '../i18n'
+import type { AgentPlayerState } from './AppHeader'
 
 interface AppFooterProps {
   activity: string
-  agentRunning: boolean
-  connected: boolean
-  context: { ai?: string; cards: number; edges: number; versions: number; mcp: string; model: string }
-  onOpenAiSettings(): void
-  onStop(): void
-  onSubmit(prompt: string): void
+  playerState: AgentPlayerState
 }
 
-export function AppFooter({ activity, agentRunning, connected, context, onOpenAiSettings, onStop, onSubmit }: AppFooterProps) {
+export function AppFooter({ activity, playerState }: AppFooterProps) {
   const { t } = useLanguage()
   return <footer className="statusbar">
     <span className="status-activity">{activity}</span>
-    <AgentPrompt activity={activity} busy={agentRunning} connected={connected} context={context} onOpenSettings={onOpenAiSettings} onStop={onStop} onSubmit={onSubmit} />
+    <span className={`status-player state-${playerState}`}><i />Autonomous player · <strong>{playerState}</strong></span>
     <span className="status-review">{t('humanReview')} <strong>{t('notified')}</strong> {t('reviewWhen')}</span>
   </footer>
 }

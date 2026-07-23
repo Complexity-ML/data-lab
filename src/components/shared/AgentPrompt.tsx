@@ -4,15 +4,19 @@ import { useLanguage } from '../../i18n'
 
 interface AgentPromptProps {
   activity: string
+  agentLabel?: string
+  ariaLabel?: string
   busy: boolean
   connected: boolean
   context: { ai?: string; cards: number; edges: number; versions: number; mcp: string; model: string }
+  placeholder?: string
+  submitLabel?: string
   onOpenSettings(): void
   onStop(): void
   onSubmit(prompt: string): void
 }
 
-export function AgentPrompt({ activity, busy, connected, context, onOpenSettings, onStop, onSubmit }: AgentPromptProps) {
+export function AgentPrompt({ activity, agentLabel, ariaLabel, busy, connected, context, onOpenSettings, onStop, onSubmit, placeholder, submitLabel }: AgentPromptProps) {
   const { t } = useLanguage()
   const [value, setValue] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -59,7 +63,7 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
     </section>}
     <form className="data-agent-prompt" onSubmit={(event) => { event.preventDefault(); submit() }}>
       <textarea
-        aria-label="What should the DATA LAB agent do?"
+        aria-label={ariaLabel ?? 'What should the DATA LAB agent do?'}
         disabled={busy}
         id="data-lab-agent-prompt"
         onChange={(event) => { setValue(event.target.value); if (connectionNotice) setConnectionNotice('') }}
@@ -68,16 +72,16 @@ export function AgentPrompt({ activity, busy, connected, context, onOpenSettings
           event.preventDefault()
           submit()
         }}
-        placeholder={connected ? t('promptPlaceholder') : t('promptDisconnected')}
+        placeholder={connected ? placeholder ?? t('promptPlaceholder') : t('promptDisconnected')}
         ref={textareaRef}
         rows={1}
         value={value}
       />
-      <div className="data-agent-prompt-context"><span><Sparkles size={11} />{t('agentLabel')}</span><small aria-live="polite">{connectionNotice || (connected ? `${context.model} · Review only · ${context.mcp}` : t('noAction'))}</small>{!connected && <button className="data-agent-connect" onClick={onOpenSettings} type="button">{t('connect')}</button>}</div>
+      <div className="data-agent-prompt-context"><span><Sparkles size={11} />{agentLabel ?? t('agentLabel')}</span><small aria-live="polite">{connectionNotice || (connected ? `${context.model} · Review only · ${context.mcp}` : t('noAction'))}</small>{!connected && <button className="data-agent-connect" onClick={onOpenSettings} type="button">{t('connect')}</button>}</div>
       <div className="data-agent-actions">
         {busy
           ? <button aria-label="Emergency stop agent" className="data-agent-send is-stop" onClick={onStop} title="Stop the current agent run immediately" type="button"><Square size={13} /></button>
-          : <button aria-label={t('send')} className="data-agent-send" disabled={!value.trim()} title={connected ? 'Propose graph changes' : t('openSettings')} type="submit"><Send size={15} /></button>}
+          : <button aria-label={submitLabel ?? t('send')} className="data-agent-send" disabled={!value.trim()} title={connected ? 'Ask without changing the graph' : t('openSettings')} type="submit"><Send size={15} /></button>}
         <button aria-expanded={detailsOpen} aria-label={t('details')} className="data-agent-detail-button" onClick={() => setDetailsOpen((current) => !current)} title={t('details')} type="button"><ListChecks size={14} /><b>{busy ? '…' : context.versions}</b></button>
       </div>
     </form>

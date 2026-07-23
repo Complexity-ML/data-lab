@@ -2,8 +2,21 @@ import { Check, DatabaseZap, GitCompareArrows, LoaderCircle, ShieldCheck, Sparkl
 import { useEffect, useState } from 'react'
 import type { AgentProposal } from '../domain/pipeline'
 import { ActionButton } from './shared/ActionButton'
+import { AgentPrompt } from './shared/AgentPrompt'
+
+export interface ReviewAssistantProps {
+  activity: string
+  answer?: { summary: string; rationale: string; evidence: string[]; model: string }
+  busy: boolean
+  connected: boolean
+  context: { ai?: string; cards: number; edges: number; versions: number; mcp: string; model: string }
+  onAsk(question: string): void
+  onOpenSettings(): void
+  onStop(): void
+}
 
 interface ReviewPanelProps {
+  assistant?: ReviewAssistantProps
   applying?: boolean
   proposal: AgentProposal
   relatedAssets: string[]
@@ -14,7 +27,7 @@ interface ReviewPanelProps {
   onClose(): void
 }
 
-export function ReviewPanel({ applying = false, proposal, relatedAssets, revisionId, writebackAvailable, onApply, onClose, onDiscard }: ReviewPanelProps) {
+export function ReviewPanel({ applying = false, assistant, proposal, relatedAssets, revisionId, writebackAvailable, onApply, onClose, onDiscard }: ReviewPanelProps) {
   const [writebackRequested, setWritebackRequested] = useState(false)
   useEffect(() => setWritebackRequested(false), [proposal.title, revisionId])
 
@@ -28,6 +41,29 @@ export function ReviewPanel({ applying = false, proposal, relatedAssets, revisio
     <p className="review-summary">{proposal.summary}</p>
     {(proposal.model || proposal.confidence !== undefined) && <div className="review-agent-meta"><span>{proposal.model ?? 'Connected model'}</span>{proposal.confidence !== undefined && <span>{Math.round(proposal.confidence * 100)}% confidence</span>}<span>{proposal.requiresHumanReview ? 'Human Review path' : 'Agent Decision path'}</span></div>}
     <div className="review-rationale"><ShieldCheck size={17} /><p>{proposal.rationale}</p></div>
+
+    {assistant && <section className="review-assistant">
+      <header><Sparkles size={15} /><div><strong>Human Review assistant</strong><small>Read-only · cannot approve, reject, mutate or write back</small></div></header>
+      {assistant.answer && <div aria-live="polite" className="review-assistant-answer">
+        <strong>{assistant.answer.model}</strong>
+        <p>{assistant.answer.summary}</p>
+        <small>{assistant.answer.rationale}</small>
+        {assistant.answer.evidence.length > 0 && <ul>{assistant.answer.evidence.map((item) => <li key={item}>{item}</li>)}</ul>}
+      </div>}
+      <AgentPrompt
+        activity={assistant.activity}
+        agentLabel="Review assistant"
+        ariaLabel="Ask the Human Review assistant"
+        busy={assistant.busy}
+        connected={assistant.connected}
+        context={assistant.context}
+        onOpenSettings={assistant.onOpenSettings}
+        onStop={assistant.onStop}
+        onSubmit={assistant.onAsk}
+        placeholder="Ask why this change is needed, what evidence is missing, its impact, or a safer alternative…"
+        submitLabel="Ask the Human Review assistant"
+      />
+    </section>}
 
     <div className="review-body-grid">
       <div className="review-body-column">

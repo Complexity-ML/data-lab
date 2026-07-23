@@ -95,6 +95,8 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
     getAiStatus: vi.fn(async () => disconnectedAiStatus),
     getChatGPTStatus: vi.fn(async () => disconnectedChatGPTStatus),
     getActiveAiSource: vi.fn(async () => ({ source: 'openai' as const })),
+    cancelAiProposal: vi.fn(async () => ({ cancelled: true })),
+    cancelChatGPTProposal: vi.fn(async () => ({ cancelled: true })),
     getDataHubMcpStatus: vi.fn(async () => ({ mode: 'demo' as const, transport: 'demo' as const, message: 'Not connected', toolCount: 0, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } })),
     listIncidentEvents: vi.fn(async () => []),
     recordIncidentEvent: vi.fn(async () => ({ recorded: true })),
@@ -111,16 +113,15 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
 
 describe('visual pipeline workspace regressions', () => {
   it('opens a new install blank, with zero versions and no false successful run state', async () => {
-    const user = userEvent.setup()
     render(<App />)
 
     expect(screen.getAllByText('0 cards', { exact: false }).length).toBeGreaterThan(0)
-    expect((screen.getByRole('button', { name: 'Run agent flow' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Play autonomous agent' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Pause autonomous agent' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Stop autonomous agent' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Pipeline is empty')).toBeTruthy()
     expect(screen.queryByText('All atomic checks passed')).toBeNull()
-
-    await user.click(screen.getByRole('button', { name: 'Show agentic details' }))
-    expect(screen.getByText('0 checkpoints')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: 'What should the DATA LAB agent do?' })).toBeNull()
   })
 
   it('uses Play on an empty workbench as a governed DataHub bootstrap mission', async () => {
@@ -136,12 +137,38 @@ describe('visual pipeline workspace regressions', () => {
 
     render(<App />)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
-    await user.click(screen.getByRole('button', { name: 'Run agent flow' }))
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
       objective: expect.stringContaining('governed'),
       graph: expect.objectContaining({ nodes: [] }),
     }))
+  })
+
+  it('pauses future autonomous iterations and Stop cancels the active provider channels', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: { title: 'No change', summary: 'No evidence change.', rationale: 'The graph is current.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+    }))
+    api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
+
+    render(<App />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByRole('button', { name: 'Pause autonomous agent' }))
+    expect(screen.getByText('paused')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
+    expect(api.cancelAiProposal).toHaveBeenCalled()
+    expect(api.cancelChatGPTProposal).toHaveBeenCalled()
+    expect(screen.getByText('stopped')).toBeTruthy()
   })
 
   it('collapses and reopens Card Library and Inspector independently', async () => {
@@ -289,10 +316,8 @@ describe('visual pipeline workspace regressions', () => {
     api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
 
     render(<App />)
-    const prompt = screen.getByRole('textbox', { name: 'What should the DATA LAB agent do?' })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
-    await user.type(prompt, 'Work on the data please')
-    await user.click(screen.getByRole('button', { name: 'Send request to DATA LAB agent' }))
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
 
     expect(await screen.findByRole('dialog', { name: 'Create a bounded starting point for the empty pipeline' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Approve change' }))
@@ -306,7 +331,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
   })
 
-  it('creates a blank workspace only for an explicit separate-graph prompt and resumes the preserved request', async () => {
+  it('keeps mission prompting out of an active autonomous workspace', async () => {
     const user = userEvent.setup()
     const sourceNode = {
       id: 'billing-source',
@@ -347,18 +372,13 @@ describe('visual pipeline workspace regressions', () => {
 
     render(<App />)
     await screen.findByText('Billing')
-    const prompt = screen.getByRole('textbox', { name: 'What should the DATA LAB agent do?' })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
-    await user.type(prompt, 'Create a new separate workspace for payment incidents')
-    await user.click(screen.getByRole('button', { name: 'Send request to DATA LAB agent' }))
-
-    await waitFor(() => expect(api.commitWorkspace).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith(
-      expect.stringContaining('payment incidents'),
-      expect.objectContaining({ nodes: [], edges: [], versions: [] }),
-    ))
+    expect(screen.queryByRole('textbox', { name: 'What should the DATA LAB agent do?' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
-    expect(screen.queryByText('Billing')).toBeNull()
+    expect(api.commitWorkspace).not.toHaveBeenCalled()
+    expect(api.createWorkspace).not.toHaveBeenCalled()
+    expect(screen.getByText('Billing')).toBeTruthy()
   })
 })
 
