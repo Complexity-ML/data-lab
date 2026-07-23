@@ -60,7 +60,8 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [libraryOpen, setLibraryOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
-  const [operationsPanel, setOperationsPanel] = useState<'actions' | 'logs' | 'reports'>()
+  const [leftOperationsPanel, setLeftOperationsPanel] = useState<'actions' | 'logs'>()
+  const [reportsOpen, setReportsOpen] = useState(false)
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
@@ -124,7 +125,8 @@ export default function App() {
   const reportCount = unresolvedIncidents.length + (pendingProposalIsDistinct ? 1 : 0)
   const activityBusy = agentRunning || playerStarting || reviewAssistantBusy || chatGPTConnecting || appUpdates.busy || Boolean(autonomousStepRequest)
   const agentActionHistory = useMemo(() => actionHistory.filter((entry) => /\b(agent|autonomous|player|proposal|review|controller|iteration)\b/i.test(entry.message)), [actionHistory])
-  const rightPanelOpen = inspectorOpen || Boolean(operationsPanel)
+  const leftPanelOpen = libraryOpen || Boolean(leftOperationsPanel)
+  const rightPanelOpen = inspectorOpen || reportsOpen
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -884,6 +886,14 @@ export default function App() {
     return window.dataLab.exportDiagnostics()
   }
 
+  const clearIncidentReports = async () => {
+    if (!window.dataLab?.clearIncidentEvents) throw new Error('Incident cleanup requires the Electron application')
+    const result = await window.dataLab.clearIncidentEvents()
+    setIncidentEvents([])
+    notifyToast(`${result.deleted} local incident event${result.deleted === 1 ? '' : 's'} removed from this workspace.`, 'success', 'Reports cleared')
+    return result
+  }
+
   const importPipelineJson = async (file: File) => {
     try {
       const artifact = parsePipelineExport(await file.text())
@@ -1025,6 +1035,7 @@ export default function App() {
       appUpdateStatus={appUpdates.status}
       errorCount={errors.length}
       findingCount={issues.length}
+      incidentReportCount={incidentEvents.length}
       initialSection={settingsSection}
       mcpMessage={mcpMessage}
       mcpTransport={mcpTransport}
@@ -1039,6 +1050,7 @@ export default function App() {
       }}
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
       onCheckForAppUpdate={appUpdates.check}
+      onClearIncidentReports={clearIncidentReports}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
       onCancelChatGPTLogin={cancelChatGPTLogin}
@@ -1086,20 +1098,26 @@ export default function App() {
       workspaces={workspacePersistence.workspaces}
     /></Suspense>}
 
-    <section className={`workspace${libraryOpen ? '' : ' library-collapsed'}${rightPanelOpen ? '' : ' inspector-collapsed'}`}>
-      <div aria-hidden={!libraryOpen} className={`library-panel-shell ${libraryOpen ? '' : 'is-closed'}`} id="data-lab-library" inert={!libraryOpen} tabIndex={-1}><CardLibraryView onAddCard={addCard} onClose={() => setLibraryOpen(false)} /></div>
+    <section className={`workspace${leftPanelOpen ? '' : ' library-collapsed'}${rightPanelOpen ? '' : ' inspector-collapsed'}`}>
+      <div aria-hidden={!leftPanelOpen} className={`library-panel-shell ${leftPanelOpen ? '' : 'is-closed'}`} id="data-lab-left-panel" inert={!leftPanelOpen} tabIndex={-1}>
+        {leftOperationsPanel === 'actions'
+          ? <aside aria-label="Agent actions" className="left-operations-panel operations-panel" id="data-lab-actions"><AgentActionsView busy={activityBusy} history={agentActionHistory} onClose={() => setLeftOperationsPanel(undefined)} playerState={playerState} /></aside>
+          : leftOperationsPanel === 'logs'
+            ? <aside aria-label="Live activity log" className="left-operations-panel operations-panel" id="data-lab-live-logs"><LiveActivityView busy={activityBusy} entries={actionHistory} onClose={() => setLeftOperationsPanel(undefined)} /></aside>
+            : <CardLibraryView onAddCard={addCard} onClose={() => setLibraryOpen(false)} />}
+      </div>
 
       <PipelineCanvasView
         activityBusy={activityBusy}
-        actionsOpen={operationsPanel === 'actions'}
+        actionsOpen={leftOperationsPanel === 'actions'}
         contextMenu={contextMenu}
         edges={edges}
         inspectorOpen={inspectorOpen}
         libraryOpen={libraryOpen}
-        logsOpen={operationsPanel === 'logs'}
+        logsOpen={leftOperationsPanel === 'logs'}
         nodes={nodes}
         reportCount={reportCount}
-        reportsOpen={operationsPanel === 'reports'}
+        reportsOpen={reportsOpen}
         onConnect={onConnect}
         onDeleteCard={deleteCard}
         onDrop={dropLibraryCard}
@@ -1108,25 +1126,21 @@ export default function App() {
         onFlowInit={(instance) => { flowInstance.current = instance }}
         onNodeContextMenu={(event, node) => { event.preventDefault(); setSelectedId(node.id); setContextMenu({ nodeId: node.id, label: node.data.label, x: event.clientX, y: event.clientY }) }}
         onNodesChange={onNodesChange}
-        onOpenActions={() => { setInspectorOpen(false); setOperationsPanel('actions') }}
-        onOpenInspector={() => { setOperationsPanel(undefined); setInspectorOpen(true) }}
-        onOpenLibrary={() => setLibraryOpen(true)}
-        onOpenLogs={() => { setInspectorOpen(false); setOperationsPanel('logs') }}
-        onOpenReports={() => { setInspectorOpen(false); setOperationsPanel('reports') }}
+        onOpenActions={() => { setLibraryOpen(false); setLeftOperationsPanel('actions') }}
+        onOpenInspector={() => { setReportsOpen(false); setInspectorOpen(true) }}
+        onOpenLibrary={() => { setLeftOperationsPanel(undefined); setLibraryOpen(true) }}
+        onOpenLogs={() => { setLibraryOpen(false); setLeftOperationsPanel('logs') }}
+        onOpenReports={() => { setInspectorOpen(false); setReportsOpen(true) }}
         onPaneClick={() => setContextMenu(undefined)}
         onSelectNode={setSelectedId}
         theme={theme}
       />
 
-      {operationsPanel === 'actions'
-        ? <aside aria-label="Agent actions" className="inspector-panel operations-panel" id="data-lab-actions"><AgentActionsView busy={activityBusy} history={agentActionHistory} onClose={() => setOperationsPanel(undefined)} playerState={playerState} /></aside>
-        : operationsPanel === 'logs'
-          ? <aside aria-label="Live activity log" className="inspector-panel operations-panel" id="data-lab-live-logs"><LiveActivityView busy={activityBusy} entries={actionHistory} onClose={() => setOperationsPanel(undefined)} /></aside>
-        : operationsPanel === 'reports'
-          ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidentEvents} incidents={incidentSummaries} onClose={() => setOperationsPanel(undefined)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setOperationsPanel(undefined); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
-          : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
-            <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={focusIncidentDiagram} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
-          </aside>}
+      {reportsOpen
+        ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidentEvents} incidents={incidentSummaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
+        : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
+          <CardInspectorView dataHubConnected={connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={focusIncidentDiagram} onInspectDataHubAsset={inspectDataHubAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={searchDataHubAssets} onSelectNode={setSelectedId} onUpdate={updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
+        </aside>}
     </section>
 
     {proposal && !proposalReviewOpen && <button className="proposal-review-reopen" onClick={() => setProposalReviewOpen(true)} type="button"><span aria-hidden="true">✦</span> Review agent proposal</button>}

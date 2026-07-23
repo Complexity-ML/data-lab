@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3, LoaderCircle, PanelRightClose, ScrollText } from 'lucide-react'
+import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, ScrollText } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import type { AgentActionLog } from './AgentActionsView'
 
@@ -10,7 +10,7 @@ interface LiveActivityViewProps {
 
 export function LiveActivityView({ busy, entries, onClose }: LiveActivityViewProps) {
   return <>
-    <PanelHeader action={<button aria-label="Close live logs" className="panel-toggle" onClick={onClose} title="Close live logs" type="button"><PanelRightClose size={16} /></button>} eyebrow="LIVE" title="Activity log" />
+    <PanelHeader action={<button aria-label="Close live logs" className="panel-toggle" onClick={onClose} title="Close live logs" type="button"><PanelLeftClose size={16} /></button>} eyebrow="LIVE" title="Activity log" />
     <div className="live-log-content">
       <div className={`live-log-state ${busy ? 'is-busy' : ''}`}>
         {busy ? <LoaderCircle className="agent-context-wheel" size={17} /> : <ScrollText size={17} />}

@@ -100,6 +100,26 @@ describe('bounded DATA LAB agent tools', () => {
     expect(session.execute('validate_plan', {})).toMatchObject({ ok: true, action_count: 1 })
   })
 
+  it('completes missing Live Monitor bounds inside agent tools', () => {
+    const session = new AgentToolSession(payload)
+    expect(session.execute('add_card', {
+      node_id: 'monitor-orders',
+      kind: 'monitor',
+      label: 'Watch orders',
+      description: 'Watch metadata changes.',
+      owner: 'DATA LAB Agent',
+      rule: 'alert=severity_increase',
+      reason: 'Keep the source under observation.',
+    }).ok).toBe(true)
+
+    expect(session.execute('inspect_graph', { node_ids: ['monitor-orders'] }).queued_actions).toEqual([
+      expect.objectContaining({
+        kind: 'monitor',
+        rule: expect.stringMatching(/on_change\(metadata_fingerprint\).*cooldown=60s.*max_iterations=10/),
+      }),
+    ])
+  })
+
   it('exposes host-owned incident context without granting an incident mutation tool', () => {
     const session = new AgentToolSession({
       ...payload,

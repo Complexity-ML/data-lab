@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3, LoaderCircle, PanelRightClose, Pause, Play, Square } from 'lucide-react'
+import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, Pause, Play, Square } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import type { AgentPlayerState } from '../components/AppHeader'
 
@@ -18,7 +18,7 @@ interface AgentActionsViewProps {
 export function AgentActionsView({ busy, history, onClose, playerState }: AgentActionsViewProps) {
   const StateIcon = playerState === 'running' ? Play : playerState === 'paused' ? Pause : Square
   return <>
-    <PanelHeader action={<button aria-label="Close agent actions" className="panel-toggle" onClick={onClose} title="Close agent actions" type="button"><PanelRightClose size={16} /></button>} eyebrow="ACT" title="Agent actions" />
+    <PanelHeader action={<button aria-label="Close agent actions" className="panel-toggle" onClick={onClose} title="Close agent actions" type="button"><PanelLeftClose size={16} /></button>} eyebrow="ACT" title="Agent actions" />
     <div className="actions-panel-content">
       <section className={`action-current ${busy ? 'is-busy' : ''}`}>
         <span>{busy ? <LoaderCircle className="agent-context-wheel" size={18} /> : <StateIcon size={18} />}</span>

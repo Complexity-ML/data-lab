@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Bot, CheckCircle2, Database, Download, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, ShieldCheck, Sun, UserRound, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, CheckCircle2, Database, Download, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, ShieldCheck, Sun, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
@@ -31,6 +31,7 @@ interface SettingsModalProps {
   }
   errorCount: number
   findingCount: number
+  incidentReportCount: number
   mcpMessage: string
   mcpTransport: 'demo' | 'http' | 'stdio'
   initialSection?: SettingsSection
@@ -38,6 +39,7 @@ interface SettingsModalProps {
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
   onCheckForAppUpdate: () => Promise<AppUpdateStatus>
+  onClearIncidentReports: () => Promise<{ deleted: number; workspaceId?: string }>
   onClose: () => void
   onCancelChatGPTLogin: () => Promise<void>
   onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
@@ -84,7 +86,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -99,6 +101,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [diagnosticBundle, setDiagnosticBundle] = useState<DiagnosticBundle>()
   const [diagnosticSettings, setDiagnosticSettings] = useState<DiagnosticSettings>({ enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false)
+  const [reportsClearArmed, setReportsClearArmed] = useState(false)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
@@ -107,6 +110,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const diagnosticLoaderRef = useRef(onLoadDiagnostics)
 
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
+  useEffect(() => { if (activeSection !== 'diagnostics') setReportsClearArmed(false) }, [activeSection])
   useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
   useEffect(() => { setDataHubWriteback(dataHubSettings.writebackEnabled) }, [dataHubSettings.writebackEnabled])
   useEffect(() => { diagnosticLoaderRef.current = onLoadDiagnostics }, [onLoadDiagnostics])
@@ -151,6 +155,16 @@ export function SettingsModal(props: SettingsModalProps) {
       setDiagnosticSettings(saved)
       setDiagnosticBundle(await onLoadDiagnostics())
     } catch (error) { notifyError(error, 'Unable to save diagnostic settings') }
+    finally { setDiagnosticsBusy(false) }
+  }
+
+  const clearReports = async () => {
+    if (!reportsClearArmed) { setReportsClearArmed(true); return }
+    setDiagnosticsBusy(true)
+    try {
+      await onClearIncidentReports()
+      setReportsClearArmed(false)
+    } catch (error) { notifyError(error, 'Unable to clear incident reports') }
     finally { setDiagnosticsBusy(false) }
   }
 
@@ -392,6 +406,7 @@ export function SettingsModal(props: SettingsModalProps) {
               <label className="settings-field"><span>Maximum events</span><select disabled={!diagnosticSettings.enabled} onChange={(event) => setDiagnosticSettings((current) => ({ ...current, maximumEvents: Number(event.target.value) }))} value={diagnosticSettings.maximumEvents}><option value={100}>100</option><option value={500}>500</option><option value={1000}>1,000</option><option value={2000}>2,000</option></select></label>
             </div>
             <div className="diagnostic-storage-summary"><Activity size={17} /><div><strong>{diagnosticBundle?.events.length ?? 0} sanitized technical event{diagnosticBundle?.events.length === 1 ? '' : 's'} stored</strong><small>The agent receives only compact recent warnings and errors as reliability context. Raw secrets never enter its prompt.</small></div></div>
+            <div className="report-storage-summary"><Trash2 size={17} /><div><strong>{incidentReportCount} incident report event{incidentReportCount === 1 ? '' : 's'} in this workspace</strong><small>Clear only the local Reports history. Graph cards, versions, diagnostics and other workspaces are preserved.</small></div><ActionButton className={reportsClearArmed ? 'is-confirming' : ''} disabled={diagnosticsBusy || incidentReportCount === 0} icon={<Trash2 size={14} />} onClick={() => void clearReports()} variant="ghost">{reportsClearArmed ? 'Confirm clear reports' : 'Clear incident reports'}</ActionButton></div>
             <div className="diagnostics-actions"><ActionButton disabled={diagnosticsBusy} icon={<Save size={14} />} onClick={() => void saveDiagnostics()} variant="primary">{diagnosticsBusy ? 'Saving…' : 'Save diagnostic settings'}</ActionButton><ActionButton disabled={diagnosticsBusy} icon={<RefreshCw className={diagnosticsBusy ? 'agent-context-wheel' : ''} size={14} />} onClick={() => void refreshDiagnostics()} variant="ghost">Refresh status</ActionButton><ActionButton icon={<FolderOpen size={15} />} onClick={() => void onOpenDiagnosticLogs()}>Open local logs</ActionButton><ActionButton icon={<FileDown size={15} />} onClick={() => void onExportDiagnostics()}>Export sanitized bundle</ActionButton></div>
           </section>
         </article>}

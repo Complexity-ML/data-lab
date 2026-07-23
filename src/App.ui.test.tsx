@@ -108,6 +108,7 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
     recordDiagnostic: vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() })),
     listIncidentEvents: vi.fn(async () => []),
     recordIncidentEvent: vi.fn(async () => ({ recorded: true })),
+    clearIncidentEvents: vi.fn(async () => ({ deleted: 0 })),
     loadWorkspaceState: vi.fn(async () => state),
     autosaveWorkspace,
     resolveWorkspaceRecovery: vi.fn(async () => ({ ...state, recovery: undefined, uncleanShutdown: false })),
@@ -286,15 +287,17 @@ describe('visual pipeline workspace regressions', () => {
     const actionsSticker = screen.getByRole('button', { name: 'Open agent actions' })
     expect(actionsSticker.querySelector('em')).toBeNull()
     await user.click(actionsSticker)
-    expect(screen.getByRole('button', { name: 'Close agent actions' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close agent actions' }).closest('#data-lab-left-panel')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open card library' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open live logs' }))
-    expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close live logs' }).closest('#data-lab-left-panel')).toBeTruthy()
     expect(screen.getByText('Simple session timeline · newest first')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
     expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
     expect(screen.getByText('No unresolved incident')).toBeTruthy()
 
     const inspectorSticker = screen.getByRole('button', { name: 'Open inspector' })
@@ -357,6 +360,16 @@ describe('visual pipeline workspace regressions', () => {
       settings: { enabled: true, level: 'all' as const, retentionDays: 7, maximumEvents: 500 },
       events: [{ id: 'event-1', timestamp: '2026-07-23T22:59:59.000Z', category: 'provider' as const, action: 'chatgpt.connect.waiting', status: 'info' as const, detail: { stage: 'browser-approval' } }],
     }))
+    api.listIncidentEvents = vi.fn(async () => [{
+      id: 'incident-1',
+      incidentKey: 'orders-drift',
+      transition: 'opened' as const,
+      severity: 'warning' as const,
+      title: 'Orders drift',
+      detail: 'Schema changed.',
+      createdAt: '2026-07-23T22:58:00.000Z',
+    }])
+    api.clearIncidentEvents = vi.fn(async () => ({ deleted: 1 }))
 
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Open settings' }))
@@ -366,6 +379,13 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('Keep a local technical log')).toBeTruthy()
     expect(screen.getByText('1 sanitized technical event stored')).toBeTruthy()
     expect(screen.queryByText('chatgpt.connect.waiting')).toBeNull()
+    expect(await screen.findByText('1 incident report event in this workspace')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Clear incident reports' }))
+    expect(screen.getByRole('button', { name: 'Confirm clear reports' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Confirm clear reports' }))
+    await waitFor(() => expect(api.clearIncidentEvents).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('0 incident report events in this workspace')).toBeTruthy()
   })
 
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {

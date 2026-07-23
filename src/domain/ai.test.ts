@@ -3,6 +3,40 @@ import { materializeAiProposal, type AiProposalResponse } from './ai'
 import type { PipelineNode } from './pipeline'
 
 describe('AI proposal materialization', () => {
+  it('completes a bounded Live Monitor contract before graph validation', () => {
+    const response: AiProposalResponse = {
+      model: 'test-model',
+      proposal: {
+        title: 'Monitor governed metadata',
+        summary: 'Add a bounded monitor.',
+        rationale: 'Continuous evidence needs a safe polling contract.',
+        requires_human_review: false,
+        confidence: 0.95,
+        writeback: 'none',
+        evidence: [],
+        actions: [{
+          type: 'add_card',
+          node_id: 'monitor-orders',
+          kind: 'monitor',
+          label: 'Watch orders',
+          description: 'Watch metadata changes.',
+          owner: 'DATA LAB Agent',
+          rule: 'alert=severity_increase',
+          source: null,
+          target: null,
+          source_handle: null,
+          reason: 'Monitor the governed source.',
+        }],
+      },
+    }
+
+    const monitor = materializeAiProposal(response, [], []).addedNodes[0]
+    expect(monitor?.data.rule).toContain('alert=severity_increase')
+    expect(monitor?.data.rule).toContain('on_change(metadata_fingerprint)')
+    expect(monitor?.data.rule).toContain('cooldown=60s')
+    expect(monitor?.data.rule).toContain('max_iterations=10')
+  })
+
   it('accepts an update to an existing Human Review checkpoint', () => {
     const review: PipelineNode = {
       id: 'review-existing',
