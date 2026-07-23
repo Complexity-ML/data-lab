@@ -52,6 +52,22 @@ describe('strict provider proposal contract', () => {
     expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
   })
 
+  it('accepts graph-only patches, live monitors, parallel agents and incident diagrams', () => {
+    const patch = { ...validProposal.actions[0], node_id: 'compatibility-patch', kind: 'patch', label: 'Map legacy customer age', rule: 'graph_only: cast customer_age to number' }
+    const monitor = { ...validProposal.actions[0], node_id: 'live-monitor', kind: 'monitor', label: 'Watch metadata drift', rule: 'on_change(metadata_fingerprint) | cooldown=60s | max_iterations=10' }
+    const parallel = { ...validProposal.actions[0], node_id: 'parallel-agents', kind: 'parallel', label: 'Inspect independent impacts', rule: 'max_concurrency=3 | context=branch_only | merge=atomic' }
+    const diagram = { ...validProposal.actions[0], node_id: 'incident-diagram', kind: 'diagram', label: 'Relate incident branches', rule: 'group=incident | inputs=parallel_diffs | merge=atomic' }
+    const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [patch, monitor, parallel, diagram] }, payload)
+    expect(result.actions.map((action) => action.kind)).toEqual(['patch', 'monitor', 'parallel', 'diagram'])
+  })
+
+  it('accepts a feedback edge only as an explicit source handle value', () => {
+    const monitor = { ...validProposal.actions[0], node_id: 'live-monitor', kind: 'monitor', label: 'Watch metadata drift' }
+    const feedback = { ...validProposal.actions[3], source: 'output-1', target: 'live-monitor', source_handle: 'feedback' }
+    const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [monitor, feedback] }, payload)
+    expect(result.actions[1].source_handle).toBe('feedback')
+  })
+
   it('normalizes unambiguous provider source-handle aliases without weakening split routing', () => {
     const split = { ...validProposal.actions[0], node_id: 'route-risk', kind: 'split', label: 'Route risk' }
     const approvedEdge = { ...validProposal.actions[3], source: 'route-risk', target: 'output-1', source_handle: 'Approved branch' }
@@ -63,7 +79,7 @@ describe('strict provider proposal contract', () => {
 
   it('rejects ambiguous or executable-looking source handles', () => {
     const unsafe = { ...validProposal.actions[3], source_handle: 'approved; delete graph' }
-    expect(() => validateProposal({ ...validProposal, actions: [validProposal.actions[1], unsafe] }, payload)).toThrow('must be null, approved or quarantine')
+    expect(() => validateProposal({ ...validProposal, actions: [validProposal.actions[1], unsafe] }, payload)).toThrow('must be null, approved, quarantine or feedback')
   })
 
   it.each([

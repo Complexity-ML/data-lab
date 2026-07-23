@@ -12,11 +12,13 @@ import {
   createWorkspace,
   duplicateWorkspace,
   listWorkspaces,
+  listIncidentEvents,
   loadAppSetting,
   loadSavedWorkspace,
   loadWorkspaceManagerState,
   markWorkspaceSessionClean,
   openWorkspace,
+  recordIncidentEvent,
   renameWorkspace,
   resolveWorkspaceRecovery,
   saveAppSetting,
@@ -145,5 +147,49 @@ describe('SQLite workspace persistence', () => {
 
     expect(loadAppSetting(target, 'active-ai-provider')).toBe('anthropic')
     expect(loadSavedWorkspace(target)).toEqual({ projectTitle: 'Committed graph' })
+  })
+
+  it('stores a bounded incident lifecycle in the active workspace and suppresses duplicate noise', () => {
+    const target = directory('incidents')
+    createWorkspace(target, 'Monitored graph', { projectTitle: 'Monitored graph' })
+    const opened = recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Customer evidence unavailable',
+      detail: 'get_entities timed out',
+      cardId: 'customers-source',
+    })
+    expect(opened.recorded).toBe(true)
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Customer evidence unavailable',
+      detail: 'same timeout',
+    }).recorded).toBe(false)
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'opened',
+      severity: 'critical',
+      title: 'Customer evidence unavailable',
+      detail: 'all metadata reads timed out',
+    }).event?.transition).toBe('worsened')
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'recovered',
+      severity: 'info',
+      title: 'Customer evidence available',
+      detail: 'all required metadata reads returned',
+    }).recorded).toBe(true)
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'datahub-evidence:customers',
+      transition: 'recovered',
+      severity: 'info',
+      title: 'Customer evidence available',
+      detail: 'still healthy',
+    }).recorded).toBe(false)
+
+    expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['recovered', 'worsened', 'opened'])
   })
 })

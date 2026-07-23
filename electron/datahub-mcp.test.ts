@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, parseDataHubDecisionRequest, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -51,6 +51,14 @@ describe('DataHub MCP connection settings', () => {
     const names = await resolveReadableToolNames(async () => { throw new Error('tool discovery timed out') })
     expect([...names].sort()).toEqual(['get_entities', 'get_lineage', 'list_schema_fields', 'search'])
     expect(names.has('save_document')).toBe(false)
+  })
+
+  it('advertises write-back only for an explicit non-read-only save_document tool', () => {
+    expect(hasExplicitDataHubWritebackTool(undefined)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document' }] } as never)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document', annotations: { readOnlyHint: true } }] } as never)).toBe(false)
+    expect(hasExplicitDataHubWritebackTool({ tools: [{ name: 'save_document', annotations: { readOnlyHint: false } }] } as never)).toBe(true)
+    expect(getDataHubMcpConfigurationStatus().writebackAvailable).toBe(false)
   })
 
   it('uses the discovered tool catalog when it is available', async () => {

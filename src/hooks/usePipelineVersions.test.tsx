@@ -75,6 +75,8 @@ describe('agent proposal approval', () => {
     expect(result.current.edges).toEqual([edge])
     expect(result.current.currentProposal).toBeUndefined()
     expect(result.current.versions.at(-1)?.status).toBe('committed')
+    expect(result.current.versions.at(-1)?.blockingIssues).toBe(0)
     expect(result.current.activity).toContain('Change approved')
+    expect(result.current.activity).toContain('readiness')
   })
 })

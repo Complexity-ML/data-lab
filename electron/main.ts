@@ -5,13 +5,14 @@ import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, parseDataHubDecisionRequest, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
+import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
 import { ensureDiagnosticLog, exportDiagnosticBundle, recordDiagnosticEvent } from './diagnostics.js'
 import { AppUpdateController } from './app-updater.js'
 import { parseUpdateChannel } from './update-policy.js'
 import { desktopWindowFrame } from './window-platform.js'
+import { openSetupUpdater, readSetupChannel, saveSetupChannel } from './setup-updater.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -54,6 +55,8 @@ const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
 const diagnosticsExportChannel = 'data-lab:diagnostics-export'
 const diagnosticsOpenChannel = 'data-lab:diagnostics-open'
+const incidentsListChannel = 'data-lab:incidents-list'
+const incidentsRecordChannel = 'data-lab:incidents-record'
 const applicationRestartChannel = 'data-lab:application-restart'
 const appUpdateStatusChannel = 'data-lab:app-update-status'
 const appUpdateStatusChangedChannel = 'data-lab:app-update-status-changed'
@@ -61,6 +64,7 @@ const appUpdateSetChannel = 'data-lab:app-update-set-channel'
 const appUpdateCheckChannel = 'data-lab:app-update-check'
 const appUpdateDownloadChannel = 'data-lab:app-update-download'
 const appUpdateInstallChannel = 'data-lab:app-update-install'
+const appUpdateOpenSetupChannel = 'data-lab:app-update-open-setup'
 let mainWindow: BrowserWindow | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
@@ -198,8 +202,10 @@ function createMainWindow() {
 app.whenReady().then(() => {
   workspaceSessionWasUnclean = beginWorkspaceSession(app.getPath('userData'))
   configureApplicationMenu()
+  const persistedUpdateChannel = parseUpdateChannel(readSetupChannel(app.getPath('userData')) ?? loadAppSetting(app.getPath('userData'), 'app-update-channel'))
+  saveAppSetting(app.getPath('userData'), 'app-update-channel', persistedUpdateChannel)
   appUpdates = new AppUpdateController({
-    channel: parseUpdateChannel(loadAppSetting(app.getPath('userData'), 'app-update-channel')),
+    channel: persistedUpdateChannel,
     currentVersion: app.getVersion(),
     execPath: process.execPath,
     isPackaged: app.isPackaged,
@@ -291,6 +297,8 @@ app.whenReady().then(() => {
     shell.showItemInFolder(path)
     return { opened: true, path }
   })
+  ipcMain.handle(incidentsListChannel, () => listIncidentEvents(app.getPath('userData')))
+  ipcMain.handle(incidentsRecordChannel, (_event, payload: unknown) => recordIncidentEvent(app.getPath('userData'), payload))
   ipcMain.handle(applicationRestartChannel, () => {
     setTimeout(() => { app.relaunch(); app.quit() }, 80)
     return { restarting: true }
@@ -299,10 +307,16 @@ app.whenReady().then(() => {
   ipcMain.handle(appUpdateSetChannel, (_event, payload: { channel?: unknown }) => {
     if (payload?.channel !== 'stable' && payload?.channel !== 'main') throw new Error('Invalid application update channel')
     saveAppSetting(app.getPath('userData'), 'app-update-channel', payload.channel)
+    saveSetupChannel(app.getPath('userData'), payload.channel)
     return appUpdates?.setChannel(payload.channel)
   })
   ipcMain.handle(appUpdateCheckChannel, () => appUpdates?.check())
   ipcMain.handle(appUpdateDownloadChannel, () => appUpdates?.download())
+  ipcMain.handle(appUpdateOpenSetupChannel, () => {
+    const channel = appUpdates?.getStatus().channel ?? 'stable'
+    saveAppSetting(app.getPath('userData'), 'app-update-channel', channel)
+    return openSetupUpdater(app.getPath('userData'), channel)
+  })
   ipcMain.handle(appUpdateInstallChannel, async (event) => {
     const status = appUpdates?.getStatus()
     if (!status?.canInstall) throw new Error('No verified update is ready to install')

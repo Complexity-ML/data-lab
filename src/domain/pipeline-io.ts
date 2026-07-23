@@ -5,7 +5,7 @@ import type { DataHubEvidence } from './datahub'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
-const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function redactExportText(value: string) {
   return value
@@ -71,6 +71,10 @@ function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
     datahubTags: Array.isArray(data.datahubTags) ? data.datahubTags.filter((tag): tag is string => typeof tag === 'string').slice(0, 100) : undefined,
     datahubQuality: quality,
     profile: cleanProfile(data.profile),
+    patchScope: kind === 'patch' ? 'graph-only' : undefined,
+    monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
+    parallelMode: kind === 'parallel' ? 'branch-fanout' : undefined,
+    diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
     pinned: data.pinned === true,
   }
 }
@@ -103,7 +107,8 @@ function cleanEdges(value: unknown, nodeIds: Set<string>): Edge[] {
     if (!id || ids.has(id)) throw new Error(`Edge ${index + 1} has a missing or duplicate ID`)
     if (!nodeIds.has(from) || !nodeIds.has(target)) throw new Error(`Edge ${id} references a missing card`)
     ids.add(id)
-    return { id, source: from, target, type: 'elastic', sourceHandle: source.sourceHandle === 'approved' || source.sourceHandle === 'quarantine' ? source.sourceHandle : undefined }
+    const sourceHandle = source.sourceHandle === 'approved' || source.sourceHandle === 'quarantine' || source.sourceHandle === 'feedback' ? source.sourceHandle : undefined
+    return { id, source: from, target, type: 'elastic', sourceHandle, label: sourceHandle === 'feedback' ? 'next iteration' : undefined }
   })
 }
 

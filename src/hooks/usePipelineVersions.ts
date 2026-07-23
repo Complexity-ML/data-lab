@@ -58,6 +58,11 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     }
     const layouted = layoutPipeline(next.nodes, next.edges)
     const version = createPipelineVersion(layouted, next.edges, proposal.title, 'agent', nextIssues)
+    // A safe incremental graph transaction may still have pipeline-readiness
+    // findings (for example, no Output card yet). Keep this field scoped to
+    // atomic transaction blockers so committed revisions never claim that
+    // their atomic validation failed.
+    version.blockingIssues = blocking.length
     version.evidence = proposal.evidence
     setNodes(layouted)
     setEdges(next.edges)
@@ -91,7 +96,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     const layouted = layoutPipeline(version.nodes, version.edges)
     setNodes(layouted)
     setEdges(version.edges)
-    setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, status: 'committed' as const } : candidate))
+    setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, blockingIssues: 0, status: 'committed' as const } : candidate))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
     setSelectedId(layouted[0]?.id ?? '')
     const readinessErrors = versionIssues.filter((issue) => issue.severity === 'error').length - blocking.length

@@ -9,8 +9,8 @@ import { graphPerformanceTargets } from '../domain/performance'
 const nodeTypes: NodeTypes = { pipeline: PipelineCard }
 const edgeTypes: EdgeTypes = { elastic: ElasticEdge }
 const miniMapColors: Record<CardKind, string> = {
-  source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', split: '#ddd6fe', decision: '#e9d5ff',
-  transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
+  source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', patch: '#fbcfe8', monitor: '#a5f3fc', parallel: '#c4b5fd', diagram: '#fde68a',
+  split: '#ddd6fe', decision: '#e9d5ff', transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
 }
 
 interface PipelineCanvasViewProps {
@@ -24,7 +24,7 @@ interface PipelineCanvasViewProps {
   onDrop(event: DragEvent<HTMLDivElement>): void
   onEdgesChange(changes: EdgeChange<Edge>[]): void
   onEditCard(nodeId: string, label: string): void
-  onFlowInit(instance: { fitView(options?: { duration?: number; padding?: number }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } }): void
+  onFlowInit(instance: { fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } }): void
   onNodeContextMenu(event: MouseEvent<Element>, node: PipelineNode): void
   onNodesChange(changes: NodeChange<PipelineNode>[]): void
   onOpenInspector(): void

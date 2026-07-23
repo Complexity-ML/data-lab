@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, PanelRightClose, Sparkles } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Focus, PanelRightClose, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
@@ -19,11 +19,12 @@ interface CardInspectorViewProps {
   onSearchDataHub(query: string): Promise<DataHubAssetSummary[]>
   onAgentRework(): void
   onClose(): void
+  onFocusDiagram(nodeId: string): void
   onSelectNode(nodeId: string): void
   onUpdate(patch: Partial<PipelineNode['data']>): void
 }
 
-export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBindDataHubSource, onClose, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, selected, workbenchAssets }: CardInspectorViewProps) {
+export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBindDataHubSource, onClose, onFocusDiagram, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, selected, workbenchAssets }: CardInspectorViewProps) {
   const [lineageExpanded, setLineageExpanded] = useState(false)
   useEffect(() => setLineageExpanded(false), [selected?.id])
   const role = selected ? cardRoleContracts[selected.data.kind] : undefined
@@ -33,6 +34,7 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
     <PanelHeader action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
     {selected ? <div className="inspector-form">
       <section className="card-agent-workspace"><div><Sparkles size={15} /><span><strong>Agent workspace</strong><small>Analyze and rework this card from DataHub context.</small></span></div><button onClick={onAgentRework} type="button">Ask agent to rework</button></section>
+      {selected.data.kind === 'diagram' && <section className="diagram-focus"><div><Focus size={15} /><span><strong>Incident workstream</strong><small>Frame the parallel incident branches merged by this diagram.</small></span></div><button onClick={() => onFocusDiagram(selected.id)} type="button">Focus subgraph</button></section>}
       {role && <section className="role-contract"><div><small>AGENT ROLE</small><strong>{role.role}</strong><p>{role.mission}</p></div><dl><div><dt>Input</dt><dd>{role.input}</dd></div><div><dt>Output</dt><dd>{role.output}</dd></div><div><dt>Tools</dt><dd>{role.allowedTools.length ? role.allowedTools.join(' · ') : 'No external tools'}</dd></div></dl></section>}
       {selected.data.kind === 'source' && <DataHubAssetPicker connected={dataHubConnected} onBind={onBindDataHubSource} onInspect={onInspectDataHubAsset} onOpenSettings={onOpenDataHubSettings} onSearch={onSearchDataHub} />}
       <label>Card name<input value={selected.data.label} onChange={(event) => onUpdate({ label: event.target.value })} /></label>

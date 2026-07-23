@@ -19,12 +19,14 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('demo')
   const [mcpTransport, setMcpTransport] = useState<McpTransport>('demo')
   const [mcpMessage, setMcpMessage] = useState('Local demo context')
+  const [writebackAvailable, setWritebackAvailable] = useState(false)
   const [settings, setSettings] = useState<DataHubConnectionSettings>(disconnectedSettings)
 
   const applyStatus = (status: Awaited<ReturnType<NonNullable<typeof window.dataLab>['getDataHubMcpStatus']>>) => {
     setConnectionMode(status.mode)
     setMcpTransport(status.transport)
     setMcpMessage(status.message)
+    setWritebackAvailable(status.writebackAvailable)
     setSettings(status.settings)
   }
 
@@ -53,6 +55,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
       notifyError(error, 'DataHub MCP connection failed')
       recordDiagnostic({ category: 'mcp', action: 'connection.sync', status: 'error', detail: { message: error instanceof Error ? error.message : 'unknown error' } })
       setConnectionMode('demo')
+      setWritebackAvailable(false)
       setMcpMessage(error instanceof Error ? error.message : 'unknown error')
       setActivity(`DataHub MCP connection failed · ${error instanceof Error ? error.message : 'unknown error'}`)
     }
@@ -85,5 +88,5 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     return window.dataLab.writeDataHubDecision(payload)
   }
 
-  return { connectionMode, inspectAsset, invalidateContext, mcpMessage, mcpTransport, recordAudit, saveSettings, searchAssets, settings, syncDataHub, writeDecision }
+  return { connectionMode, inspectAsset, invalidateContext, mcpMessage, mcpTransport, recordAudit, saveSettings, searchAssets, settings, syncDataHub, writebackAvailable, writeDecision }
 }

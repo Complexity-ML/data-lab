@@ -61,7 +61,7 @@ export interface AiProposalResponse {
   usage?: unknown
 }
 
-const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
@@ -75,6 +75,10 @@ function text(value: unknown, fallback = '', limit = 800) {
 function nodePatch(action: AiAction): Partial<PipelineNodeData> {
   const patch: Partial<PipelineNodeData> = { status: 'draft', agentAdded: true }
   if (action.kind && kinds.has(action.kind)) patch.kind = action.kind
+  if (action.kind === 'patch') patch.patchScope = 'graph-only'
+  if (action.kind === 'monitor') patch.monitorMode = 'event-loop'
+  if (action.kind === 'parallel') patch.parallelMode = 'branch-fanout'
+  if (action.kind === 'diagram') patch.diagramMode = 'incident-workstream'
   if (text(action.label)) patch.label = text(action.label, '', 120)
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
@@ -116,6 +120,10 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         status: 'draft',
         schema: [],
         agentAdded: true,
+        patchScope: action.kind === 'patch' ? 'graph-only' : undefined,
+        monitorMode: action.kind === 'monitor' ? 'event-loop' : undefined,
+        parallelMode: action.kind === 'parallel' ? 'branch-fanout' : undefined,
+        diagramMode: action.kind === 'diagram' ? 'incident-workstream' : undefined,
       },
     })
   }
@@ -141,7 +149,8 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         let suffix = index + 1
         while (knownEdgeIds.has(id)) id = `${base}-${suffix++}`
         knownEdgeIds.add(id)
-        addedEdges.push({ id, source, target, sourceHandle: text(action.source_handle) || undefined, type: 'elastic' })
+        const sourceHandle = text(action.source_handle) || undefined
+        addedEdges.push({ id, source, target, sourceHandle, type: 'elastic', label: sourceHandle === 'feedback' ? 'next iteration' : undefined })
       }
     }
     if (action.type === 'remove_edge') {

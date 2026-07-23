@@ -24,6 +24,7 @@ describe('DataHub lineage impact', () => {
       onAgentRework={vi.fn()}
       onBindDataHubSource={vi.fn()}
       onClose={vi.fn()}
+      onFocusDiagram={vi.fn()}
       onInspectDataHubAsset={vi.fn()}
       onOpenDataHubSettings={vi.fn()}
       onSearchDataHub={vi.fn()}

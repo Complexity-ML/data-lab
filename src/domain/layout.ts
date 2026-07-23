@@ -194,22 +194,23 @@ export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
  * Pass nodeIds to arrange only agent-created cards while preserving user work.
  */
 export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: Iterable<string>): PipelineNode[] {
+  const iterationEdges = edges.filter((edge) => edge.sourceHandle !== 'feedback')
   const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
   const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
   if (arranged.size === 0) return nodes
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => ({ ...node.position }))
   const positions = new Map<string, Position>()
-  const components = connectedComponents(nodes, edges, arranged)
+  const components = connectedComponents(nodes, iterationEdges, arranged)
   let fullCursorY = layoutStartY
 
   try {
     for (const componentIds of components) {
       const ids = new Set(componentIds)
       const localNodes = nodes.filter((node) => ids.has(node.id))
-      const localEdges = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+      const localEdges = iterationEdges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
       const local = layoutComponent(localNodes, localEdges)
-      const incomingAnchors = edges
+      const incomingAnchors = iterationEdges
         .filter((edge) => !arranged.has(edge.source) && ids.has(edge.target))
         .map((edge) => nodes.find((node) => node.id === edge.source))
         .filter((node): node is PipelineNode => Boolean(node))
