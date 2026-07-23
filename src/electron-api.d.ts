@@ -79,6 +79,7 @@ declare global {
       cancelAiProposal(): Promise<{ cancelled: boolean }>
       getChatGPTStatus(): Promise<ChatGPTSessionStatus>
       connectChatGPT(): Promise<ChatGPTSessionStatus>
+      cancelChatGPTLogin(): Promise<{ cancelled: boolean }>
       disconnectChatGPT(): Promise<ChatGPTSessionStatus>
       configureChatGPT(payload: { model: string; effort: string }): Promise<ChatGPTSessionStatus>
       runChatGPTProposal(payload: unknown): Promise<AiProposalResponse>

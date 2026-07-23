@@ -3,14 +3,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, decryptions: 0 }))
+const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, availabilityChecks: 0, decryptions: 0 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => electronState.directory },
   safeStorage: {
     decryptString: (buffer: Buffer) => { electronState.decryptions += 1; return buffer.toString('utf8').replace(/^encrypted:/, '') },
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
-    isEncryptionAvailable: () => electronState.encryptionAvailable,
+    isEncryptionAvailable: () => { electronState.availabilityChecks += 1; return electronState.encryptionAvailable },
   },
 }))
 
@@ -22,6 +22,7 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'data-lab-ai-provider-'))
   electronState.directory = directory
   electronState.encryptionAvailable = true
+  electronState.availabilityChecks = 0
   electronState.decryptions = 0
   process.env.OPENAI_API_KEY = ''
   process.env.ANTHROPIC_API_KEY = ''
@@ -34,15 +35,24 @@ afterEach(() => {
 })
 
 describe('secure provider credential lifecycle', () => {
+  it('reports startup status without probing or opening operating-system secure storage', async () => {
+    const status = await getAiStatus()
+    expect(status.providers.openai.credentialSource).toBe('none')
+    expect(electronState.availabilityChecks).toBe(0)
+    expect(electronState.decryptions).toBe(0)
+  })
+
   it('saves, rotates and removes each provider key independently without exposing it to the renderer status', async () => {
     await saveAiSettings({ provider: 'openai', apiKey: 'sk-first-secret' })
     await saveAiSettings({ provider: 'anthropic', apiKey: 'key-anthropic-secret' })
     await saveAiSettings({ provider: 'openai', apiKey: 'sk-rotated-secret' })
 
+    electronState.availabilityChecks = 0
     const status = await getAiStatus()
     expect(status.providers.openai).toMatchObject({ connected: true, credentialSource: 'encrypted' })
     expect(status.providers.anthropic).toMatchObject({ connected: true, credentialSource: 'encrypted' })
     expect(JSON.stringify(status)).not.toContain('secret')
+    expect(electronState.availabilityChecks).toBe(0)
     expect(electronState.decryptions).toBe(0)
 
     const stored = readFileSync(join(directory, 'ai-provider.json'), 'utf8')

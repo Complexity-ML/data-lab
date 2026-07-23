@@ -41,6 +41,7 @@ interface SettingsModalProps {
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
   onCheckForAppUpdate: () => Promise<AppUpdateStatus>
   onClose: () => void
+  onCancelChatGPTLogin: () => Promise<void>
   onConfigureChatGPT: (configuration: { model: string; effort: string }) => Promise<void>
   onConnectChatGPT: () => Promise<void>
   onCreateWorkspace: (name: string) => Promise<void>
@@ -82,10 +83,11 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentEvents, incidentSummaries, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
+  const [chatGPTConnecting, setChatGPTConnecting] = useState(false)
   const [aiFeedback, setAiFeedback] = useState('')
   const [dataHubBusy, setDataHubBusy] = useState(false)
   const [dataHubFeedback, setDataHubFeedback] = useState('')
@@ -96,6 +98,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
   const dataHubTokenRef = useRef<HTMLInputElement>(null)
+  const chatGPTConnectEpoch = useRef(0)
 
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
   useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
@@ -205,15 +208,38 @@ export function SettingsModal(props: SettingsModalProps) {
   }
 
   const connectChatGPTAccount = async () => {
+    const attempt = ++chatGPTConnectEpoch.current
     setAiBusy(true)
+    setChatGPTConnecting(true)
     setAiFeedback('Opening the secure ChatGPT sign-in…')
     try {
       await onConnectChatGPT()
+      if (chatGPTConnectEpoch.current !== attempt) return
       setAiFeedback('ChatGPT account connected and selected for the next agent request.')
     } catch (error) {
+      if (chatGPTConnectEpoch.current !== attempt) return
       notifyError(error, 'Unable to connect the ChatGPT account')
       setAiFeedback(error instanceof Error ? error.message : 'Unable to connect the ChatGPT account.')
-    } finally { setAiBusy(false) }
+    } finally {
+      if (chatGPTConnectEpoch.current === attempt) {
+        setChatGPTConnecting(false)
+        setAiBusy(false)
+      }
+    }
+  }
+
+  const cancelChatGPTAccountLogin = async () => {
+    chatGPTConnectEpoch.current += 1
+    setChatGPTConnecting(false)
+    setAiBusy(false)
+    setAiFeedback('Cancelling ChatGPT sign-in…')
+    try {
+      await onCancelChatGPTLogin()
+      setAiFeedback('ChatGPT sign-in cancelled. You can retry safely.')
+    } catch (error) {
+      notifyError(error, 'Unable to cancel the ChatGPT sign-in')
+      setAiFeedback(error instanceof Error ? error.message : 'Unable to cancel the ChatGPT sign-in.')
+    }
   }
 
   const disconnectChatGPTAccount = async () => {
@@ -348,7 +374,9 @@ export function SettingsModal(props: SettingsModalProps) {
               <div className="chatgpt-account-status"><CheckCircle2 size={19} /><div><strong>{chatGPTStatus.email ?? 'ChatGPT account connected'}</strong><small>{chatGPTStatus.planType ? `${chatGPTStatus.planType} plan` : 'Codex account session'} · no API key required</small></div></div>
               {chatGPTModel && <div className="ai-option-grid"><label className="settings-field"><span>ChatGPT model</span><select onChange={(event) => { const model = chatGPTStatus.models?.find((item) => item.id === event.target.value); if (model) void onConfigureChatGPT({ model: model.id, effort: model.defaultEffort ?? model.efforts[0] ?? '' }) }} value={chatGPTModel.id}>{chatGPTStatus.models?.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><label className="settings-field"><span>Reasoning</span><select disabled={!chatGPTModel.efforts.length} onChange={(event) => void onConfigureChatGPT({ model: chatGPTModel.id, effort: event.target.value })} value={chatGPTEffort}>{chatGPTModel.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select></label></div>}
               <div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogOut size={14} />} onClick={() => void disconnectChatGPTAccount()} variant="ghost">Disconnect ChatGPT</ActionButton></div>
-            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions"><ActionButton disabled={aiBusy} icon={<LogIn size={14} />} onClick={() => void connectChatGPTAccount()} variant="primary">{aiBusy ? 'Connecting…' : 'Continue with ChatGPT'}</ActionButton></div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error} · You can retry the connection.</p>}</>}
+            </> : <><p className="settings-feedback">Sign in with a dedicated DATA LAB Codex session. It does not reuse or expose another app’s credentials.</p><div className="ai-connection-actions">{chatGPTConnecting
+              ? <ActionButton icon={<X size={14} />} onClick={() => void cancelChatGPTAccountLogin()} variant="ghost">Cancel ChatGPT sign-in</ActionButton>
+              : <ActionButton disabled={aiBusy} icon={<LogIn size={14} />} onClick={() => void connectChatGPTAccount()} variant="primary">Continue with ChatGPT</ActionButton>}</div>{chatGPTStatus.error && <p className="settings-feedback">{chatGPTStatus.error} · You can retry the connection.</p>}</>}
           </section>
           <section className="settings-section ai-connection-panel">
             <div className="settings-section-title"><span>API providers</span><small>{aiStatus.providers[aiSettings.provider].connected ? `Connected · ${aiStatus.providers[aiSettings.provider].credentialSource}` : 'Not connected'}</small></div>

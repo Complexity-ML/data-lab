@@ -78,4 +78,16 @@ describe('visual SCSS contracts', () => {
 
     expect(new Set(darkTreatments).size).toBe(kinds.length)
   })
+
+  it('keeps the full modal close control outside Electron drag regions', () => {
+    const close = declarations('.settings-close')
+    expect(close.get('position')).toBe('relative')
+    expect(close.get('z-index')).toBe('2')
+    expect(close.get('width')).toBe('34px')
+    expect(close.get('min-width')).toBe('34px')
+    expect(close.get('height')).toBe('34px')
+    expect(close.get('min-height')).toBe('34px')
+    expect(close.get('pointer-events')).toBe('auto')
+    expect(close.get('-webkit-app-region')).toBe('no-drag')
+  })
 })

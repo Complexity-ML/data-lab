@@ -82,6 +82,21 @@ export function useAiConnections(reportActivity: (message: string) => void) {
     reportActivity(status.connected ? `ChatGPT connected and active · ${status.selectedModel ?? 'default model'}` : 'ChatGPT sign-in was not completed')
   }
 
+  const cancelChatGPTLogin = async () => {
+    if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
+    await window.dataLab.cancelChatGPTLogin()
+    const status = await window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)
+    setChatGPTStatus(status)
+    if (status.connected) {
+      sourceSelectionEpoch.current += 1
+      const selection = await window.dataLab.setActiveAiSource('chatgpt')
+      setActiveAiSource(selection.source)
+      reportActivity(`ChatGPT connected and active · ${status.selectedModel ?? 'default model'}`)
+    } else {
+      reportActivity('ChatGPT sign-in cancelled · you can retry safely')
+    }
+  }
+
   const disconnectChatGPT = async () => {
     if (!window.dataLab) throw new Error('ChatGPT connection requires Electron')
     setChatGPTStatus(await window.dataLab.disconnectChatGPT())
@@ -106,6 +121,7 @@ export function useAiConnections(reportActivity: (message: string) => void) {
     active,
     activeAiSource,
     aiStatus,
+    cancelChatGPTLogin,
     chatGPTStatus,
     configureChatGPT,
     connectChatGPT,

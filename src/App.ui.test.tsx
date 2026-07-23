@@ -96,6 +96,8 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
     getAiStatus: vi.fn(async () => disconnectedAiStatus),
     getChatGPTStatus: vi.fn(async () => disconnectedChatGPTStatus),
     getActiveAiSource: vi.fn(async () => ({ source: 'openai' as const })),
+    connectChatGPT: vi.fn(async () => disconnectedChatGPTStatus),
+    cancelChatGPTLogin: vi.fn(async () => ({ cancelled: true })),
     cancelAiProposal: vi.fn(async () => ({ cancelled: true })),
     cancelChatGPTProposal: vi.fn(async () => ({ cancelled: true })),
     getDataHubMcpStatus: vi.fn(async () => ({ mode: 'demo' as const, transport: 'demo' as const, message: 'Not connected', toolCount: 0, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } })),
@@ -288,6 +290,22 @@ describe('visual pipeline workspace regressions', () => {
 
     expect(await screen.findByText('ChatGPT connection requires Electron')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Continue with ChatGPT' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('lets the user cancel a pending ChatGPT sign-in without leaving Settings busy', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.connectChatGPT = vi.fn(() => new Promise<never>(() => undefined))
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    await user.click(await screen.findByRole('button', { name: 'AI connectionModel and quality' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel ChatGPT sign-in' }))
+
+    expect(api.cancelChatGPTLogin).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('button', { name: 'Continue with ChatGPT' })).toBeTruthy()
+    expect(screen.getByText('ChatGPT sign-in cancelled. You can retry safely.')).toBeTruthy()
   })
 
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
