@@ -3,12 +3,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true }))
+const electronState = vi.hoisted(() => ({ directory: '', encryptionAvailable: true, decryptions: 0 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => electronState.directory },
   safeStorage: {
-    decryptString: (buffer: Buffer) => buffer.toString('utf8').replace(/^encrypted:/, ''),
+    decryptString: (buffer: Buffer) => { electronState.decryptions += 1; return buffer.toString('utf8').replace(/^encrypted:/, '') },
     encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
     isEncryptionAvailable: () => electronState.encryptionAvailable,
   },
@@ -23,6 +23,7 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'data-lab-datahub-'))
   electronState.directory = directory
   electronState.encryptionAvailable = true
+  electronState.decryptions = 0
   process.env.DATAHUB_MCP_URL = ''
   process.env.DATAHUB_MCP_TOKEN = ''
   process.env.DATAHUB_GMS_URL = ''
@@ -104,6 +105,7 @@ describe('DataHub MCP connection settings', () => {
       settings: { transport: 'stdio', url: 'http://localhost:8080', tokenConfigured: true, tokenSource: 'encrypted' },
     })
     expect(JSON.stringify(status)).not.toContain('datahub-private-token')
+    expect(electronState.decryptions).toBe(0)
     expect(readFileSync(join(directory, 'data-lab.sqlite')).toString('utf8')).not.toContain('datahub-private-token')
   })
 

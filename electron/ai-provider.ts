@@ -84,12 +84,12 @@ async function apiKey(provider: ApiProvider): Promise<string | undefined> {
 
 export async function getAiStatus() {
   const config = await readConfig()
-  const providerEntries = await Promise.all((['openai', 'anthropic', 'moonshot'] as ApiProvider[]).map(async (provider) => {
+  const providerEntries = (['openai', 'anthropic', 'moonshot'] as ApiProvider[]).map((provider) => {
     const environment = Boolean(environmentKey(provider))
     const selected = config.providers[provider]
     const catalog = selected.catalog ?? []
-    return [provider, { connected: Boolean(await apiKey(provider)), credentialSource: environment ? 'environment' as const : selected.encryptedKey ? 'encrypted' as const : 'none' as const, model: selected.model, catalog, catalogRefreshedAt: selected.catalogRefreshedAt, capabilities: modelCapabilities(provider, selected.model), modelUnavailable: catalog.length > 0 && !catalog.some((model) => model.id === selected.model) }] as const
-  }))
+    return [provider, { connected: environment || Boolean(selected.encryptedKey), credentialSource: environment ? 'environment' as const : selected.encryptedKey ? 'encrypted' as const : 'none' as const, model: selected.model, catalog, catalogRefreshedAt: selected.catalogRefreshedAt, capabilities: modelCapabilities(provider, selected.model), modelUnavailable: catalog.length > 0 && !catalog.some((model) => model.id === selected.model) }] as const
+  })
   const providerStatus = Object.fromEntries(providerEntries) as unknown as Record<ApiProvider, ProviderStatus>
   return {
     connected: providerStatus[config.selectedProvider].connected,
