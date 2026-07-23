@@ -1,8 +1,9 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import type { PipelineNode } from '../domain/pipeline'
 
 const icons = {
+  control: Bot,
   source: Database,
   profile: ChartColumn,
   analysis: BrainCircuit,
@@ -35,6 +36,7 @@ export function PipelineCard({ data, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'monitor' && <span className="monitor-mode-badge">Live loop</span>}
       {data.kind === 'parallel' && <span className="parallel-mode-badge">Fan out</span>}
       {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
+      {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
       {data.runState === 'waiting' && <span className="run-badge is-waiting"><CirclePause size={10} /> Review</span>}

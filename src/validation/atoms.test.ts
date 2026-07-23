@@ -145,6 +145,17 @@ describe('atomic pipeline validation', () => {
     expect(findings.some((finding) => finding.nodeId === profile.id && finding.atomId === 'card-contracts')).toBe(false)
   })
 
+  it('keeps one DATA LAB Control card outside lineage with a complete player policy', () => {
+    const control = { ...newCard('control', 9), id: 'control-policy' }
+    const valid = validatePipeline([...initialNodes, control], initialEdges)
+    expect(valid.some((finding) => finding.nodeId === control.id && finding.atomId === 'card-contracts')).toBe(false)
+
+    const connected = validatePipeline([...initialNodes, control], [...initialEdges, { id: 'control-source', source: control.id, target: initialNodes[0]!.id }])
+    expect(connected).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'control-edge-control-policy', severity: 'error' }),
+    ]))
+  })
+
   it('detects a declared breaking schema type drift', () => {
     const source = { ...newCard('source', 0), id: 'drift-source', data: { ...newCard('source', 0).data, schema: [{ name: 'customer_id', type: 'number' as const }] } }
     const contract = { ...newCard('validation', 1), id: 'drift-contract', data: { ...newCard('validation', 1).data, rule: 'schema_contract: customer_id:string' } }

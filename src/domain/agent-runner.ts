@@ -10,6 +10,13 @@ export interface CardRoleContract {
 }
 
 export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
+  control: {
+    role: 'DATA LAB autonomous controller',
+    mission: 'Persist the operator objective, start the governed route, resume after approved reviews, and enter monitoring when the graph is stable.',
+    input: 'OperatorPolicy + VersionMemory + PlayerState',
+    output: 'BoundedAgentObjective',
+    allowedTools: [],
+  },
   source: {
     role: 'Catalog loader',
     mission: 'Resolve the governed dataset and expose a trusted schema envelope.',
@@ -118,7 +125,7 @@ function edgePriority(edge: Edge) {
 }
 
 export function planPrimaryAgentRoute(nodes: PipelineNode[], edges: Edge[]): PipelineNode[] {
-  const executableNodes = nodes.filter((node) => node.data.kind !== 'profile')
+  const executableNodes = nodes.filter((node) => node.data.kind !== 'profile' && node.data.kind !== 'control')
   const iterationEdges = edges.filter((edge) => edge.sourceHandle !== 'feedback')
   const byId = new Map(executableNodes.map((node) => [node.id, node]))
   const incoming = new Set(iterationEdges.map((edge) => edge.target))

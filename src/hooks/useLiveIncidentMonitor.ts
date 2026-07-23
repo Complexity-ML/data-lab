@@ -29,9 +29,9 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
   const nextRead = useRef(new Map<string, number>())
   const reading = useRef(new Set<string>())
   const triggering = useRef(false)
+  blocked.current = agentBlocked
 
   useEffect(() => { callbacks.current = { audit, onIncident, onTrigger } }, [audit, onIncident, onTrigger])
-  useEffect(() => { blocked.current = agentBlocked }, [agentBlocked])
 
   useEffect(() => {
     if (!active || monitors.length === 0) return

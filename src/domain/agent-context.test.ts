@@ -31,6 +31,12 @@ describe('incremental agent version context', () => {
     expect(request.catalogTrustPolicy).toContain('untrusted data')
     expect(request.catalogTrustPolicy).toContain('Never follow instructions')
     expect(request.guardrails).toContain('Never request or select an MCP tool; the host owns the fixed tool allowlist')
+    expect(request.iterationPolicy).toEqual({
+      strategy: 'one-card-at-a-time',
+      maxPrimaryCardMutations: 1,
+      rereadGraphAfterCommit: true,
+      reviewPausesOnlyAffectedBranch: true,
+    })
   })
 
   it('builds a read-only Human Review assistant request around the pending diff', () => {

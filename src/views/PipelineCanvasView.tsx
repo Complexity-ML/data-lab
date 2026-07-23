@@ -1,5 +1,5 @@
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes } from '@xyflow/react'
-import { PanelLeftOpen, PanelRightOpen, Pencil, Trash2 } from 'lucide-react'
+import { Activity, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, Trash2 } from 'lucide-react'
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
 import { ElasticEdge } from '../components/shared/ElasticEdge'
@@ -9,11 +9,14 @@ import { graphPerformanceTargets } from '../domain/performance'
 const nodeTypes: NodeTypes = { pipeline: PipelineCard }
 const edgeTypes: EdgeTypes = { elastic: ElasticEdge }
 const miniMapColors: Record<CardKind, string> = {
+  control: '#818cf8',
   source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', patch: '#fbcfe8', monitor: '#a5f3fc', parallel: '#c4b5fd', diagram: '#fde68a',
   split: '#ddd6fe', decision: '#e9d5ff', transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
 }
 
 interface PipelineCanvasViewProps {
+  activity: string
+  activityBusy: boolean
   contextMenu?: { nodeId: string; label: string; x: number; y: number }
   edges: Edge[]
   inspectorOpen: boolean
@@ -29,18 +32,23 @@ interface PipelineCanvasViewProps {
   onNodesChange(changes: NodeChange<PipelineNode>[]): void
   onOpenInspector(): void
   onOpenLibrary(): void
+  onOpenActivity(): void
   onPaneClick(): void
   onSelectNode(nodeId: string): void
   theme: 'light' | 'dark'
 }
 
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
-  const { contextMenu, edges, inspectorOpen, libraryOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenInspector, onOpenLibrary, onPaneClick, onSelectNode, theme } = props
+  const { activity, activityBusy, contextMenu, edges, inspectorOpen, libraryOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActivity, onOpenInspector, onOpenLibrary, onPaneClick, onSelectNode, theme } = props
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
     {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
     {!inspectorOpen && <button aria-label="Open inspector" className="inspector-open" onClick={onOpenInspector} title="Open inspector" type="button"><PanelRightOpen size={16} /><span>Inspector</span></button>}
+    <button aria-label="Open activity log" className={`canvas-activity${activityBusy ? ' is-busy' : ''}`} onClick={onOpenActivity} title="Open activity log in Settings" type="button">
+      <span>{activityBusy ? <LoaderCircle aria-hidden="true" /> : <Activity aria-hidden="true" />}</span>
+      <span><small>ACTIVITY</small><strong>{activity}</strong></span>
+    </button>
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
     <ReactFlow
       nodes={nodes}
