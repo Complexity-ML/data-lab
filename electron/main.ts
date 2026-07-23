@@ -5,7 +5,7 @@ import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, parseDataHubDecisionRequest, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, deleteWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
+import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, clearIncidentEvents, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, deleteWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
 import { ensureDiagnosticLog, exportDiagnosticBundle, loadDiagnosticSettings, recordDiagnosticEvent, saveDiagnosticSettings } from './diagnostics.js'
@@ -61,6 +61,7 @@ const diagnosticsSettingsChannel = 'data-lab:diagnostics-settings'
 const diagnosticsSettingsSaveChannel = 'data-lab:diagnostics-settings-save'
 const incidentsListChannel = 'data-lab:incidents-list'
 const incidentsRecordChannel = 'data-lab:incidents-record'
+const incidentsClearChannel = 'data-lab:incidents-clear'
 const applicationRestartChannel = 'data-lab:application-restart'
 const appUpdateStatusChannel = 'data-lab:app-update-status'
 const appUpdateStatusChangedChannel = 'data-lab:app-update-status-changed'
@@ -307,6 +308,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(incidentsListChannel, () => listIncidentEvents(app.getPath('userData')))
   ipcMain.handle(incidentsRecordChannel, (_event, payload: unknown) => recordIncidentEvent(app.getPath('userData'), payload))
+  ipcMain.handle(incidentsClearChannel, () => clearIncidentEvents(app.getPath('userData')))
   ipcMain.handle(applicationRestartChannel, () => {
     setTimeout(() => { app.relaunch(); app.quit() }, 80)
     return { restarting: true }

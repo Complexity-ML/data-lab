@@ -46,6 +46,7 @@ const diagnosticsSettingsChannel = 'data-lab:diagnostics-settings'
 const diagnosticsSettingsSaveChannel = 'data-lab:diagnostics-settings-save'
 const incidentsListChannel = 'data-lab:incidents-list'
 const incidentsRecordChannel = 'data-lab:incidents-record'
+const incidentsClearChannel = 'data-lab:incidents-clear'
 const applicationRestartChannel = 'data-lab:application-restart'
 const appUpdateStatusChannel = 'data-lab:app-update-status'
 const appUpdateStatusChangedChannel = 'data-lab:app-update-status-changed'
@@ -101,6 +102,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   saveDiagnosticSettings: (settings: unknown) => ipcRenderer.invoke(diagnosticsSettingsSaveChannel, settings),
   listIncidentEvents: () => ipcRenderer.invoke(incidentsListChannel),
   recordIncidentEvent: (event: unknown) => ipcRenderer.invoke(incidentsRecordChannel, event),
+  clearIncidentEvents: () => ipcRenderer.invoke(incidentsClearChannel),
   restartApplication: () => ipcRenderer.invoke(applicationRestartChannel),
   getAppUpdateStatus: () => ipcRenderer.invoke(appUpdateStatusChannel),
   setAppUpdateChannel: (channel: 'stable' | 'main') => ipcRenderer.invoke(appUpdateSetChannel, { channel }),

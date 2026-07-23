@@ -453,6 +453,15 @@ export function listIncidentEvents(userDataDirectory: string, limit = 200): Inci
   return (rows as unknown as IncidentRow[]).map(incidentFromRow)
 }
 
+export function clearIncidentEvents(userDataDirectory: string): { deleted: number; workspaceId?: string } {
+  const target = db(userDataDirectory)
+  const workspaceId = activeWorkspaceId(target) ?? undefined
+  const result = workspaceId
+    ? target.prepare('DELETE FROM incident_events WHERE workspace_id = ?').run(workspaceId)
+    : target.prepare('DELETE FROM incident_events WHERE workspace_id IS NULL').run()
+  return { deleted: Number(result.changes), workspaceId }
+}
+
 export function recordIncidentEvent(userDataDirectory: string, payload: unknown): { recorded: boolean; event?: IncidentEvent } {
   if (!payload || typeof payload !== 'object') throw new Error('Invalid incident event')
   const value = payload as Record<string, unknown>

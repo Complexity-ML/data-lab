@@ -103,6 +103,7 @@ declare global {
       saveDiagnosticSettings(settings: DiagnosticSettings): Promise<DiagnosticSettings>
       listIncidentEvents(): Promise<IncidentEvent[]>
       recordIncidentEvent(event: IncidentEventInput): Promise<IncidentRecordResult>
+      clearIncidentEvents(): Promise<{ deleted: number; workspaceId?: string }>
       restartApplication(): Promise<{ restarting: true }>
       getAppUpdateStatus(): Promise<AppUpdateStatus>
       setAppUpdateChannel(channel: AppUpdateChannel): Promise<AppUpdateStatus>

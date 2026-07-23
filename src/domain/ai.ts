@@ -73,18 +73,31 @@ function text(value: unknown, fallback = '', limit = 800) {
   return typeof value === 'string' ? value.trim().slice(0, limit) : fallback
 }
 
-function nodePatch(action: AiAction): Partial<PipelineNodeData> {
+function completeMonitorRule(value: unknown, fallback?: unknown) {
+  let rule = text(value, text(fallback, '', 2_000), 2_000)
+  const clauses: string[] = []
+  if (!/on_change\(metadata_fingerprint\)/i.test(rule)) clauses.push('on_change(metadata_fingerprint)')
+  if (!/cooldown=\d+s/i.test(rule)) clauses.push('cooldown=60s')
+  if (!/max_iterations=\d+/i.test(rule)) clauses.push('max_iterations=10')
+  if (clauses.length) rule = [rule, ...clauses].filter(Boolean).join(' | ')
+  return rule
+}
+
+function nodePatch(action: AiAction, current?: PipelineNodeData): Partial<PipelineNodeData> {
   const patch: Partial<PipelineNodeData> = { status: 'draft', agentAdded: true }
-  if (action.kind && kinds.has(action.kind)) patch.kind = action.kind
-  if (action.kind === 'patch') patch.patchScope = 'graph-only'
-  if (action.kind === 'monitor') patch.monitorMode = 'event-loop'
-  if (action.kind === 'parallel') patch.parallelMode = 'branch-fanout'
-  if (action.kind === 'diagram') patch.diagramMode = 'incident-workstream'
-  if (action.kind === 'control') patch.controlMode = 'autonomous-player'
+  const actionKind = action.kind && kinds.has(action.kind) ? action.kind : undefined
+  const effectiveKind = actionKind ?? current?.kind
+  if (actionKind) patch.kind = actionKind
+  if (effectiveKind === 'patch') patch.patchScope = 'graph-only'
+  if (effectiveKind === 'monitor') patch.monitorMode = 'event-loop'
+  if (effectiveKind === 'parallel') patch.parallelMode = 'branch-fanout'
+  if (effectiveKind === 'diagram') patch.diagramMode = 'incident-workstream'
+  if (effectiveKind === 'control') patch.controlMode = 'autonomous-player'
   if (text(action.label)) patch.label = text(action.label, '', 120)
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
-  if (text(action.rule)) patch.rule = text(action.rule, '', 2_000)
+  if (effectiveKind === 'monitor') patch.rule = completeMonitorRule(action.rule, current?.kind === 'monitor' ? current.rule : undefined)
+  else if (text(action.rule)) patch.rule = text(action.rule, '', 2_000)
   return patch
 }
 
@@ -119,7 +132,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         label: text(action.label, `Agent ${action.kind}`, 120),
         description: text(action.description, 'Agent-proposed card awaiting human review.', 500),
         owner: text(action.owner, 'LABO Agent', 120),
-        rule: text(action.rule, undefined, 2_000) || undefined,
+        rule: action.kind === 'monitor' ? completeMonitorRule(action.rule) : text(action.rule, undefined, 2_000) || undefined,
         status: 'draft',
         schema: [],
         agentAdded: true,
@@ -140,8 +153,9 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
   for (const [index, action] of contract.actions.slice(0, 20).entries()) {
     if (action.type === 'update_card') {
       const nodeId = resolveNode(action.node_id)
-      if (nodeId && nodes.some((node) => node.id === nodeId)) {
-        updatedNodes.push({ nodeId, patch: nodePatch(action), reason: text(action.reason, 'AI-proposed card revision.', 500) })
+      const current = nodes.find((node) => node.id === nodeId)
+      if (nodeId && current) {
+        updatedNodes.push({ nodeId, patch: nodePatch(action, current.data), reason: text(action.reason, 'AI-proposed card revision.', 500) })
       }
     }
     if (action.type === 'add_edge') {

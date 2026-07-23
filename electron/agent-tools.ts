@@ -217,6 +217,15 @@ export class AgentToolSession {
     if (kind === 'control') return supplied ?? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
     if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_iteration | on_reject=repair_loop'
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
+    if (kind === 'monitor') {
+      let rule = supplied ?? ''
+      const clauses: string[] = []
+      if (!/on_change\(metadata_fingerprint\)/i.test(rule)) clauses.push('on_change(metadata_fingerprint)')
+      if (!/cooldown=\d+s/i.test(rule)) clauses.push('cooldown=60s')
+      if (!/max_iterations=\d+/i.test(rule)) clauses.push('max_iterations=10')
+      if (clauses.length) rule = [rule, ...clauses].filter(Boolean).join(' | ')
+      return rule
+    }
     return supplied
   }
 
@@ -282,14 +291,19 @@ export class AgentToolSession {
       if (tool === 'update_card') {
         const kind = text(args.kind, 32) as ProposalCardKind | null
         if (kind && !kinds.includes(kind)) throw new Error('Unknown DATA LAB card kind')
+        const nodeId = requiredText(args.node_id, 'node_id', 120)
         const label = text(args.label, 120)
         const description = text(args.description, 500)
         const owner = text(args.owner, 120)
-        const rule = kind ? this.normalizedRule(kind, args.rule) : text(args.rule, 2_000)
+        const effectiveKind = kind ?? this.kindOf(nodeId)
+        const suppliedRule = text(args.rule, 2_000)
+        const rule = effectiveKind === 'monitor'
+          ? suppliedRule ? this.normalizedRule('monitor', suppliedRule) : null
+          : kind ? this.normalizedRule(kind, args.rule) : suppliedRule
         if (!kind && !label && !description && !owner && !rule) throw new Error('update_card requires at least one changed field')
         return this.validateCandidate(tool, {
           type: 'update_card',
-          node_id: requiredText(args.node_id, 'node_id', 120),
+          node_id: nodeId,
           kind,
           label,
           description,

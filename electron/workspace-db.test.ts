@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   archiveWorkspace,
+  clearIncidentEvents,
   autosaveWorkspaceDraft,
   beginWorkspaceSession,
   closeWorkspaceDatabase,
@@ -122,6 +123,32 @@ describe('SQLite workspace persistence', () => {
     archiveWorkspace(target, workspaceId)
     deleteWorkspace(target, workspaceId)
     expect(listIncidentEvents(target)).toEqual([])
+  })
+
+  it('clears incident reports only for the active workspace', () => {
+    const target = directory('clear-incidents')
+    const first = createWorkspace(target, 'Orders monitor', { projectTitle: 'Orders monitor' })
+    recordIncidentEvent(target, {
+      incidentKey: 'orders',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Orders drift',
+      detail: 'Schema changed.',
+    })
+    createWorkspace(target, 'Customers monitor', { projectTitle: 'Customers monitor' })
+    recordIncidentEvent(target, {
+      incidentKey: 'customers',
+      transition: 'opened',
+      severity: 'critical',
+      title: 'Customers unavailable',
+      detail: 'Connector failed.',
+    })
+
+    expect(clearIncidentEvents(target)).toMatchObject({ deleted: 1 })
+    expect(listIncidentEvents(target)).toEqual([])
+    openWorkspace(target, first.activeWorkspaceId!)
+    expect(listIncidentEvents(target)).toHaveLength(1)
+    expect(listIncidentEvents(target)[0]?.incidentKey).toBe('orders')
   })
 
   it('keeps debounced drafts separate and offers recovery only after an unclean shutdown', () => {

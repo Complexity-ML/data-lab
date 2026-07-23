@@ -205,6 +205,11 @@ button { color: inherit; }
 .diagnostic-toggle strong, .diagnostic-storage-summary strong { font-size: 9px; }
 .diagnostic-toggle small, .diagnostic-storage-summary small { color: var(--muted); font-size: 7.5px; line-height: 1.45; }
 .diagnostic-storage-summary { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; padding: 11px; color: var(--text); border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.report-storage-summary { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 11px; color: var(--text); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.report-storage-summary > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.report-storage-summary strong { font-size: 9px; }
+.report-storage-summary small { color: var(--muted); font-size: 7.5px; line-height: 1.45; }
+.report-storage-summary .is-confirming { color: var(--error-text); border-color: var(--error-line); background: var(--error-surface); }
 .diagnostic-toolbar { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(110px, 1fr) auto; align-items: end; gap: 8px; }
 .diagnostic-toolbar label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 7px; font-weight: 750; }
 .diagnostic-toolbar select { min-height: 31px; padding: 0 8px; color: var(--text); border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--panel); font-size: 8px; }
@@ -382,6 +387,7 @@ button { color: inherit; }
 .library-panel-shell { overflow: hidden; border-right: 1px solid var(--line); transition: opacity .18s ease; }
 .library-panel-shell.is-closed { border-right: 0; opacity: 0; pointer-events: none; }
 .library-panel { overflow-y: auto; height: 100%; padding: 20px 16px; }
+.left-operations-panel { height: 100%; min-width: 0; min-height: 0; padding: 20px 18px; background: var(--panel); }
 .inspector-panel { padding: 20px 18px; border-left: 1px solid var(--line); }
 .inspector-panel.is-closed { overflow: hidden; padding: 0; border-left: 0; opacity: 0; pointer-events: none; }
 .operations-panel { overflow: hidden; }
@@ -818,6 +824,7 @@ button { color: inherit; }
 :root[data-theme='dark'] .topbar,
 :root[data-theme='dark'] .library-panel-shell,
 :root[data-theme='dark'] .library-panel,
+:root[data-theme='dark'] .left-operations-panel,
 :root[data-theme='dark'] .inspector-panel,
 :root[data-theme='dark'] .statusbar { background: var(--panel); }
 :root[data-theme='dark'] .button.ghost,
