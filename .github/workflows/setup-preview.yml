@@ -73,9 +73,21 @@ jobs:
 
       - name: Build macOS Setup DMG
         if: matrix.platform == 'macOS'
+        shell: bash
         run: |
           npm run build:ui --prefix apps/bootstrap-installer
-          npm run tauri --prefix apps/bootstrap-installer -- build --bundles dmg --target ${{ matrix.rust_target }}
+          for attempt in 1 2 3; do
+            echo "DMG bundle attempt ${attempt}/3 for ${{ matrix.rust_target }}"
+            if npm run tauri --prefix apps/bootstrap-installer -- build --verbose --bundles dmg --target ${{ matrix.rust_target }}; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Tauri DMG bundling failed after 3 attempts"
+              exit 1
+            fi
+            echo "::warning::Tauri bundle_dmg.sh failed intermittently; retrying with the compiled Rust artifacts"
+            sleep $((attempt * 5))
+          done
 
       - name: Build Windows Setup installer
         if: matrix.platform == 'Windows'

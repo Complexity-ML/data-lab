@@ -168,6 +168,9 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (nodeIds.size + aliases.size > maximumNodes || edgeIds.size - removedEdges.size + addedEdgeCount > maximumEdges) throw new Error('Proposal would grow the graph beyond the DATA LAB safety limits')
   const includesReview = actions.some((action) => action.kind === 'review')
   if (proposal.requires_human_review && !includesReview) throw new Error('Human Review was requested without a Human Review card action')
+  const request = record(payload, 'Agent request')
+  if (request.mode === 'review-assistant' && actions.length) throw new Error('Human Review assistant responses must contain zero graph actions')
+  if (request.mode === 'review-assistant' && proposal.requires_human_review) throw new Error('Human Review assistant responses cannot request another review')
 
   return {
     title: text(proposal.title, 'title', 160)!,

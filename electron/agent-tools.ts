@@ -178,6 +178,7 @@ export class AgentToolSession {
 
   get finished() { return Boolean(this.finishedProposal) }
   get proposal() { return this.finishedProposal }
+  private get reviewAssistantMode() { return record(this.payload).mode === 'review-assistant' }
 
   private result(tool: string, status: ToolStatus, summary: string, detail: JsonRecord = {}) {
     this.trace.push({ tool, status, summary })
@@ -190,6 +191,7 @@ export class AgentToolSession {
   }
 
   private validateCandidate(tool: string, action: ValidatedProposalAction) {
+    if (this.reviewAssistantMode) throw new Error('Human Review assistant is read-only; graph actions are unavailable')
     const candidate = [...this.actions, action]
     validateProposal(proposalWith(candidate), this.payload)
     this.actions.push(action)
@@ -336,6 +338,7 @@ export class AgentToolSession {
         })
       }
       if (tool === 'finish_plan') {
+        if (this.reviewAssistantMode && this.actions.length) throw new Error('Human Review assistant must finish with zero graph actions')
         const proposal = validateProposal(proposalWith(this.actions, {
           title: requiredText(args.title, 'title', 160),
           summary: requiredText(args.summary, 'summary', 800),

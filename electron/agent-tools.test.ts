@@ -145,4 +145,28 @@ describe('bounded DATA LAB agent tools', () => {
       evidence: ['PII tag'],
     }).ok).toBe(true)
   })
+
+  it('makes Human Review assistant turns physically read-only', () => {
+    const session = new AgentToolSession({ ...payload, mode: 'review-assistant' })
+    expect(session.execute('add_card', {
+      node_id: 'forbidden-card',
+      kind: 'analysis',
+      label: 'Forbidden',
+      description: null,
+      owner: null,
+      rule: null,
+      reason: 'Attempt a mutation.',
+    })).toMatchObject({ ok: false, status: 'rejected', summary: expect.stringContaining('read-only') })
+
+    expect(session.execute('finish_plan', {
+      title: 'Reviewer answer',
+      summary: 'The evidence is incomplete.',
+      rationale: 'A fresh schema read is required before approval.',
+      requires_human_review: false,
+      confidence: 0.9,
+      writeback: 'No action; advice only.',
+      evidence: ['Schema read timed out'],
+    })).toMatchObject({ ok: true })
+    expect(session.proposal?.actions).toEqual([])
+  })
 })
