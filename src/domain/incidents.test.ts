@@ -20,6 +20,13 @@ describe('continuous incident lifecycle', () => {
     expect(summaries[0]).toMatchObject({ status: 'resolved', severity: 'info', occurrenceCount: 2, eventCount: 6 })
   })
 
+  it('keeps connector provenance generic in incident summaries', () => {
+    const summaries = summarizeIncidentEvents([
+      { ...incident('connector', 'opened', 'warning', '2026-07-23T00:00:00.000Z'), sourceSystem: 'Kafka', sourceRef: 'topic:orders' },
+    ])
+    expect(summaries[0]).toMatchObject({ sourceSystem: 'Kafka', sourceRef: 'topic:orders' })
+  })
+
   it('fingerprints stable evidence, opens once and recovers', () => {
     const audit = {
       urn: 'urn:li:dataset:test',

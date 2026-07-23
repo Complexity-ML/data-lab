@@ -59,7 +59,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     setVersions((current) => appendPipelineVersion(current, version))
     setSelectedId(nextProposal.updatedNodes[0]?.nodeId ?? nextProposal.addedNodes[0]?.id ?? '')
     setProposal(undefined)
-    setActivity('Low-risk incident correction committed atomically · Live Monitor will verify the next DataHub fingerprint')
+    setActivity('Low-risk incident correction committed atomically · Live Monitor will verify the next connector fingerprint')
     notifyToast('The low-risk branch was committed as a restorable version. Monitoring remains active while Electron is open.', 'success', 'Incident correction applied')
     recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'success', detail: { versionId: version.id, incidentKey: nextProposal.incidentKey } })
     return version.id

@@ -173,6 +173,8 @@ describe('SQLite workspace persistence', () => {
       severity: 'warning',
       title: 'Customer evidence unavailable',
       detail: 'get_entities timed out',
+      sourceSystem: 'DataHub',
+      sourceRef: 'urn:li:dataset:customers',
       fingerprint: 'warning-v1',
       cardId: 'customers-source',
     })
@@ -220,5 +222,6 @@ describe('SQLite workspace persistence', () => {
 
     expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['opened', 'recovered', 'worsened', 'opened'])
     expect(listIncidentEvents(target)[0].fingerprint).toBe('warning-v2')
+    expect(listIncidentEvents(target).at(-1)).toMatchObject({ sourceSystem: 'DataHub', sourceRef: 'urn:li:dataset:customers' })
   })
 })

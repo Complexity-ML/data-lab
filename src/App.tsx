@@ -342,6 +342,8 @@ export default function App() {
               severity: 'critical',
               title: `DataHub evidence · ${source.data.label}`,
               detail,
+              sourceSystem: 'DataHub',
+              sourceRef: sourceUrn,
               fingerprint: 'audit-transport-error',
               cardId: source.id,
               branchId: monitored?.monitor.monitorId ?? source.id,
@@ -359,6 +361,8 @@ export default function App() {
             severity: failedReads.length === audit.reads.length ? 'critical' : failedReads.length ? 'warning' : 'info',
             title: `DataHub evidence · ${source.data.label}`,
             detail: failedReads.length ? `${failedReads.length}/${audit.reads.length} metadata reads failed or became stale: ${failedReads.map((read) => read.name).join(', ')}.` : 'All required DataHub metadata reads returned to normal.',
+            sourceSystem: 'DataHub',
+            sourceRef: sourceUrn,
             fingerprint: audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
             cardId: source.id,
             branchId: monitored?.monitor.monitorId ?? source.id,
@@ -390,6 +394,8 @@ export default function App() {
             severity: 'warning',
             title: 'DataHub source discovery unavailable',
             detail: 'DataHub MCP is connected, but no governed starting dataset matched the autonomous objective. The player will retry without calling the model again.',
+            sourceSystem: 'DataHub',
+            sourceRef: 'mcp',
             fingerprint: 'no-governed-source-candidate',
             cardId: unboundSource?.id,
             branchId: unboundSource?.id,
@@ -408,6 +414,8 @@ export default function App() {
           severity: 'critical',
           title: 'DataHub connection required',
           detail: 'The autonomous graph contains an unbound Data Source, but DataHub MCP is not connected. Monitoring and impact analysis cannot begin.',
+          sourceSystem: 'DataHub',
+          sourceRef: 'mcp',
           fingerprint: 'datahub-disconnected',
           cardId: unboundSource.id,
           branchId: unboundSource.id,
@@ -501,6 +509,8 @@ export default function App() {
             severity: 'info',
             title: `Governed source discovered · ${blankCandidate.name}`,
             detail: `Fresh DataHub evidence resolved the unbound source to ${blankCandidate.urn}.`,
+            sourceSystem: 'DataHub',
+            sourceRef: blankCandidate.urn,
             fingerprint: blankCandidate.urn,
             cardId: unboundSource.id,
             branchId: unboundSource.id,
@@ -545,6 +555,8 @@ export default function App() {
               severity: 'info',
               title: nextProposal.title,
               detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version; Live Monitor will verify the next fingerprint.`,
+              sourceSystem: 'DataHub',
+              sourceRef: monitored.monitor.urn,
               fingerprint: monitored.audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
               cardId: monitored.monitor.monitorId,
               branchId: monitored.monitor.monitorId,
@@ -562,7 +574,7 @@ export default function App() {
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) {
-        if (nextProposal.incidentKey) void logIncident({ incidentKey: nextProposal.incidentKey, transition: 'human-review', severity: 'warning', title: nextProposal.title, detail: nextProposal.summary, versionId: reviewVersionId, branchId: monitored?.monitor.monitorId })
+        if (nextProposal.incidentKey) void logIncident({ incidentKey: nextProposal.incidentKey, transition: 'human-review', severity: 'warning', title: nextProposal.title, detail: nextProposal.summary, sourceSystem: monitored ? 'DataHub' : undefined, sourceRef: monitored?.monitor.urn, versionId: reviewVersionId, branchId: monitored?.monitor.monitorId })
         void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
       }
     } catch (error) {
@@ -816,7 +828,7 @@ export default function App() {
     onTrigger: async (trigger) => {
       if (playerStartupBlocked.current) return
       await auditWithAgent(
-        `Live Monitor detected a DataHub metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, update only the affected branch, and propose one coherent versioned correction.`,
+        `Live Monitor detected a connector metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, preserve its source provenance, update only the affected branch, and propose one coherent versioned correction.`,
         trigger,
       )
     },

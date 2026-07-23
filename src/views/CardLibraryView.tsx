@@ -9,7 +9,7 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
   { kind: 'analysis', description: 'Read schema, quality and lineage', icon: BrainCircuit },
   { kind: 'impact', description: 'Trace change impact to models', icon: ChartNetwork },
   { kind: 'patch', description: 'Reversible graph-only compatibility fix', icon: FileDiff },
-  { kind: 'monitor', description: 'Restart safely when DataHub evidence changes', icon: Radar },
+  { kind: 'monitor', description: 'Restart safely when connected evidence changes', icon: Radar },
   { kind: 'parallel', description: 'Delegate independent graph branches', icon: Network },
   { kind: 'diagram', description: 'Merge incident branch diagrams atomically', icon: LayoutDashboard },
   { kind: 'split', description: 'Route rows into branches', icon: GitBranch },
