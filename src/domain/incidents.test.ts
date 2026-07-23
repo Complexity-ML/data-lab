@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { summarizeIncidentEvents, type IncidentEvent } from './incidents'
-import { evaluateMonitorObservation, findBoundLiveMonitors, observeDataHubAudit, parseLiveMonitorPolicy } from './live-monitor'
+import { evaluateMonitorObservation, findBoundLiveMonitors, liveMonitorBindingKey, observeDataHubAudit, parseLiveMonitorPolicy } from './live-monitor'
 import type { PipelineNode } from './pipeline'
 
 function incident(id: string, transition: IncidentEvent['transition'], severity: IncidentEvent['severity'], createdAt: string): IncidentEvent {
@@ -48,5 +48,6 @@ describe('continuous incident lifecycle', () => {
       { id: 'source-monitor', source: 'source', target: 'monitor' },
       { id: 'feedback', source: 'output', target: 'monitor', sourceHandle: 'feedback' },
     ])).toMatchObject([{ monitorId: 'monitor', sourceId: 'source', urn: 'urn:orders', policy: { cooldownMs: 60_000, maxIterations: 10 } }])
+    expect(liveMonitorBindingKey({ monitorId: 'monitor', urn: 'urn:orders' })).not.toBe(liveMonitorBindingKey({ monitorId: 'monitor', urn: 'urn:new-orders' }))
   })
 })

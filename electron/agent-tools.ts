@@ -228,6 +228,7 @@ export class AgentToolSession {
             nodes: requested.size ? current.nodes.filter((node) => requested.has(String(node.id))) : current.nodes,
             edges: current.edges,
           },
+          source_scope: record(record(this.payload).sourceScope),
           queued_actions: this.actions,
         })
       }

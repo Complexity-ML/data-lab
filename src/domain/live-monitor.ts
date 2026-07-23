@@ -37,6 +37,10 @@ export interface BoundLiveMonitor {
   policy: LiveMonitorPolicy
 }
 
+export function liveMonitorBindingKey(monitor: Pick<BoundLiveMonitor, 'monitorId' | 'urn'>) {
+  return `${monitor.monitorId}::${monitor.urn}`
+}
+
 const severityRank: Record<IncidentSeverity, number> = { info: 0, warning: 1, critical: 2 }
 
 function stableHash(value: string) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { Edge } from '@xyflow/react'
 import type { DataHubMcpAudit } from '../electron-api'
 import type { IncidentEventInput } from '../domain/incidents'
-import { evaluateMonitorObservation, findBoundLiveMonitors, observeDataHubAudit, type BoundLiveMonitor, type MonitorRuntimeState } from '../domain/live-monitor'
+import { evaluateMonitorObservation, findBoundLiveMonitors, liveMonitorBindingKey, observeDataHubAudit, type BoundLiveMonitor, type MonitorRuntimeState } from '../domain/live-monitor'
 import type { PipelineNode } from '../domain/pipeline'
 
 export interface LiveIncidentTrigger {
@@ -40,15 +40,16 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
     const tick = async () => {
       const now = Date.now()
       for (const monitor of monitors) {
-        if (disposed || reading.current.has(monitor.monitorId) || (nextRead.current.get(monitor.monitorId) ?? 0) > now) continue
-        reading.current.add(monitor.monitorId)
-        nextRead.current.set(monitor.monitorId, now + monitor.policy.cooldownMs)
+        const bindingKey = liveMonitorBindingKey(monitor)
+        if (disposed || reading.current.has(bindingKey) || (nextRead.current.get(bindingKey) ?? 0) > now) continue
+        reading.current.add(bindingKey)
+        nextRead.current.set(bindingKey, now + monitor.policy.cooldownMs)
         try {
           const auditResult = await callbacks.current.audit(monitor.urn)
           if (disposed) return
           const observation = observeDataHubAudit(auditResult)
-          const decision = evaluateMonitorObservation(runtime.current.get(monitor.monitorId), observation, monitor.policy)
-          runtime.current.set(monitor.monitorId, decision.next)
+          const decision = evaluateMonitorObservation(runtime.current.get(bindingKey), observation, monitor.policy)
+          runtime.current.set(bindingKey, decision.next)
           if (!decision.transition) continue
           const incidentKey = `live-monitor:${monitor.monitorId}:${monitor.urn}`
           const detail = decision.transition === 'recovered'
@@ -74,7 +75,7 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
             const incidentKey = `live-monitor:${monitor.monitorId}:${monitor.urn}`
             await callbacks.current.onIncident({
               incidentKey,
-              transition: runtime.current.get(monitor.monitorId)?.open ? 'worsened' : 'opened',
+              transition: runtime.current.get(bindingKey)?.open ? 'worsened' : 'opened',
               severity: 'critical',
               title: `${monitor.monitorLabel} · monitoring unavailable`,
               detail: error instanceof Error ? error.message : 'DataHub monitoring failed.',
@@ -82,10 +83,10 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
               cardId: monitor.monitorId,
               branchId: monitor.monitorId,
             })
-            runtime.current.set(monitor.monitorId, { fingerprint: 'monitor-read-error', severity: 'critical', open: true, iterations: (runtime.current.get(monitor.monitorId)?.iterations ?? 0) + 1 })
+            runtime.current.set(bindingKey, { fingerprint: 'monitor-read-error', severity: 'critical', open: true, iterations: (runtime.current.get(bindingKey)?.iterations ?? 0) + 1 })
           }
         } finally {
-          reading.current.delete(monitor.monitorId)
+          reading.current.delete(bindingKey)
         }
       }
     }
