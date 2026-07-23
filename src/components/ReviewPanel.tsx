@@ -1,9 +1,10 @@
-import { Check, DatabaseZap, GitCompareArrows, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { Check, DatabaseZap, GitCompareArrows, LoaderCircle, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AgentProposal } from '../domain/pipeline'
 import { ActionButton } from './shared/ActionButton'
 
 interface ReviewPanelProps {
+  applying?: boolean
   proposal: AgentProposal
   relatedAssets: string[]
   revisionId?: string
@@ -13,7 +14,7 @@ interface ReviewPanelProps {
   onClose(): void
 }
 
-export function ReviewPanel({ proposal, relatedAssets, revisionId, writebackAvailable, onApply, onClose, onDiscard }: ReviewPanelProps) {
+export function ReviewPanel({ applying = false, proposal, relatedAssets, revisionId, writebackAvailable, onApply, onClose, onDiscard }: ReviewPanelProps) {
   const [writebackRequested, setWritebackRequested] = useState(false)
   useEffect(() => setWritebackRequested(false), [proposal.title, revisionId])
 
@@ -80,8 +81,8 @@ export function ReviewPanel({ proposal, relatedAssets, revisionId, writebackAvai
     </div>
 
     <footer className="review-actions">
-      <ActionButton icon={<X size={15} />} onClick={onDiscard} variant="secondary">Reject</ActionButton>
-      <ActionButton icon={<Check size={15} />} onClick={() => onApply(writebackRequested)} variant="primary">Approve change</ActionButton>
+      <ActionButton disabled={applying} icon={<X size={15} />} onClick={onDiscard} variant="secondary">Reject</ActionButton>
+      <ActionButton aria-busy={applying} disabled={applying} icon={applying ? <LoaderCircle className="agent-context-wheel" size={15} /> : <Check size={15} />} onClick={() => onApply(writebackRequested)} variant="primary">{applying ? 'Applying change…' : 'Approve change'}</ActionButton>
     </footer>
   </section>
 }

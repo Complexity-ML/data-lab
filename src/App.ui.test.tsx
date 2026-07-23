@@ -18,7 +18,10 @@ interface MockFlowProps {
   children?: ReactNode
   nodes: MockNode[]
   onDrop?(event: ReactDragEvent<HTMLDivElement>): void
-  onInit?(instance: { screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } }): void
+  onInit?(instance: {
+    fitView(options?: { duration?: number; padding?: number }): Promise<boolean>
+    screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number }
+  }): void
 }
 
 vi.mock('@xyflow/react', async () => {
@@ -39,7 +42,7 @@ vi.mock('@xyflow/react', async () => {
       React.useEffect(() => {
         if (initialized.current) return
         initialized.current = true
-        onInit?.({ screenToFlowPosition: (point) => point })
+        onInit?.({ fitView: vi.fn(async () => true), screenToFlowPosition: (point) => point })
       }, [onInit])
       return <div data-testid="pipeline-flow" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
         {nodes.map((node) => <div
@@ -225,6 +228,59 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('Committed pipeline')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Recover draft' }))
     expect(api.resolveWorkspaceRecovery).toHaveBeenCalledWith('recover')
+  })
+
+  it('commits an approved provider proposal into the visible main graph', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({
+      activeWorkspaceId: null,
+      uncleanShutdown: false,
+      workspaces: [],
+    })
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({
+      ...disconnectedChatGPTStatus,
+      available: true,
+      connected: true,
+      selectedModel: 'gpt-5.6-sol',
+      selectedEffort: 'high',
+    }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: {
+        title: 'Create a bounded starting point for the empty pipeline',
+        summary: 'Add a placeholder Data Source and a Human Review checkpoint.',
+        rationale: 'The intended dataset must be bound before downstream work.',
+        requires_human_review: true,
+        confidence: 0.99,
+        writeback: 'Commit the reviewed graph locally.',
+        evidence: ['No DataHub URN is bound.'],
+        actions: [
+          { type: 'add_card', node_id: 'source-intended-dataset', kind: 'source', label: 'Intended Dataset', description: 'Awaiting a DataHub binding.', owner: 'LABO Agent', rule: 'Bind a trusted dataset before execution.', source: null, target: null, source_handle: null, reason: 'Create the bounded source placeholder.' },
+          { type: 'add_card', node_id: 'review-bind-dataset', kind: 'review', label: 'Verify and Bind Dataset', description: 'Human checkpoint.', owner: 'Data steward', rule: 'Approve only after the dataset identity is verified.', source: null, target: null, source_handle: null, reason: 'Require explicit verification.' },
+          { type: 'add_edge', node_id: null, kind: null, label: null, description: null, owner: null, rule: null, source: 'source-intended-dataset', target: 'review-bind-dataset', source_handle: null, reason: 'Gate the source binding.' },
+        ],
+      },
+    }) as Awaited<ReturnType<NonNullable<typeof window.dataLab>['runChatGPTProposal']>>)
+    api.notifyHumanReview = vi.fn(async () => ({ shown: true }))
+    api.recordDiagnostic = vi.fn(async (event) => ({ ...event, id: 'diagnostic', timestamp: new Date().toISOString() }))
+
+    render(<App />)
+    const prompt = screen.getByRole('textbox', { name: 'What should the DATA LAB agent do?' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.type(prompt, 'Work on the data please')
+    await user.click(screen.getByRole('button', { name: 'Send request to DATA LAB agent' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Create a bounded starting point for the empty pipeline' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Approve change' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create a bounded starting point for the empty pipeline' })).toBeNull())
+    const flow = screen.getByTestId('pipeline-flow')
+    expect(within(flow).getByText('Intended Dataset')).toBeTruthy()
+    expect(within(flow).getByText('Verify and Bind Dataset')).toBeTruthy()
+    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(2)
+    expect(screen.getAllByText('2 cards', { exact: false }).length).toBeGreaterThan(0)
+    expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
   })
 })
 
