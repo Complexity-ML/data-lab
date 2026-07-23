@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os'
 describe('source-first Setup updater', () => {
   it('resolves the helper installed beside the Electron user profile', () => {
     expect(setupHelperPath('/profile', 'darwin')).toBe('/profile/installer/data-lab-setup')
-    expect(setupHelperPath('C:\\profile', 'win32')).toMatch(/installer[\\/]data-lab-setup\.exe$/)
+    expect(setupHelperPath('C:\\profile', 'win32')).toBe(
+      'C:\\profile\\installer\\data-lab-setup.exe',
+    )
   })
 
   it('shares the selected channel with Setup without accepting arbitrary values', () => {

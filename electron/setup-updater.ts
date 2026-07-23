@@ -1,10 +1,15 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import type { AppUpdateChannel } from './update-policy.js'
 
 export function setupHelperPath(userDataDirectory: string, platform: NodeJS.Platform = process.platform) {
-  return join(userDataDirectory, 'installer', platform === 'win32' ? 'data-lab-setup.exe' : 'data-lab-setup')
+  const platformPath = platform === 'win32' ? win32 : posix
+  return platformPath.join(
+    userDataDirectory,
+    'installer',
+    platform === 'win32' ? 'data-lab-setup.exe' : 'data-lab-setup',
+  )
 }
 
 export function readSetupChannel(userDataDirectory: string): AppUpdateChannel | undefined {
