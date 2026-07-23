@@ -1,53 +1,80 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react'
-import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
 import type { Edge } from '@xyflow/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
+import { useState } from 'react'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentProposal, PipelineNode } from '../domain/pipeline'
 import { usePipelineVersions } from './usePipelineVersions'
 
-const proposal: AgentProposal = {
-  id: 'proposal-incremental-start',
-  title: 'Create a bounded starting point',
-  summary: 'Add a source and review checkpoint.',
-  rationale: 'The dataset is not bound yet.',
-  addedNodes: [
-    { id: 'source-intended-dataset', type: 'pipeline', position: { x: 0, y: 0 }, data: { kind: 'source', label: 'Intended Dataset', description: 'Awaiting binding.', owner: 'LABO Agent', status: 'draft', schema: [] } },
-    { id: 'review-bind-dataset', type: 'pipeline', position: { x: 300, y: 0 }, data: { kind: 'review', label: 'Verify and Bind Dataset', description: 'Human checkpoint.', owner: 'Data steward', status: 'draft', schema: [] } },
-  ],
-  updatedNodes: [],
-  addedEdges: [{ id: 'source-to-review', source: 'source-intended-dataset', target: 'review-bind-dataset', type: 'elastic' }],
-  removedEdgeIds: [],
-  datahubReads: [],
-  writeback: 'Local only.',
+const source: PipelineNode = {
+  id: 'source-intended-dataset',
+  type: 'pipeline',
+  position: { x: 100, y: 100 },
+  data: { kind: 'source', label: 'Intended Dataset', description: 'Awaiting a DataHub binding.', owner: 'LABO Agent', status: 'draft', schema: [] },
 }
 
-describe('reviewed proposal approval', () => {
-  it('commits an incremental reviewed graph even when the pipeline is not runnable yet', () => {
-    const setActivity = vi.fn()
-    const { result } = renderHook(() => {
-      const [nodes, setNodes] = useState<PipelineNode[]>([])
-      const [edges, setEdges] = useState<Edge[]>([])
-      const versions = usePipelineVersions({
-        edges,
-        nodes,
-        proposal,
-        setActivity,
-        setEdges,
-        setNodes,
-        setProjectTitle: vi.fn(),
-        setProposal: vi.fn(),
-        setSelectedId: vi.fn(),
-      })
-      return { edges, nodes, versions }
-    })
+const review: PipelineNode = {
+  id: 'review-bind-dataset',
+  type: 'pipeline',
+  position: { x: 400, y: 100 },
+  data: { kind: 'review', label: 'Verify and Bind Dataset', description: 'Human checkpoint.', owner: 'Data steward', status: 'draft', schema: [] },
+}
 
-    act(() => { result.current.versions.recordPendingReview(proposal) })
-    act(() => { expect(result.current.versions.approveProposal()).toBe(true) })
+const edge: Edge = { id: 'source-to-review', source: source.id, target: review.id, type: 'elastic' }
 
-    expect(result.current.nodes.map((node) => node.id)).toEqual(['source-intended-dataset', 'review-bind-dataset'])
-    expect(result.current.edges).toHaveLength(1)
-    expect(setActivity).toHaveBeenLastCalledWith('Change approved · atomic transaction passed · 2 pipeline readiness checks remain')
+const proposal: AgentProposal = {
+  id: 'proposal-empty-pipeline-start',
+  title: 'Create a bounded starting point for the empty pipeline',
+  summary: 'Add a placeholder source and a human checkpoint.',
+  rationale: 'The intended dataset must be bound before downstream work.',
+  writeback: 'Commit the reviewed graph locally.',
+  requiresHumanReview: true,
+  datahubReads: ['No DataHub URN is bound.'],
+  addedNodes: [source, review],
+  updatedNodes: [],
+  removedEdgeIds: [],
+  addedEdges: [edge],
+}
+
+afterEach(cleanup)
+
+function useApprovalHarness() {
+  const [nodes, setNodes] = useState<PipelineNode[]>([])
+  const [edges, setEdges] = useState<Edge[]>([])
+  const [currentProposal, setProposal] = useState<AgentProposal | undefined>(proposal)
+  const [activity, setActivity] = useState('idle')
+  const [, setProjectTitle] = useState('Untitled pipeline')
+  const [, setSelectedId] = useState('')
+  const versions = usePipelineVersions({
+    edges,
+    nodes,
+    proposal: currentProposal,
+    setActivity,
+    setEdges,
+    setNodes,
+    setProjectTitle,
+    setProposal,
+    setSelectedId,
+  })
+  return { activity, currentProposal, edges, nodes, ...versions }
+}
+
+describe('agent proposal approval', () => {
+  it('commits an approved incremental proposal into the active graph', () => {
+    const { result } = renderHook(() => useApprovalHarness())
+
+    act(() => { result.current.recordPendingReview(proposal) })
+    expect(result.current.versions.at(-1)?.status).toBe('pending-review')
+
+    let approved = false
+    act(() => { approved = result.current.approveProposal() })
+
+    expect(approved).toBe(true)
+    expect(result.current.nodes.map((node) => node.id)).toEqual([source.id, review.id])
+    expect(result.current.edges).toEqual([edge])
+    expect(result.current.currentProposal).toBeUndefined()
+    expect(result.current.versions.at(-1)?.status).toBe('committed')
+    expect(result.current.activity).toContain('Change approved')
   })
 })

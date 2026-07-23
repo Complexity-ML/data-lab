@@ -5,6 +5,7 @@ import { applyProposal, loadPipelinePreset, type AgentProposal, type PipelineNod
 import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from '../domain/versioning'
 import { atomicTransactionBlockers, validatePipeline } from '../validation'
 import { recordDiagnostic } from '../domain/diagnostics'
+import { notifyToast } from '../domain/toasts'
 
 type PipelineVersionsOptions = {
   edges: Edge[]
@@ -36,12 +37,23 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
   }
 
   const approveProposal = () => {
-    if (!proposal) return false
+    if (!proposal) {
+      setActivity('Approval unavailable · the proposal is no longer pending · graph unchanged')
+      recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'warning', detail: { reason: 'proposal-missing' } })
+      return false
+    }
     const next = applyProposal(nodes, edges, proposal)
     const nextIssues = validatePipeline(next.nodes, next.edges)
     const blocking = atomicTransactionBlockers(nextIssues)
     if (blocking.length) {
       setActivity(`Transaction rejected · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed · graph unchanged`)
+      notifyToast(blocking[0]?.detail ?? 'The proposed graph failed an atomic safety check.', 'error', 'Change not applied')
+      recordDiagnostic({
+        category: 'revision',
+        action: 'proposal.approve',
+        status: 'error',
+        detail: { blockerIds: blocking.map((issue) => issue.id), blockingIssues: blocking.length },
+      })
       return false
     }
     const layouted = layoutPipeline(next.nodes, next.edges)
@@ -57,6 +69,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     setActivity(readinessErrors > 0
       ? `Change approved · atomic transaction passed · ${readinessErrors} pipeline readiness check${readinessErrors === 1 ? '' : 's'} remain`
       : 'Change approved · atomic checks passed · revision committed')
+    notifyToast(`${layouted.length} card${layouted.length === 1 ? '' : 's'} and ${next.edges.length} connection${next.edges.length === 1 ? '' : 's'} committed to the active graph.`, 'success', 'Graph updated')
     recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'success', detail: { versionId: version.id, blockingIssues: 0 } })
     return true
   }
