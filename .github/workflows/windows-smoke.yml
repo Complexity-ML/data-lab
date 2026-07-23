@@ -27,7 +27,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          # electron-builder's Windows icon helper currently crashes after
+          # producing the ICO under Node 24 (0xC0000005 / 3221225477).
+          node-version: 22
           cache: npm
 
       - name: Install Windows dependencies

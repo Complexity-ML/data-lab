@@ -472,6 +472,15 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     WHERE incident_key = ? AND ${workspaceId ? 'workspace_id = ?' : 'workspace_id IS NULL'}
     ORDER BY created_at DESC, rowid DESC LIMIT 1
   `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as IncidentRow | undefined
+  const latestHistoricalProvenance = (column: 'source_system' | 'source_ref') => {
+    const row = target.prepare(`
+      SELECT ${column} AS value FROM incident_events
+      WHERE incident_key = ? AND ${workspaceId ? 'workspace_id = ?' : 'workspace_id IS NULL'}
+        AND ${column} IS NOT NULL AND TRIM(${column}) <> ''
+      ORDER BY created_at DESC, rowid DESC LIMIT 1
+    `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as { value?: string } | undefined
+    return optional(row?.value)
+  }
   const transition = value.transition as IncidentEventInput['transition']
   if (last && fingerprint && last.fingerprint === fingerprint && last.transition === transition && last.severity === value.severity) return { recorded: false }
   if (transition === 'recovered' && (!last || last.transition === 'recovered')) return { recorded: false }
@@ -487,8 +496,8 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
     severity: value.severity as IncidentEventInput['severity'],
     title,
     detail,
-    sourceSystem: optional(value.sourceSystem) ?? last?.source_system ?? undefined,
-    sourceRef: optional(value.sourceRef) ?? last?.source_ref ?? undefined,
+    sourceSystem: optional(value.sourceSystem) ?? optional(last?.source_system) ?? latestHistoricalProvenance('source_system'),
+    sourceRef: optional(value.sourceRef) ?? optional(last?.source_ref) ?? latestHistoricalProvenance('source_ref'),
     fingerprint,
     cardId: optional(value.cardId),
     branchId: optional(value.branchId),
