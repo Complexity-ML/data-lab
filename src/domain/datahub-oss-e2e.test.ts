@@ -2,12 +2,14 @@ import type { Edge } from '@xyflow/react'
 import { describe, expect, it } from 'vitest'
 import mcpEvidence from '../../examples/datahub-oss/mcp-evidence.json'
 import correctionFixture from '../../examples/datahub-oss/reviewed-correction.json'
+import reviewedPipeline from '../../examples/datahub-oss/reviewed-pipeline.json'
 import validationReport from '../../examples/datahub-oss/validation-report.json'
 import { validateProposal } from '../../electron/proposal-contract'
 import { validatePipeline } from '../validation'
 import { materializeAiProposal, type AiProposalResponse } from './ai'
 import { executePipelineAtomically } from './atomic-execution'
 import { applyProposal, type PipelineNode } from './pipeline'
+import { parsePipelineExport } from './pipeline-io'
 
 const sourceUrn = 'urn:li:dataset:(urn:li:dataPlatform:dbt,b2fd91.ORDER_ENTRY_DB.analytics.order_details,PROD)'
 const initialNodes: PipelineNode[] = [
@@ -83,5 +85,18 @@ describe('DataHub OSS end-to-end acceptance fixture', () => {
       candidateAfterReviewedDiff: { blockingIssues: 0, directUnprotectedEdgePresent: false },
       atomicReplay: { beforeHumanDecision: 'waiting', afterApproval: 'completed', afterRejection: 'failed' },
     })
+  })
+
+  it('ships an importable reviewed pipeline with committed DataHub evidence provenance', () => {
+    const artifact = parsePipelineExport(JSON.stringify(reviewedPipeline))
+    const blocking = validatePipeline(artifact.graph.nodes, artifact.graph.edges).filter((finding) => finding.severity === 'error')
+    const version = artifact.versions[0]
+
+    expect(artifact.projectTitle).toBe('Order details PII protection')
+    expect(artifact.graph.nodes.map((node) => node.data.kind)).toEqual(expect.arrayContaining(['source', 'profile', 'impact', 'transform', 'review', 'output']))
+    expect(blocking).toEqual([])
+    expect(version.status).toBe('committed')
+    expect(version.blockingIssues).toBe(0)
+    expect(version.evidence?.map((item) => item.tool)).toEqual(['get_entities', 'list_schema_fields', 'get_lineage'])
   })
 })

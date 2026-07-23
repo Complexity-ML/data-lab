@@ -128,6 +128,14 @@ The complementary DataHub Skills provide workflow instructions on top of MCP too
 
 See [DataHub MCP Server](https://docs.datahub.com/docs/features/feature-guides/mcp) and [DataHub Skills](https://docs.datahub.com/docs/dev-guides/agent-context/skills).
 
+## Evidence and screenshots
+
+- [Sanitized DataHub OSS MCP evidence](examples/datahub-oss/mcp-evidence.json)
+- [Reviewed graph correction](examples/datahub-oss/reviewed-correction.json)
+- [Importable approved pipeline and evidence checkpoint](examples/datahub-oss/reviewed-pipeline.json)
+- [Atomic validation and replay report](examples/datahub-oss/validation-report.json)
+- [Final application screenshots](docs/hackathon-submission.md#application-screenshots)
+
 ## Security model
 
 - Electron renderer isolation is enabled (`contextIsolation`, `sandbox`, no Node integration).
