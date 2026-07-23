@@ -170,6 +170,7 @@ DATAHUB_GMS_URL=http://localhost:8080 npm run electron:dev
 - [ ] Record and publish the final public demo video under three minutes.
 - [x] Add the public repository link to Devpost.
 - [x] Verify the Devpost description, pitch, and technology list.
+- [x] Document the adapted LABO AI graph-placement provenance as pre-existing Apache-2.0 work.
 - [ ] Add the final public demo video and optional live-demo links to Devpost.
 - [ ] Opt in to the feedback survey if desired.
 
