@@ -69,10 +69,29 @@ Trust boundaries and failure modes are detailed in [`threat-model.md`](threat-mo
 
 - [`examples/datahub-oss/mcp-evidence.json`](../examples/datahub-oss/mcp-evidence.json): sanitized successful MCP reads.
 - [`examples/datahub-oss/reviewed-correction.json`](../examples/datahub-oss/reviewed-correction.json): complete reviewed graph diff.
+- [`examples/datahub-oss/reviewed-pipeline.json`](../examples/datahub-oss/reviewed-pipeline.json): importable approved graph and evidence checkpoint.
 - [`examples/datahub-oss/validation-report.json`](../examples/datahub-oss/validation-report.json): validation and atomic replay results.
 - [`examples/generated-transform.sql`](../examples/generated-transform.sql): sample generated transformation artifact.
 
 No raw rows, credentials, authorization headers, or provider secrets are committed.
+
+## Application screenshots
+
+### Honest blank workbench
+
+![DATA LAB blank workbench](assets/data-lab-blank-workbench.png)
+
+### Official DataHub MCP connected to local OSS
+
+![DATA LAB connected to DataHub OSS MCP](assets/data-lab-datahub-connected.png)
+
+### Reviewed PII-protection graph
+
+![DATA LAB reviewed PII-protection pipeline](assets/data-lab-reviewed-pipeline.png)
+
+### Version checkpoint with DataHub evidence provenance
+
+![DATA LAB checkpoint showing get_entities, list_schema_fields and get_lineage evidence](assets/data-lab-version-checkpoint.png)
 
 ## Demo script — target 2:45
 
@@ -130,7 +149,7 @@ DATAHUB_GMS_URL=http://localhost:8080 npm run electron:dev
 - [x] Real sanitized DataHub OSS MCP evidence.
 - [x] Complete sample graph diff and atomic validation report.
 - [x] Final project description, technology list, architecture, and timed demo script.
-- [ ] Capture final application screenshots after the DataHub OSS revision is visible in the merged desktop build.
+- [x] Capture final application screenshots after the DataHub OSS revision is visible in the desktop build.
 - [ ] Record and publish the final public demo video under three minutes.
 - [x] Add the public repository link to Devpost.
 - [x] Verify the Devpost description, pitch, and technology list.
