@@ -63,6 +63,19 @@ function identifier(value: unknown, label: string, nullable = false): string | n
   return result
 }
 
+function sourceHandle(value: unknown, label: string): 'approved' | 'quarantine' | null {
+  if (value === null) return null
+  if (typeof value !== 'string') throw new Error(`${label} must be text or null`)
+  const normalized = value.trim().toLowerCase().replace(/[\s_]+/g, '-')
+  if (['', 'n/a', 'na', 'none', 'null', 'not-applicable'].includes(normalized)) return null
+  if (normalized === 'approved' || normalized === 'quarantine') return normalized
+  const suffix = normalized.match(/^(approved|quarantine)-(?:branch|path|output|handle)$/)
+  if (suffix) return suffix[1] as 'approved' | 'quarantine'
+  const prefix = normalized.match(/^(?:branch|path|output|handle)-(approved|quarantine)$/)
+  if (prefix) return prefix[1] as 'approved' | 'quarantine'
+  throw new Error(`${label} must be null, approved or quarantine`)
+}
+
 function compactGraph(payload: unknown) {
   const input = record(payload, 'Agent request')
   const graph = record(input.graph, 'Agent request graph')
@@ -100,7 +113,7 @@ function validateAction(value: unknown, index: number): ValidatedProposalAction 
     rule: text(action.rule, `Proposal action ${index + 1} rule`, 2_000, true),
     source: identifier(action.source, `Proposal action ${index + 1} source`, true),
     target: identifier(action.target, `Proposal action ${index + 1} target`, true),
-    source_handle: identifier(action.source_handle, `Proposal action ${index + 1} source_handle`, true),
+    source_handle: sourceHandle(action.source_handle, `Proposal action ${index + 1} source_handle`),
     reason: text(action.reason, `Proposal action ${index + 1} reason`, 500)!,
   }
 }
