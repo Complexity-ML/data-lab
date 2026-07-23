@@ -206,22 +206,31 @@ describe('SQLite workspace persistence', () => {
       detail: 'same timeout',
       fingerprint: 'warning-v1',
     }).recorded).toBe(false)
-    expect(recordIncidentEvent(target, {
+    const worsened = recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
       transition: 'opened',
       severity: 'critical',
       title: 'Customer evidence unavailable',
       detail: 'all metadata reads timed out',
       fingerprint: 'critical-v1',
-    }).event?.transition).toBe('worsened')
-    expect(recordIncidentEvent(target, {
+    })
+    expect(worsened.event).toMatchObject({
+      transition: 'worsened',
+      sourceSystem: 'DataHub',
+      sourceRef: 'urn:li:dataset:customers',
+    })
+    const recovered = recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
       transition: 'recovered',
       severity: 'info',
       title: 'Customer evidence available',
       detail: 'all required metadata reads returned',
       fingerprint: 'healthy-v1',
-    }).recorded).toBe(true)
+    })
+    expect(recovered).toMatchObject({
+      recorded: true,
+      event: { sourceSystem: 'DataHub', sourceRef: 'urn:li:dataset:customers' },
+    })
     expect(recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
       transition: 'recovered',
@@ -230,14 +239,18 @@ describe('SQLite workspace persistence', () => {
       detail: 'still healthy',
       fingerprint: 'healthy-v1',
     }).recorded).toBe(false)
-    expect(recordIncidentEvent(target, {
+    const reopened = recordIncidentEvent(target, {
       incidentKey: 'datahub-evidence:customers',
       transition: 'opened',
       severity: 'warning',
       title: 'Customer evidence unavailable again',
       detail: 'a later monitored fingerprint failed',
       fingerprint: 'warning-v2',
-    }).recorded).toBe(true)
+    })
+    expect(reopened).toMatchObject({
+      recorded: true,
+      event: { sourceSystem: 'DataHub', sourceRef: 'urn:li:dataset:customers' },
+    })
 
     expect(listIncidentEvents(target).map((event) => event.transition)).toEqual(['opened', 'recovered', 'worsened', 'opened'])
     expect(listIncidentEvents(target)[0].fingerprint).toBe('warning-v2')
