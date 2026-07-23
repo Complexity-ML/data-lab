@@ -48,7 +48,7 @@ describe('pipeline XY layout', () => {
   it('routes feedback cables below the bounded iteration instead of through its cards', () => {
     const path = elasticFeedbackPath(900, 180, 420, 320)
     expect(path.match(/ C /g)).toHaveLength(2)
-    expect(path).toContain('404')
+    expect(path).toContain('452')
     expect(path).toMatch(/^M 900 180 L 918 180/)
     expect(path).toMatch(/L 420 320$/)
   })

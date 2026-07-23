@@ -180,7 +180,7 @@ export default function App() {
   const onReconnect = (oldEdge: Edge, connection: Connection) => {
     if (!connection.source || !connection.target) return
     const feedback = connection.sourceHandle === 'feedback'
-    setEdges((current) => reconnectEdge(oldEdge, connection, current).map((edge) => edge.id === oldEdge.id
+    setEdges((current) => reconnectEdge(oldEdge, connection, current, { shouldReplaceId: false }).map((edge) => edge.id === oldEdge.id
       ? { ...edge, type: 'elastic', label: feedback ? 'next iteration' : undefined }
       : edge))
     setActivity(feedback ? 'Feedback cable reconnected · next bounded iteration preserved' : 'Elastic cable reconnected · lineage validation refreshed')
