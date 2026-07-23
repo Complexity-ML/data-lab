@@ -34,5 +34,5 @@ export const unavailableAppUpdateStatus: AppUpdateStatus = {
   canCheck: false,
   canDownload: false,
   canInstall: false,
-  message: 'Updates are available only in a signed DATA LAB macOS application.',
+  message: 'Updates are available only in a signed DATA LAB desktop application.',
 }

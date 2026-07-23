@@ -363,10 +363,10 @@ export function SettingsModal(props: SettingsModalProps) {
         </article>}
 
         {activeSection === 'updates' && <article className="settings-page">
-          <div className="settings-page-heading"><small>APPLICATION UPDATES</small><h3>Signed macOS release channels</h3><p>DATA LAB never downloads or installs an update without your explicit action.</p></div>
+          <div className="settings-page-heading"><small>APPLICATION UPDATES</small><h3>Signed desktop release channels</h3><p>DATA LAB never downloads or installs an update without your explicit action.</p></div>
           <section className="settings-section update-settings">
             <div className="settings-section-title"><span><ShieldCheck size={15} /> Installed version</span><small>{appUpdateStatus.currentVersion}</small></div>
-            <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Apple Developer ID verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Unsigned update path blocked'}</strong><small>{appUpdateStatus.message}</small></div></div>
+            <div className={`update-trust update-${appUpdateStatus.currentSignatureVerified ? 'trusted' : 'blocked'}`}><ShieldCheck size={19} /><div><strong>{appUpdateStatus.currentSignatureVerified ? 'Desktop signature verified' : appUpdateStatus.phase === 'unavailable' ? 'Desktop release required' : 'Unsigned update path blocked'}</strong><small>{appUpdateStatus.message}</small></div></div>
             <div aria-label="Application update channel" className="theme-switch update-channel-switch" role="radiogroup">
               <button aria-checked={appUpdateStatus.channel === 'stable'} className={appUpdateStatus.channel === 'stable' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('stable'))} role="radio" type="button"><span><strong>Stable</strong><small>Verified version tags intended for normal use.</small></span></button>
               <button aria-checked={appUpdateStatus.channel === 'main'} className={appUpdateStatus.channel === 'main' ? 'is-active' : ''} disabled={appUpdateBusy || appUpdateStatus.phase === 'unavailable'} onClick={() => void runUpdateAction(() => onSetAppUpdateChannel('main'))} role="radio" type="button"><span><strong>Main preview</strong><small>Explicit opt-in builds from main; may be less stable.</small></span></button>
@@ -376,7 +376,7 @@ export function SettingsModal(props: SettingsModalProps) {
             <div className="ai-connection-actions"><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canCheck} icon={<RefreshCw size={14} />} onClick={() => void runUpdateAction(onCheckForAppUpdate)} variant="ghost">Check</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canDownload} icon={<Download size={14} />} onClick={() => void runUpdateAction(onDownloadAppUpdate)} variant="ghost">Download</ActionButton><ActionButton disabled={appUpdateBusy || !appUpdateStatus.canInstall} icon={<Play size={14} />} onClick={() => void runUpdateAction(onInstallAppUpdate)} variant="primary">Restart &amp; install</ActionButton></div>
             {(updateFeedback || appUpdateStatus.error) && <p aria-live="polite" className="settings-feedback">{appUpdateStatus.error ?? updateFeedback}</p>}
           </section>
-          <p className="settings-note">Stable is the default. Main preview must be selected manually and never bypasses Developer ID signing, notarization, or the native installation confirmation.</p>
+          <p className="settings-note">Stable is the default. Main preview must be selected manually and never bypasses platform signing, notarization where applicable, or the native installation confirmation.</p>
         </article>}
 
         {activeSection === 'presets' && <article className="settings-page">

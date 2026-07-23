@@ -8,9 +8,12 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   scripts: Record<string, string>
   dependencies: Record<string, string>
   build: {
+    asarUnpack?: string[]
     forceCodeSigning?: boolean
     generateUpdatesFilesForAllChannels?: boolean
     mac: { identity?: string; hardenedRuntime?: boolean; notarize?: boolean; icon?: string; target?: Array<{ target: string; arch: string[] }> }
+    win?: { icon?: string; target?: Array<{ target: string; arch: string[] }> }
+    nsis?: { oneClick?: boolean; perMachine?: boolean; allowToChangeInstallationDirectory?: boolean; shortcutName?: string }
     publish?: Array<{ provider?: string; owner?: string; repo?: string }>
   }
 }
@@ -47,5 +50,28 @@ describe('macOS release configuration', () => {
     expect(workflow).toContain('codesign --verify --deep --strict')
     expect(workflow).toContain('spctl --assess --type execute')
     expect(workflow).toContain('stapler validate')
+  })
+
+  it('builds a Windows installer and portable updater archive without weakening production signing', () => {
+    expect(packageJson.build.win?.icon).toBe('build/icon-1024.png')
+    expect(packageJson.build.win?.target).toEqual([
+      { target: 'nsis', arch: ['x64', 'arm64'] },
+      { target: 'zip', arch: ['x64', 'arm64'] },
+    ])
+    expect(packageJson.build.nsis).toMatchObject({ oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true, shortcutName: 'DATA LAB' })
+    expect(packageJson.build.asarUnpack).toContain('node_modules/@openai/codex-*/vendor/**/*')
+    expect(packageJson.scripts['package:win:dir']).toContain('-c.forceCodeSigning=false')
+    expect(packageJson.scripts['package:win:ci']).toContain('-c.forceCodeSigning=false')
+  })
+
+  it('packages and inspects Windows artifacts on a native GitHub runner', () => {
+    const workflow = readFileSync(join(root, '.github/workflows/windows-smoke.yml'), 'utf8')
+    expect(workflow).toContain('runs-on: windows-2022')
+    expect(workflow).toContain('npm run package:win:ci')
+    expect(workflow).toContain("Get-ChildItem release -Filter 'DATA-LAB-*-x64.exe'")
+    expect(workflow).toContain("Get-ChildItem release -Recurse -Filter 'DATA LAB.exe'")
+    expect(workflow).toContain("@openai/codex-win32-x64")
+    expect(workflow).toContain("-Filter 'codex.exe'")
+    expect(workflow).toContain("$info.ProductName -ne 'DATA LAB'")
   })
 })

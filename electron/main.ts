@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type BrowserWindowConstructorOptions, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type MenuItemConstructorOptions } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
@@ -11,6 +11,7 @@ import { reserveHumanReviewNotification } from './human-review-notifications.js'
 import { ensureDiagnosticLog, exportDiagnosticBundle, recordDiagnosticEvent } from './diagnostics.js'
 import { AppUpdateController } from './app-updater.js'
 import { parseUpdateChannel } from './update-policy.js'
+import { desktopWindowFrame } from './window-platform.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -142,9 +143,7 @@ function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown; ver
 }
 
 function createMainWindow() {
-  const platformFrame: BrowserWindowConstructorOptions = process.platform === 'darwin'
-    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 26 } }
-    : { titleBarStyle: 'default', autoHideMenuBar: true }
+  const platformFrame = desktopWindowFrame(process.platform)
   const window = new BrowserWindow({
     width: 1500,
     height: 920,
@@ -312,7 +311,7 @@ app.whenReady().then(() => {
       type: 'question' as const,
       title: 'Install verified DATA LAB update',
       message: `Restart and install DATA LAB ${status.availableVersion ?? 'update'}?`,
-      detail: 'The application will close. macOS and electron-updater will enforce the downloaded application signature before replacement.',
+      detail: 'The application will close. The operating system and electron-updater will enforce the downloaded application signature before replacement.',
       buttons: ['Restart & install', 'Cancel'],
       defaultId: 1,
       cancelId: 1,

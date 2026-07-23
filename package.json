@@ -16,6 +16,8 @@
     "electron:start": "npm run build && npm run build:electron && electron .",
     "package:mac:dir": "npm run build && npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --publish never -c.forceCodeSigning=false -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
     "package:mac:release": "npm run build && npm run build:electron && electron-builder --mac dmg zip --x64 --arm64 --publish always",
+    "package:win:dir": "npm run build && npm run build:electron && electron-builder --win dir --x64 --publish never -c.forceCodeSigning=false",
+    "package:win:ci": "npm run build && npm run build:electron && electron-builder --win nsis zip --x64 --publish never -c.forceCodeSigning=false",
     "verify:electron-load": "npm run build:electron && node scripts/verify-electron-load.mjs",
     "verify:datahub-oss": "node scripts/verify-datahub-oss.mjs --query=email",
     "verify:datahub-agent": "npm run build:electron && node scripts/generate-datahub-agent-proposal.mjs",
@@ -31,6 +33,9 @@
       "output": "release"
     },
     "asar": true,
+    "asarUnpack": [
+      "node_modules/@openai/codex-*/vendor/**/*"
+    ],
     "forceCodeSigning": true,
     "generateUpdatesFilesForAllChannels": true,
     "files": [
@@ -53,6 +58,27 @@
           "arch": ["x64", "arm64"]
         }
       ]
+    },
+    "win": {
+      "icon": "build/icon-1024.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "DATA LAB"
     },
     "publish": [
       {
