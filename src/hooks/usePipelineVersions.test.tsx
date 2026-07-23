@@ -3,7 +3,7 @@
 import type { Edge } from '@xyflow/react'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { useState } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentProposal, PipelineNode } from '../domain/pipeline'
 import { usePipelineVersions } from './usePipelineVersions'
 
@@ -39,7 +39,7 @@ const proposal: AgentProposal = {
 
 afterEach(cleanup)
 
-function useApprovalHarness() {
+function useApprovalHarness(resolveApprovedExecution?: (nodes: PipelineNode[], edges: Edge[]) => PipelineNode[]) {
   const [nodes, setNodes] = useState<PipelineNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [currentProposal, setProposal] = useState<AgentProposal | undefined>(proposal)
@@ -50,6 +50,7 @@ function useApprovalHarness() {
     edges,
     nodes,
     proposal: currentProposal,
+    resolveApprovedExecution,
     setActivity,
     setEdges,
     setNodes,
@@ -78,5 +79,23 @@ describe('agent proposal approval', () => {
     expect(result.current.versions.at(-1)?.blockingIssues).toBe(0)
     expect(result.current.activity).toContain('Change approved')
     expect(result.current.activity).toContain('readiness')
+  })
+
+  it('commits the branch state returned by the Human Review checkpoint resolver', () => {
+    const resolveApprovedExecution = vi.fn((nodes: PipelineNode[]) => nodes.map((node) =>
+      node.data.kind === 'review'
+        ? { ...node, data: { ...node.data, runState: 'completed' as const, runSequence: 7 } }
+        : node))
+    const { result } = renderHook(() => useApprovalHarness(resolveApprovedExecution))
+
+    act(() => { result.current.recordPendingReview(proposal) })
+    act(() => { result.current.approveProposal() })
+
+    expect(resolveApprovedExecution).toHaveBeenCalledOnce()
+    expect(result.current.nodes.find((node) => node.id === review.id)?.data).toMatchObject({
+      runState: 'completed',
+      runSequence: 7,
+    })
+    expect(result.current.versions.at(-1)?.nodes.find((node) => node.id === review.id)?.data.runState).toBe('completed')
   })
 })

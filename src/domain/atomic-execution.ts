@@ -27,6 +27,7 @@ export interface AtomicPipelineRun {
 interface AtomicExecutionOptions {
   reviewDecisions?: Record<string, 'approved' | 'rejected' | 'pending'>
   shouldStop?(completedNodeIds: string[]): boolean
+  resumeFrom?: AtomicPipelineRun
 }
 
 function branchState(outputId: string, states: Record<string, AtomicRunState>, incoming: Map<string, string[]>): AtomicBranchResult['state'] {
@@ -47,14 +48,20 @@ function branchState(outputId: string, states: Record<string, AtomicRunState>, i
 }
 
 export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], options: AtomicExecutionOptions = {}): AtomicPipelineRun {
-  const nodeStates = Object.fromEntries(nodes.map((node) => [node.id, 'idle' as AtomicRunState]))
+  const previous = options.resumeFrom
+  const nodeStates: Record<string, AtomicRunState> = Object.fromEntries(nodes.map<[string, AtomicRunState]>((node) => {
+    const previousState = previous?.nodeStates[node.id]
+    if (previousState === 'completed' || previousState === 'failed' || previousState === 'stopped') return [node.id, previousState]
+    if (previousState === 'waiting' && !options.reviewDecisions?.[node.id]) return [node.id, 'waiting']
+    return [node.id, 'idle' as AtomicRunState]
+  }))
   if (nodes.length === 0) return { started: false, state: 'idle', nodeStates, events: [], branches: [], reason: 'A pipeline requires at least one card.' }
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
   for (const edge of edges) if (edge.sourceHandle !== 'feedback' && byId.has(edge.source) && byId.has(edge.target)) incoming.get(edge.target)!.push(edge.source)
-  const events: AtomicExecutionEvent[] = []
-  const completed: string[] = []
-  let sequence = 0
+  const events: AtomicExecutionEvent[] = previous ? [...previous.events] : []
+  const completed = nodes.filter((node) => nodeStates[node.id] === 'completed').map((node) => node.id)
+  let sequence = events.reduce((maximum, event) => Math.max(maximum, event.sequence), 0)
   let progressed = true
 
   while (progressed) {
@@ -108,6 +115,22 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
     : branches.length > 0 && branches.every((branch) => branch.state === 'completed') ? 'completed'
       : 'failed'
   return { started: true, state, nodeStates, events, branches, reason: state === 'failed' ? 'The graph could not complete every terminal branch.' : undefined }
+}
+
+export function resumePipelineAtomically(
+  nodes: PipelineNode[],
+  edges: Edge[],
+  previous: AtomicPipelineRun,
+  reviewDecisions: Record<string, 'approved' | 'rejected' | 'pending'>,
+): AtomicPipelineRun {
+  if (!previous.started || previous.state !== 'waiting') throw new Error('Only a waiting atomic run can be resumed.')
+  const waitingReviewIds = nodes
+    .filter((node) => node.data.kind === 'review' && previous.nodeStates[node.id] === 'waiting')
+    .map((node) => node.id)
+  if (!waitingReviewIds.some((nodeId) => reviewDecisions[nodeId] === 'approved' || reviewDecisions[nodeId] === 'rejected')) {
+    throw new Error('Resume requires an explicit decision for a waiting Human Review card.')
+  }
+  return executePipelineAtomically(nodes, edges, { reviewDecisions, resumeFrom: previous })
 }
 
 export function applyAtomicRunState(nodes: PipelineNode[], run: AtomicPipelineRun): PipelineNode[] {

@@ -59,6 +59,7 @@ export interface AiProposalResponse {
   proposal: AiProposalContract
   model: string
   usage?: unknown
+  toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
 const kinds = new Set<CardKind>(['source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
@@ -175,6 +176,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
     model: response.model,
     datahubReads: Array.isArray(contract.evidence) ? contract.evidence.map((item) => text(item, '', 500)).filter(Boolean).slice(0, 12) : [],
     writeback: text(contract.writeback, 'Record the approved decision and lineage in DataHub.', 800),
+    toolTrace: response.toolTrace?.slice(0, 96),
     addedNodes,
     updatedNodes,
     addedEdges,

@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { getAiStatus, modelCapabilities, redactSensitive, refreshAiModelCatalog, saveAiSettings } from './ai-provider.js'
+import { getAiStatus, modelCapabilities, redactSensitive, refreshAiModelCatalog, runAiProposal, saveAiSettings } from './ai-provider.js'
 
 let directory: string
 
@@ -91,5 +91,71 @@ describe('provider model capabilities', () => {
     expect(status.providers.openai.catalogRefreshedAt).toBeTruthy()
     expect(status.providers.openai.modelUnavailable).toBe(true)
     expect(status.settings.model).toBe('my-fine-tuned-model')
+  })
+})
+
+describe('OpenAI agent tool loop', () => {
+  it('preserves reasoning output, returns tool results, and finishes with a host-validated proposal', async () => {
+    await saveAiSettings({ provider: 'openai', model: 'gpt-5.6-terra', apiKey: 'sk-tool-secret' })
+    const requests: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>
+      requests.push(request)
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({
+          model: 'gpt-5.6-terra',
+          output: [
+            { type: 'reasoning', id: 'reasoning-1', summary: [] },
+            { type: 'function_call', call_id: 'call-inspect', name: 'inspect_graph', arguments: '{"node_ids":[]}' },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        model: 'gpt-5.6-terra',
+        usage: { input_tokens: 100, output_tokens: 20 },
+        output: [
+          { type: 'function_call', call_id: 'call-add', name: 'add_card', arguments: JSON.stringify({
+            node_id: 'profile-1',
+            kind: 'profile',
+            label: 'Customer profile',
+            description: null,
+            owner: null,
+            rule: 'schema=versioned',
+            reason: 'Keep compact evidence.',
+          }) },
+          { type: 'function_call', call_id: 'call-validate', name: 'validate_plan', arguments: '{}' },
+          { type: 'function_call', call_id: 'call-finish', name: 'finish_plan', arguments: JSON.stringify({
+            title: 'Add profile memory',
+            summary: 'Store a compact reusable metadata profile.',
+            rationale: 'Avoid repeated schema reconstruction.',
+            requires_human_review: false,
+            confidence: 0.92,
+            writeback: 'Commit locally after review.',
+            evidence: ['list_schema_fields · ok'],
+          }) },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+
+    const result = await runAiProposal({
+      graph: {
+        nodes: [{ id: 'source-1', kind: 'source' }],
+        edges: [],
+      },
+    })
+
+    expect(result.proposal.actions[0]).toMatchObject({
+      type: 'add_card',
+      node_id: 'profile-1',
+      description: 'Agent-proposed Data Profile awaiting graph review.',
+    })
+    expect(result.toolTrace?.map((item) => item.tool)).toEqual(['inspect_graph', 'add_card', 'validate_plan', 'finish_plan'])
+    expect(requests[0]).toMatchObject({ tool_choice: 'required', parallel_tool_calls: true, store: false })
+    expect(Array.isArray(requests[0].tools)).toBe(true)
+    const secondInput = requests[1].input as Record<string, unknown>[]
+    expect(secondInput).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'reasoning', id: 'reasoning-1' }),
+      expect.objectContaining({ type: 'function_call_output', call_id: 'call-inspect' }),
+    ]))
   })
 })

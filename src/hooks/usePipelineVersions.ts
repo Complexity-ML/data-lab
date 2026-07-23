@@ -17,9 +17,11 @@ type PipelineVersionsOptions = {
   setProjectTitle: Dispatch<SetStateAction<string>>
   setProposal: Dispatch<SetStateAction<AgentProposal | undefined>>
   setSelectedId: Dispatch<SetStateAction<string>>
+  resolveApprovedExecution?(nodes: PipelineNode[], edges: Edge[]): PipelineNode[]
+  resolveRejectedExecution?(nodes: PipelineNode[], edges: Edge[]): PipelineNode[]
 }
 
-export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId }: PipelineVersionsOptions) {
+export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExecution, resolveRejectedExecution, setActivity, setEdges, setNodes, setProjectTitle, setProposal, setSelectedId }: PipelineVersionsOptions) {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [pendingVersionId, setPendingVersionId] = useState<string>()
 
@@ -57,14 +59,15 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
       return false
     }
     const layouted = layoutPipeline(next.nodes, next.edges)
-    const version = createPipelineVersion(layouted, next.edges, proposal.title, 'agent', nextIssues)
+    const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
+    const version = createPipelineVersion(committedNodes, next.edges, proposal.title, 'agent', nextIssues)
     // A safe incremental graph transaction may still have pipeline-readiness
     // findings (for example, no Output card yet). Keep this field scoped to
     // atomic transaction blockers so committed revisions never claim that
     // their atomic validation failed.
     version.blockingIssues = blocking.length
     version.evidence = proposal.evidence
-    setNodes(layouted)
+    setNodes(committedNodes)
     setEdges(next.edges)
     setVersions((current) => commitPendingVersion(current, pendingVersionId, version))
     setSelectedId(proposal.updatedNodes[0]?.nodeId ?? proposal.addedNodes[0]?.id ?? '')
@@ -74,13 +77,14 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     setActivity(readinessErrors > 0
       ? `Change approved · atomic transaction passed · ${readinessErrors} pipeline readiness check${readinessErrors === 1 ? '' : 's'} remain`
       : 'Change approved · atomic checks passed · revision committed')
-    notifyToast(`${layouted.length} card${layouted.length === 1 ? '' : 's'} and ${next.edges.length} connection${next.edges.length === 1 ? '' : 's'} committed to the active graph.`, 'success', 'Graph updated')
+    notifyToast(`${committedNodes.length} card${committedNodes.length === 1 ? '' : 's'} and ${next.edges.length} connection${next.edges.length === 1 ? '' : 's'} committed to the active graph.`, 'success', 'Graph updated')
     recordDiagnostic({ category: 'revision', action: 'proposal.approve', status: 'success', detail: { versionId: version.id, blockingIssues: 0 } })
     return true
   }
 
   const rejectProposal = () => {
     if (pendingVersionId) setVersions((current) => rejectPendingVersion(current, pendingVersionId))
+    if (resolveRejectedExecution) setNodes((current) => resolveRejectedExecution(current, edges))
     setPendingVersionId(undefined)
     setProposal(undefined)
     setActivity('Agent proposal rejected · revision marked rejected · active branch unchanged')
@@ -94,11 +98,12 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     const blocking = atomicTransactionBlockers(versionIssues)
     if (blocking.length > 0) { setActivity(`Review cannot be approved · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed`); return false }
     const layouted = layoutPipeline(version.nodes, version.edges)
-    setNodes(layouted)
+    const committedNodes = resolveApprovedExecution?.(layouted, version.edges) ?? layouted
+    setNodes(committedNodes)
     setEdges(version.edges)
-    setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: layouted, blockingIssues: 0, status: 'committed' as const } : candidate))
+    setVersions((current) => current.map((candidate) => candidate.id === versionId ? { ...candidate, nodes: committedNodes, blockingIssues: 0, status: 'committed' as const } : candidate))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
-    setSelectedId(layouted[0]?.id ?? '')
+    setSelectedId(committedNodes[0]?.id ?? '')
     const readinessErrors = versionIssues.filter((issue) => issue.severity === 'error').length - blocking.length
     setActivity(readinessErrors > 0
       ? `Human Review approved · ${version.label} committed · ${readinessErrors} pipeline readiness check${readinessErrors === 1 ? '' : 's'} remain`
@@ -110,6 +115,7 @@ export function usePipelineVersions({ edges, nodes, proposal, setActivity, setEd
     const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
     if (!version) { setActivity('Review is no longer pending'); return false }
     setVersions((current) => rejectPendingVersion(current, versionId))
+    if (resolveRejectedExecution) setNodes((current) => resolveRejectedExecution(current, edges))
     if (pendingVersionId === versionId) { setPendingVersionId(undefined); setProposal(undefined) }
     setActivity(`Human Review rejected · ${version.label} remains visible in history · active graph unchanged`)
     return true
