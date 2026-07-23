@@ -16,9 +16,10 @@
     "electron:start": "npm run build && npm run build:electron && electron .",
     "package:mac:dir": "npm run build && npm run build:electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --publish never -c.forceCodeSigning=false -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
     "package:mac:release": "npm run build && npm run build:electron && electron-builder --mac dmg zip --x64 --arm64 --publish always",
+    "verify:electron-load": "npm run build:electron && node scripts/verify-electron-load.mjs",
     "verify:datahub-oss": "node scripts/verify-datahub-oss.mjs --query=email",
     "verify:datahub-agent": "npm run build:electron && node scripts/generate-datahub-agent-proposal.mjs --confirm-external-share",
-    "test": "vitest run",
+    "test": "vitest run && npm run verify:electron-load",
     "preview": "vite preview"
   },
   "build": {
