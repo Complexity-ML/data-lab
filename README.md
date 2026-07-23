@@ -4,6 +4,8 @@ DATA LAB is a human-reviewed visual pipeline studio for the **Build with DataHub
 
 **Primary challenge track:** Agents That Do Real Work.
 
+**Project links:** [Devpost draft](https://devpost.com/software/data-lab) · [Public source repository](https://github.com/Complexity-ML/data-lab)
+
 ## Why it exists
 
 Most visual pipeline builders let users connect blocks without understanding the real catalog. DATA LAB loads schema, ownership, tags and lineage from DataHub first. Its agent can therefore answer questions such as:
