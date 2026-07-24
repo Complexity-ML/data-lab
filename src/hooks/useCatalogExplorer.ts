@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -16,11 +16,26 @@ export function useCatalogExplorer(options: {
 }) {
   const { incidentSummaries, inspectAsset, logIncident, setActivity, setNodes } = options
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
+  const checkpointKey = useCallback((explorer: PipelineNode, query: string) => {
+    const value = `${explorer.id}:${explorer.data.rule ?? ''}:${query}`
+    let hash = 2166136261
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index)
+      hash = Math.imul(hash, 16777619)
+    }
+    return `catalog:${(hash >>> 0).toString(16).padStart(8, '0')}`
+  }, [])
+  const persistProgress = useCallback((key: string, progress: CatalogExplorationProgress) => {
+    void window.dataLab?.saveCatalogCheckpoint?.(key, progress).catch(() => undefined)
+  }, [])
   const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean, worker?: PipelineNode) => {
     if (!isCurrent()) return
-    const connectorPaused = progress.pauseReason === 'connector_unavailable'
+    const connectorPaused = progress.pauseReason === 'connector_unavailable' || progress.pauseReason === 'retry_exhausted'
+    const retryExhausted = progress.pauseReason === 'retry_exhausted'
     const scopeLabel = progress.mode === 'dataset' ? 'Focused dataset audit' : 'Connected-catalog audit'
-    const phase = progress.state === 'failed' || connectorPaused ? `${scopeLabel} paused for connector recovery` : progress.state === 'complete' ? `${scopeLabel} complete` : `${scopeLabel} running`
+    const phase = retryExhausted
+      ? `${scopeLabel} paused — connector unavailable`
+      : progress.state === 'failed' || connectorPaused ? `${scopeLabel} paused for connector recovery` : progress.state === 'complete' ? `${scopeLabel} complete` : `${scopeLabel} running`
     const recovering = connectorPaused || progress.concurrency === 1 && (progress.connectorRecoveryStreak ?? 0) < 2
     setNodes((current) => current.map((node) => {
       if (node.id === explorer.id) return {
@@ -46,8 +61,10 @@ export function useCatalogExplorer(options: {
       }
       return node
     }))
-    setActivity(progress.state === 'failed' || connectorPaused
-      ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry scheduled`
+    setActivity(retryExhausted
+      ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry limit reached`
+      : progress.state === 'failed' || connectorPaused
+      ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry ${progress.connectorRetryCount ?? 0}/${progress.connectorRetryLimit ?? 3} scheduled`
       : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? 0} queued · ${progress.concurrency} adaptive worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s)`)
   }, [setActivity, setNodes])
 
@@ -81,7 +98,9 @@ export function useCatalogExplorer(options: {
       : undefined
     const assets = focusedAsset ? [focusedAsset] : input.assets
     catalogAssets.current.set(input.explorer.id, assets)
-    const previousProgress = input.explorer.data.exploration
+    const key = checkpointKey(input.explorer, input.query)
+    const persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
+    const previousProgress = mergeCatalogProgress(input.explorer.data.exploration, persistedProgress ?? undefined)
     const configuredConcurrency = policy.scope === 'dataset' ? 1 : workerPolicy?.concurrency ?? policy.concurrency
     const configuredBatchSize = policy.scope === 'dataset' ? 1 : workerPolicy?.batchSize ?? policy.batchSize
     const concurrency = policy.scope === 'dataset'
@@ -133,12 +152,18 @@ export function useCatalogExplorer(options: {
       cacheMode: policy.cacheMode,
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
       maxInspections: configuredBatchSize,
-      previous: input.explorer.data.exploration?.datasets,
+      previous: previousProgress?.datasets,
       previousProgress,
+      retryCooldownMs: (workerPolicy?.cooldownSeconds ?? 30) * 1_000,
+      retryLimit: workerPolicy?.retry === 'none' ? 1 : workerPolicy?.maxRetries ?? 3,
       query: input.query,
       isCancelled: () => !input.isCurrent(),
-      onCheckpoint: (progress) => updateProgress(input.explorer, progress, input.isCurrent, input.worker),
+      onCheckpoint: (progress) => {
+        updateProgress(input.explorer, progress, input.isCurrent, input.worker)
+        persistProgress(key, progress)
+      },
     })
+    persistProgress(key, explored.progress)
 
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
     const byUrn = new Map(assets.map((asset) => [asset.urn, asset]))
@@ -245,7 +270,7 @@ export function useCatalogExplorer(options: {
         }),
       ],
     }
-  }, [incidentSummaries, inspectAsset, logIncident, updateProgress])
+  }, [checkpointKey, incidentSummaries, inspectAsset, logIncident, persistProgress, updateProgress])
 
   const attachProgress = useCallback((proposal: AgentProposal, explorer: PipelineNode, progress: CatalogExplorationProgress) => {
     const existingUpdate = proposal.updatedNodes.find((update) => update.nodeId === explorer.id)
@@ -260,25 +285,36 @@ export function useCatalogExplorer(options: {
   }, [])
 
   const markDiscoveryFailed = useCallback((explorer: PipelineNode, query: string, isCurrent: () => boolean) => {
-    updateProgress(explorer, {
+    const previous = explorer.data.exploration
+    const retryCount = (previous?.connectorRetryCount ?? 0) + 1
+    const retryLimit = previous?.connectorRetryLimit ?? 3
+    const progress = mergeCatalogProgress(previous, {
       query,
-      total: 0,
-      discovered: 0,
-      inspected: 0,
-      failed: 1,
-      incidents: 0,
-      governanceGaps: 0,
-      concurrency: 4,
-      batchSize: 8,
-      remaining: 0,
-      mode: 'catalog',
-      cacheMode: 'prefer',
+      total: previous?.total ?? 0,
+      discovered: previous?.discovered ?? 0,
+      inspected: previous?.inspected ?? 0,
+      failed: Math.max(1, previous?.failed ?? 0),
+      incidents: previous?.incidents ?? 0,
+      governanceGaps: previous?.governanceGaps ?? 0,
+      concurrency: 1,
+      batchSize: previous?.batchSize ?? 8,
+      remaining: previous?.remaining ?? Math.max(0, (previous?.total ?? 0) - (previous?.inspected ?? 0)),
+      mode: previous?.mode ?? 'catalog',
+      cacheMode: previous?.cacheMode ?? 'prefer',
       phase: 'checkpoint',
-      state: 'failed',
+      state: 'paused',
+      pauseReason: retryCount >= retryLimit ? 'retry_exhausted' : 'connector_unavailable',
+      connectorRetryCount: retryCount,
+      connectorRetryLimit: retryLimit,
+      connectorFailureFingerprint: previous?.connectorFailureFingerprint ?? 'catalog-discovery-unavailable',
+      nextRetryAt: new Date(Date.now() + 30_000).toISOString(),
       checkpointAt: new Date().toISOString(),
-      datasets: [],
-    }, isCurrent)
-  }, [updateProgress])
+      datasets: previous?.datasets ?? [],
+    })!
+    updateProgress(explorer, progress, isCurrent)
+    persistProgress(checkpointKey(explorer, query), progress)
+    return progress
+  }, [checkpointKey, persistProgress, updateProgress])
 
   const assetsFor = useCallback((explorerId: string) => catalogAssets.current.get(explorerId) ?? [], [])
 

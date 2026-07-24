@@ -86,6 +86,8 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       fingerprint: typeof item.fingerprint === 'string' ? item.fingerprint.slice(0, 120) : '',
       capturedAt: typeof item.capturedAt === 'string' ? item.capturedAt : new Date(0).toISOString(),
       expiresAt: typeof item.expiresAt === 'string' ? item.expiresAt : new Date(0).toISOString(),
+      attemptCount: Math.max(0, Math.min(1_000, Number.isInteger(item.attemptCount) ? Number(item.attemptCount) : 0)) || undefined,
+      lastAttemptAt: typeof item.lastAttemptAt === 'string' ? item.lastAttemptAt : undefined,
     }]
   }) : []
   return {
@@ -103,12 +105,16 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     batchProcessed: bounded('batchProcessed', 32),
     batchCached: bounded('batchCached', 32),
     connectorRecoveryStreak: bounded('connectorRecoveryStreak', 100),
+    connectorRetryCount: bounded('connectorRetryCount', 10),
+    connectorRetryLimit: Math.max(1, Math.min(10, bounded('connectorRetryLimit', 10) || 3)),
+    connectorFailureFingerprint: typeof source.connectorFailureFingerprint === 'string' ? source.connectorFailureFingerprint.slice(0, 120) : undefined,
+    nextRetryAt: typeof source.nextRetryAt === 'string' ? source.nextRetryAt : undefined,
     remaining: bounded('remaining'),
     mode: source.mode === 'dataset' ? 'dataset' : 'catalog',
     cacheMode: source.cacheMode === 'refresh' ? 'refresh' : 'prefer',
     phase: ['discover', 'inspect', 'checkpoint'].includes(String(source.phase)) ? source.phase as CatalogExplorationProgress['phase'] : 'checkpoint',
     state: legacyConnectorPause ? 'paused' : state,
-    pauseReason: source.pauseReason === 'cancelled' || source.pauseReason === 'connector_unavailable'
+    pauseReason: source.pauseReason === 'cancelled' || source.pauseReason === 'connector_unavailable' || source.pauseReason === 'retry_exhausted'
       ? source.pauseReason
       : legacyConnectorPause ? 'connector_unavailable' : undefined,
     checkpointAt: typeof source.checkpointAt === 'string' ? source.checkpointAt : new Date(0).toISOString(),

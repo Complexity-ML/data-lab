@@ -9,6 +9,8 @@ describe('generic Worker Node policy', () => {
       batchSize: 8,
       concurrency: 6,
       retry: 'checkpoint',
+      maxRetries: 3,
+      cooldownSeconds: 30,
       context: 'branch_only',
       merge: 'atomic',
     })

@@ -32,7 +32,7 @@ describe('versioned pipeline JSON exchange', () => {
     expect(imported.graph.nodes[0]?.data).toMatchObject({
       kind: 'worker',
       workerMode: 'bounded-execution',
-      rule: 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic',
+      rule: 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | max_retries=3 | cooldown_seconds=30 | context=branch_only | merge=atomic',
     })
   })
 

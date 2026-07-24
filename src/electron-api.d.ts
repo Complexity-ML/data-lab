@@ -101,6 +101,8 @@ declare global {
       autosaveWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string } | { saved: false; reason: 'no-active-workspace' }>
       commitWorkspace(workspace: WorkspacePayload): Promise<{ saved: true; workspaceId: string; updatedAt: string }>
       resolveWorkspaceRecovery(action: 'recover' | 'discard'): Promise<WorkspaceManagerState>
+      loadCatalogCheckpoint(key: string): Promise<import('./domain/pipeline').CatalogExplorationProgress | null>
+      saveCatalogCheckpoint(key: string, progress: import('./domain/pipeline').CatalogExplorationProgress): Promise<{ saved: true; scopeId: string; updatedAt: string }>
       getActiveAiSource(): Promise<{ source: ActiveAiSource }>
       setActiveAiSource(source: ActiveAiSource): Promise<{ source: ActiveAiSource }>
       recordDiagnostic(event: DiagnosticInput): Promise<(DiagnosticInput & { id: string; timestamp: string }) | undefined>

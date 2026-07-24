@@ -58,12 +58,16 @@ export interface CatalogExplorationProgress {
   batchProcessed?: number
   batchCached?: number
   connectorRecoveryStreak?: number
+  connectorRetryCount?: number
+  connectorRetryLimit?: number
+  connectorFailureFingerprint?: string
+  nextRetryAt?: string
   remaining?: number
   mode?: 'dataset' | 'catalog'
   cacheMode?: 'prefer' | 'refresh'
   phase?: 'discover' | 'inspect' | 'checkpoint'
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
-  pauseReason?: 'cancelled' | 'connector_unavailable'
+  pauseReason?: 'cancelled' | 'connector_unavailable' | 'retry_exhausted'
   checkpointAt: string
   datasets: CatalogDatasetCheckpoint[]
 }
@@ -80,6 +84,8 @@ export interface CatalogDatasetCheckpoint {
   fingerprint: string
   capturedAt: string
   expiresAt: string
+  attemptCount?: number
+  lastAttemptAt?: string
 }
 
 export interface PipelineNodeData extends Record<string, unknown> {
