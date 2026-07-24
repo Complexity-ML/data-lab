@@ -172,9 +172,15 @@ describe('visual pipeline workspace regressions', () => {
       downstream: [],
       freshness: { capturedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), stale: false },
     }
+    const inspectedAsset = {
+      ...asset,
+      owners: ['Data Platform'],
+      fields: [{ name: 'customer_id', type: 'string' as const }],
+      qualityStatus: 'healthy' as const,
+    }
     api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
     api.searchDataHubAssets = vi.fn(async () => [asset])
-    api.inspectDataHubAsset = vi.fn(async () => ({ asset, evidence: [{
+    api.inspectDataHubAsset = vi.fn(async () => ({ asset: inspectedAsset, evidence: [{
       name: 'get_entities' as const,
       status: 'ok' as const,
       summary: 'Governed dataset identity returned.',
@@ -199,7 +205,10 @@ describe('visual pipeline workspace regressions', () => {
     expect(api.searchDataHubAssets).toHaveBeenCalledWith('*')
     expect(api.inspectDataHubAsset).toHaveBeenCalledWith(asset.urn, false)
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
-      datahubEvidence: expect.arrayContaining([expect.stringContaining('Starting dataset candidate selected after complete catalog exploration: customers')]),
+      datahubEvidence: expect.arrayContaining([
+        expect.stringContaining('Starting dataset candidate selected after complete catalog exploration: customers'),
+        expect.stringContaining('Selected schema: customer_id:string'),
+      ]),
     }))
     expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({ incidentKey: 'source-discovery:datahub', transition: 'opened' }))
   })

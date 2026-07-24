@@ -454,7 +454,7 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
   }
   const first = await searchPage(0)
   if (!first.matches.length) return []
-  const total = Math.min(first.total, 500)
+  const total = resolveCatalogSearchTotal(first.total)
   const offsets = Array.from({ length: Math.max(0, Math.ceil(total / pageSize) - 1) }, (_, index) => (index + 1) * pageSize)
   const pages = await mapWithConcurrency(offsets, 6, (offset) => searchPage(offset))
   const seen = new Set<string>()
@@ -463,6 +463,10 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
     seen.add(match.urn)
     return [parseAssetContext({ urn: match.urn, name: match.name })]
   }).slice(0, total)
+}
+
+export function resolveCatalogSearchTotal(total: number) {
+  return Math.min(Math.max(0, Math.floor(total)), 2_000)
 }
 
 export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
