@@ -51,6 +51,11 @@ export interface CatalogExplorationProgress {
   incidents: number
   governanceGaps: number
   concurrency: number
+  batchSize?: number
+  remaining?: number
+  mode?: 'dataset' | 'catalog'
+  cacheMode?: 'prefer' | 'refresh'
+  phase?: 'discover' | 'inspect' | 'checkpoint'
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
   checkpointAt: string
   datasets: CatalogDatasetCheckpoint[]
@@ -348,7 +353,7 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
                   : kind === 'control'
                     ? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
                     : kind === 'explorer'
-                      ? 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true'
+                      ? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
             : undefined,
       patchScope: kind === 'patch' ? 'graph-only' : undefined,
       monitorMode: kind === 'monitor' ? 'event-loop' : undefined,

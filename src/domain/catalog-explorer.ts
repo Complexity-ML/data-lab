@@ -97,7 +97,10 @@ export async function inspectCatalogInParallel(
   assets: DataHubAssetSummary[],
   inspect: (urn: string) => Promise<CatalogInspection>,
   options: {
+    batchSize?: number
+    cacheMode?: 'prefer' | 'refresh'
     concurrency?: number
+    mode?: 'dataset' | 'catalog'
     previous?: CatalogDatasetCheckpoint[]
     isCancelled?(): boolean
     maxInspections?: number
@@ -106,6 +109,7 @@ export async function inspectCatalogInParallel(
   } = {},
 ) {
   const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? 4)))
+  const batchSize = Math.max(1, Math.min(32, Math.floor(options.batchSize ?? options.maxInspections ?? (assets.length || 1))))
   const inspections: CatalogInspection[] = []
   const previous = new Map((options.previous ?? []).map((checkpoint) => [checkpoint.urn, checkpoint]))
   const reusable = assets.flatMap((asset) => {
@@ -114,7 +118,7 @@ export async function inspectCatalogInParallel(
   })
   const checkpoints: CatalogDatasetCheckpoint[] = [...reusable]
   const pending = assets.filter((asset) => !reusable.some((checkpoint) => checkpoint.urn === asset.urn))
-  const inspectionBudget = Math.max(1, Math.min(32, Math.floor(options.maxInspections ?? pending.length)))
+  const inspectionBudget = Math.max(1, Math.min(batchSize, Math.floor(options.maxInspections ?? batchSize), pending.length || 1))
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
@@ -134,6 +138,11 @@ export async function inspectCatalogInParallel(
       incidents,
       governanceGaps,
       concurrency,
+      batchSize,
+      remaining: Math.max(0, assets.length - checkpoints.length),
+      mode: options.mode ?? 'catalog',
+      cacheMode: options.cacheMode ?? 'prefer',
+      phase: state === 'complete' || state === 'paused' || state === 'failed' ? 'checkpoint' : 'inspect',
       state,
       checkpointAt: new Date().toISOString(),
       datasets: orderedCheckpoints(),
@@ -192,6 +201,11 @@ export async function inspectCatalogInParallel(
     incidents: checkpoints.filter(hasDataIncident).length,
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,
     concurrency,
+    batchSize,
+    remaining: Math.max(0, assets.length - checkpoints.length),
+    mode: options.mode ?? 'catalog',
+    cacheMode: options.cacheMode ?? 'prefer',
+    phase: 'checkpoint',
     state,
     checkpointAt: new Date().toISOString(),
     datasets: orderedCheckpoints(),

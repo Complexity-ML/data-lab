@@ -115,7 +115,7 @@ export const agentToolDefinitions = [
 
 const cardRoles: Record<ProposalCardKind, string> = {
   control: 'Persist the autonomous objective and player resume/monitor policy.',
-  explorer: 'Discover the complete connector catalog, checkpoint coverage, and fan out bounded dataset audits.',
+  explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. Update its checkpoint but never connect it to dataset lineage.',
   source: 'Resolve a governed DataHub dataset.',
   profile: 'Keep compact versioned schema, quality and freshness memory without raw rows.',
   analysis: 'Read trusted metadata and produce findings.',
@@ -219,7 +219,7 @@ export class AgentToolSession {
     if (kind === 'control') return supplied ?? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
     if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_iteration | on_reject=repair_loop'
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
-    if (kind === 'explorer') return supplied ?? 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true'
+    if (kind === 'explorer') return supplied ?? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
     if (kind === 'risk') return supplied ?? 'scope=downstream_ml | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage'
     if (kind === 'monitor') {
       let rule = supplied ?? ''

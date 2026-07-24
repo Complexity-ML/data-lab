@@ -10,6 +10,7 @@ import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
 import { shouldCallAgentForCatalog } from '../domain/catalog-explorer'
+import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
 import { addDataProfileToProposal, canReuseDataProfile, dataProfileEvidence } from '../domain/data-profile'
@@ -37,6 +38,7 @@ interface AutonomousPlayerOptions {
   agentRunId: MutableRef<number>
   autonomyPolicy: AutonomyPolicy
   commitAutonomousProposal(proposal: AgentProposal): string | undefined
+  discardInvalidProposal(blockerIds: string[]): void
   connectionMode: 'demo' | 'connected'
   edges: Edge[]
   fitCommittedGraph(): void
@@ -89,7 +91,7 @@ interface AutonomousPlayerOptions {
 
 export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const {
-    active, activeAiSource, activeAtomicRun, agentRunId, autonomyPolicy, commitAutonomousProposal,
+    active, activeAiSource, activeAtomicRun, agentRunId, autonomyPolicy, commitAutonomousProposal, discardInvalidProposal,
     connectionMode, edges, fitCommittedGraph, incidentSummaries, inspectDataHubAsset, inspectorOpen,
     issues, language, libraryOpen, logIncident, nodes, pendingVersionId, projectTitle, proposal,
     recordAudit, recordPendingReview, rejectProposal, resumePlayerAfterReview, reviewAssistant,
@@ -186,6 +188,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     const hasDataSource = nodes.some((node) => node.data.kind === 'source')
     const unboundSource = nodes.find((node) => node.data.kind === 'source' && !(node.data.assetRef || node.data.datahubUrn))
     const catalogExplorer = nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
+    const explorerPolicy = catalogExplorer ? parseCatalogExplorerPolicy(catalogExplorer.data.rule) : undefined
     let datahubEvidence: string[] = []
     let evidenceEntries: DataHubEvidence[] = []
     let blankCandidate: DataHubAssetSummary | undefined
@@ -305,10 +308,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           if (inspection?.asset) profileCandidates.set(sourceUrn, inspection.asset)
         }
         if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
-          setActivity('Catalog Explorer reading the next 4 datasets while the agent extends the diagram…')
+          const batchLabel = explorerPolicy?.scope === 'dataset' ? 'the focused dataset' : `the next ${explorerPolicy?.batchSize ?? 8} datasets`
+          setActivity(`Catalog Explorer reading ${batchLabel} with ${explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? 4} bounded worker(s)…`)
           const previousProgress = catalogExplorer.data.exploration
           let candidates = catalog.assetsFor(catalogExplorer.id)
-          if (!candidates.length) candidates = await searchDataHubAssets('*')
+          if (!candidates.length && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets('*')
           const explored = await catalog.explore({
             assets: candidates,
             explorer: catalogExplorer,
@@ -330,7 +334,12 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           failed: 0,
           incidents: 0,
           governanceGaps: 0,
-          concurrency: 4,
+          concurrency: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? 4,
+          batchSize: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.batchSize ?? 8,
+          remaining: 0,
+          mode: explorerPolicy?.scope === 'dataset' ? 'dataset' : 'catalog',
+          cacheMode: explorerPolicy?.cacheMode ?? 'prefer',
+          phase: 'discover',
           state: 'discovering',
           checkpointAt: new Date().toISOString(),
           datasets: [],
@@ -338,13 +347,15 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         let candidates: DataHubAssetSummary[] = []
         let discoveryError: unknown
         const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
-        try { candidates = await searchDataHubAssets(discoveryQuery) }
+        try {
+          if (explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets(discoveryQuery)
+        }
         catch (error) { discoveryError = error }
-        if (!candidates.length && discoveryQuery !== '*') {
+        if (!candidates.length && discoveryQuery !== '*' && explorerPolicy?.scope !== 'dataset') {
           try { candidates = await searchDataHubAssets('*') }
           catch (error) { discoveryError = error }
         }
-        if (candidates.length && agentRunId.current === runId) {
+        if ((candidates.length || explorerPolicy?.scope === 'dataset') && agentRunId.current === runId) {
           const explored = catalogExplorer ? await catalog.explore({
             assets: candidates,
             explorer: catalogExplorer,
@@ -842,6 +853,18 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       if (!currentProposal) {
         notifyToast('The reviewed proposal is no longer pending. The graph was not changed.', 'error', 'Approval unavailable')
         return false
+      }
+      const preview = applyProposal(nodes, edges, currentProposal)
+      const approvalBlockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
+      if (approvalBlockers.length) {
+        const feedback = approvalBlockers.map((issue) => `${issue.id} · ${issue.title}: ${issue.detail}`).join(' | ')
+        discardInvalidProposal(approvalBlockers.map((issue) => issue.id))
+        setProposalReviewOpen(false)
+        resumePlayerAfterReview.current = false
+        setPlayerState('running')
+        queueAutonomousStep(`The human approved the intent of "${currentProposal.title}", but DATA LAB rejected its implementation atomically. Preserve that human approval as intent, discard the invalid diff, and produce a smaller corrected proposal that resolves every blocker without weakening validation: ${feedback}`, playerSessionId.current, 200)
+        notifyToast('Your approval was preserved as intent. The invalid diff was discarded and the agent is correcting its atomic blockers.', 'info', 'Agent repair started')
+        return true
       }
       if (!approveProposal()) return false
       const shouldResumePlayer = playerState === 'running' || resumePlayerAfterReview.current
