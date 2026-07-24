@@ -97,6 +97,9 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     incidents: bounded('incidents'),
     governanceGaps: bounded('governanceGaps'),
     concurrency: Math.max(1, Math.min(16, bounded('concurrency', 16) || 4)),
+    batchSize: bounded('batchSize', 32) || undefined,
+    batchDurationMs: bounded('batchDurationMs', 300_000) || undefined,
+    batchFailed: bounded('batchFailed', 32),
     state: legacyConnectorPause ? 'paused' : state,
     pauseReason: source.pauseReason === 'cancelled' || source.pauseReason === 'connector_unavailable'
       ? source.pauseReason

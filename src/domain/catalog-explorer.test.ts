@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -144,6 +144,48 @@ describe('Catalog Explorer', () => {
     const unavailableInspect = vi.fn(async () => unavailable)
     expect(await inspectWithBoundedRetry(value.urn, unavailableInspect)).toEqual(unavailable)
     expect(unavailableInspect).toHaveBeenCalledTimes(2)
+  })
+
+  it('defers unavailable catalog retries to the next versioned checkpoint', async () => {
+    const value = asset(1)
+    const unavailable = {
+      asset: value,
+      evidence: [{
+        ...inspection(value).evidence[0]!,
+        status: 'error' as const,
+        stale: true,
+      }],
+    }
+    const inspect = vi.fn(async () => unavailable)
+
+    expect(await inspectWithBoundedRetry(value.urn, inspect, { retryUnavailable: false })).toEqual(unavailable)
+    expect(inspect).toHaveBeenCalledTimes(1)
+  })
+
+  it('adapts workers between one and eight from batch latency and failures', () => {
+    const base = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 4,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      batchSize: 4,
+      batchDurationMs: 4_000,
+      batchFailed: 0,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(resolveAdaptiveCatalogConcurrency()).toBe(4)
+    expect(resolveAdaptiveCatalogConcurrency(base)).toBe(6)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 7 })).toBe(8)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchDurationMs: 20_000 })).toBe(3)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchFailed: 1 })).toBe(2)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(1)
   })
 
   it('pauses the connector circuit after a later unavailable batch', async () => {

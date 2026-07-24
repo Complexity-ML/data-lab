@@ -29,10 +29,27 @@ export function isInspectionUnavailable(inspection: CatalogInspection) {
 export async function inspectWithBoundedRetry(
   urn: string,
   inspect: (urn: string, force?: boolean) => Promise<CatalogInspection>,
+  options: { retryUnavailable?: boolean } = {},
 ) {
   const first = await inspect(urn, false)
-  if (!isInspectionUnavailable(first)) return first
+  if (!isInspectionUnavailable(first) || options.retryUnavailable === false) return first
   return inspect(urn, true)
+}
+
+const clampConcurrency = (value: number) => Math.max(1, Math.min(8, Math.floor(value)))
+
+export function resolveAdaptiveCatalogConcurrency(
+  previous?: CatalogExplorationProgress,
+  initialConcurrency = 4,
+) {
+  if (!previous) return clampConcurrency(initialConcurrency)
+  const current = clampConcurrency(previous.concurrency || initialConcurrency)
+  const failed = previous.batchFailed ?? 0
+  if (previous.pauseReason === 'connector_unavailable' || failed > 0) return Math.max(1, Math.floor(current / 2))
+  if (!previous.batchDurationMs) return current
+  if (previous.batchDurationMs <= 8_000) return Math.min(8, current + 2)
+  if (previous.batchDurationMs >= 15_000) return Math.max(1, current - 1)
+  return current
 }
 
 export function shouldCallAgentForCatalog(
@@ -118,6 +135,9 @@ export async function inspectCatalogInParallel(
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
+  let batchSize = 0
+  let batchDurationMs = 0
+  let batchFailed = 0
 
   const emit = (state: CatalogExplorationProgress['state'], pauseReason?: CatalogExplorationProgress['pauseReason']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
@@ -134,6 +154,9 @@ export async function inspectCatalogInParallel(
       incidents,
       governanceGaps,
       concurrency,
+      batchSize,
+      batchDurationMs,
+      batchFailed,
       state,
       pauseReason,
       checkpointAt: new Date().toISOString(),
@@ -145,6 +168,7 @@ export async function inspectCatalogInParallel(
   let connectorUnavailable = false
   for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += concurrency) {
     const batch = scheduled.slice(offset, offset + concurrency)
+    const batchStartedAt = Date.now()
     const batchCheckpoints = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
@@ -167,6 +191,9 @@ export async function inspectCatalogInParallel(
         }
       }
     }))
+    batchSize = batch.length
+    batchDurationMs = Math.max(0, Date.now() - batchStartedAt)
+    batchFailed = batchCheckpoints.filter((checkpoint) => checkpoint.status === 'unavailable').length
     checkpoints.push(...batchCheckpoints)
     emit('inspecting')
 
@@ -199,6 +226,9 @@ export async function inspectCatalogInParallel(
     incidents: checkpoints.filter(hasDataIncident).length,
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,
     concurrency,
+    batchSize,
+    batchDurationMs,
+    batchFailed,
     state,
     pauseReason,
     checkpointAt: new Date().toISOString(),

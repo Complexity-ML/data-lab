@@ -305,7 +305,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           if (inspection?.asset) profileCandidates.set(sourceUrn, inspection.asset)
         }
         if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
-          setActivity('Catalog Explorer reading the next 4 datasets while the agent extends the diagram…')
+          setActivity('Catalog Explorer reading the next adaptive dataset batch while the agent extends the diagram…')
           const previousProgress = catalogExplorer.data.exploration
           let candidates = catalog.assetsFor(catalogExplorer.id)
           if (!candidates.length) candidates = await searchDataHubAssets('*')

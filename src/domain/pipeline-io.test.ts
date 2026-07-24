@@ -61,6 +61,9 @@ describe('versioned pipeline JSON exchange', () => {
       incidents: 0,
       governanceGaps: 8,
       concurrency: 4,
+      batchSize: 4,
+      batchDurationMs: 7_500,
+      batchFailed: 1,
       state: 'failed',
       checkpointAt: '2026-07-24T12:43:27.235Z',
       datasets: [],
@@ -70,6 +73,9 @@ describe('versioned pipeline JSON exchange', () => {
     expect(imported.graph.nodes[0]!.data.exploration).toMatchObject({
       state: 'paused',
       pauseReason: 'connector_unavailable',
+      batchSize: 4,
+      batchDurationMs: 7_500,
+      batchFailed: 1,
       inspected: 8,
       failed: 5,
     })

@@ -51,6 +51,9 @@ export interface CatalogExplorationProgress {
   incidents: number
   governanceGaps: number
   concurrency: number
+  batchSize?: number
+  batchDurationMs?: number
+  batchFailed?: number
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
   pauseReason?: 'cancelled' | 'connector_unavailable'
   checkpointAt: string
