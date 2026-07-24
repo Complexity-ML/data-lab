@@ -433,7 +433,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         datahubEvidence = ['No bounded DataHub source matched the prompt. Treat evidence as incomplete and do not modify an unrelated source branch.']
       }
 
-      if (catalogProgress?.state === 'failed' && expectedPlayerSessionId !== undefined) {
+      if ((catalogProgress?.state === 'failed' || catalogProgress?.pauseReason === 'connector_unavailable') && expectedPlayerSessionId !== undefined) {
         queueAutonomousStep('Retry the versioned Catalog Explorer checkpoint after the connector becomes available. Do not call the model until fresh catalog evidence is collected.', expectedPlayerSessionId, 30_000)
         setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total} · connector retry in 30 seconds · model not called`)
         return

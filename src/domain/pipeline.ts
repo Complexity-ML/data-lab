@@ -52,6 +52,7 @@ export interface CatalogExplorationProgress {
   governanceGaps: number
   concurrency: number
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
+  pauseReason?: 'cancelled' | 'connector_unavailable'
   checkpointAt: string
   datasets: CatalogDatasetCheckpoint[]
 }

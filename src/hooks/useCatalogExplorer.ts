@@ -16,7 +16,8 @@ export function useCatalogExplorer(options: {
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
   const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
     if (!isCurrent()) return
-    const phase = progress.state === 'failed' ? 'Catalog audit paused' : progress.state === 'complete' ? 'Complete connected-catalog audit' : 'Connected-catalog audit running'
+    const connectorPaused = progress.pauseReason === 'connector_unavailable'
+    const phase = progress.state === 'failed' || connectorPaused ? 'Catalog audit paused for connector recovery' : progress.state === 'complete' ? 'Complete connected-catalog audit' : 'Connected-catalog audit running'
     setNodes((current) => current.map((node) => node.id === explorer.id ? {
       ...node,
       data: {
@@ -24,11 +25,11 @@ export function useCatalogExplorer(options: {
         exploration: progress,
         description: `${phase} · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s) · ${progress.failed} connector read(s) unavailable.`,
         status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
-        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : progress.state === 'failed' ? 'failed' : 'running',
+        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'waiting' : progress.state === 'failed' ? 'failed' : 'running',
       },
     } : node))
-    setActivity(progress.state === 'failed'
-      ? `Catalog Explorer paused · catalog connection unavailable after ${progress.inspected}/${progress.total || '?'} inspections`
+    setActivity(progress.state === 'failed' || connectorPaused
+      ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry scheduled`
       : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s)`)
   }, [setActivity, setNodes])
 

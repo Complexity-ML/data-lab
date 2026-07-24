@@ -18,7 +18,7 @@ export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
 }
 
 export function shouldOpenCatalogConnectivityIncident(progress: CatalogExplorationProgress) {
-  return progress.state === 'failed' && progress.failed > 0
+  return (progress.state === 'failed' || progress.pauseReason === 'connector_unavailable') && progress.failed > 0
 }
 
 export function isInspectionUnavailable(inspection: CatalogInspection) {
@@ -40,7 +40,7 @@ export function shouldCallAgentForCatalog(
   current: CatalogExplorationProgress,
   profileRisk = false,
 ) {
-  if (current.state === 'failed') return false
+  if (current.state === 'failed' || current.pauseReason === 'connector_unavailable') return false
   if (current.state === 'complete') return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
@@ -119,7 +119,7 @@ export async function inspectCatalogInParallel(
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
 
-  const emit = (state: CatalogExplorationProgress['state']) => {
+  const emit = (state: CatalogExplorationProgress['state'], pauseReason?: CatalogExplorationProgress['pauseReason']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
     // Collection failures and governance gaps are not evidence that the
     // underlying dataset is unhealthy.
@@ -135,6 +135,7 @@ export async function inspectCatalogInParallel(
       governanceGaps,
       concurrency,
       state,
+      pauseReason,
       checkpointAt: new Date().toISOString(),
       datasets: orderedCheckpoints(),
     }, [...inspections])
@@ -175,14 +176,20 @@ export async function inspectCatalogInParallel(
     }
   }
   const hasMore = scheduled.length < pending.length
-  const state: CatalogExplorationProgress['state'] = options.isCancelled?.()
+  const cancelled = options.isCancelled?.() === true
+  const state: CatalogExplorationProgress['state'] = cancelled
     ? 'paused'
     : connectorUnavailable
-      ? 'failed'
+      ? 'paused'
       : hasMore
         ? 'inspecting'
         : 'complete'
-  emit(state)
+  const pauseReason: CatalogExplorationProgress['pauseReason'] = cancelled
+    ? 'cancelled'
+    : connectorUnavailable
+      ? 'connector_unavailable'
+      : undefined
+  emit(state, pauseReason)
   return { inspections, progress: {
     query: options.query ?? '*',
     total: assets.length,
@@ -193,6 +200,7 @@ export async function inspectCatalogInParallel(
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,
     concurrency,
     state,
+    pauseReason,
     checkpointAt: new Date().toISOString(),
     datasets: orderedCheckpoints(),
   } satisfies CatalogExplorationProgress }

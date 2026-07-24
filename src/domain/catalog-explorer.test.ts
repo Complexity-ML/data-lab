@@ -91,7 +91,7 @@ describe('Catalog Explorer', () => {
     })
   })
 
-  it('opens the connector circuit after a complete unavailable batch', async () => {
+  it('pauses the connector circuit after a complete unavailable batch and preserves the checkpoint', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     const inspect = vi.fn(async () => { throw new Error('MCP unavailable') })
 
@@ -103,7 +103,8 @@ describe('Catalog Explorer', () => {
       inspected: 4,
       failed: 4,
       incidents: 0,
-      state: 'failed',
+      state: 'paused',
+      pauseReason: 'connector_unavailable',
     })
   })
 
@@ -145,7 +146,7 @@ describe('Catalog Explorer', () => {
     expect(unavailableInspect).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the connector circuit after a later unavailable batch', async () => {
+  it('pauses the connector circuit after a later unavailable batch', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     let calls = 0
     const inspect = vi.fn(async (urn: string) => {
@@ -162,7 +163,8 @@ describe('Catalog Explorer', () => {
       inspected: 8,
       failed: 4,
       incidents: 0,
-      state: 'failed',
+      state: 'paused',
+      pauseReason: 'connector_unavailable',
     })
   })
 
@@ -220,6 +222,7 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
+    expect(shouldCallAgentForCatalog(base, { ...base, state: 'paused', pauseReason: 'connector_unavailable', failed: 4 })).toBe(false)
   })
 
   it('opens a connector incident only after the catalog circuit actually fails', () => {
@@ -239,5 +242,7 @@ describe('Catalog Explorer', () => {
 
     expect(shouldOpenCatalogConnectivityIncident(base)).toBe(false)
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'failed' })).toBe(true)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(true)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'cancelled' })).toBe(false)
   })
 })
