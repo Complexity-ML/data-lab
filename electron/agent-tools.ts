@@ -1,4 +1,4 @@
-import { validateProposal, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
+import { riskAssessmentRuleError, validateProposal, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
 
 type JsonRecord = Record<string, unknown>
 type ToolStatus = 'read' | 'accepted' | 'rejected'
@@ -149,29 +149,6 @@ function requiredText(value: unknown, label: string, maximum: number): string {
   return result
 }
 
-function riskRuleError(rule: string | null): string | undefined {
-  const normalizedRule = rule?.toLowerCase()
-  if (!normalizedRule || !['scope=', 'risk_type=', 'severity=', 'confidence=', 'evidence=', 'affected_assets=', 'action='].every((field) => normalizedRule.includes(field))) {
-    return 'Risk Assessment requires scope, risk_type, severity, confidence, evidence, affected_assets and action'
-  }
-  const value = (key: string) => normalizedRule.match(new RegExp(`(?:^|\\|)\\s*${key}\\s*=\\s*([^|]+)`, 'i'))?.[1].trim().toLowerCase()
-  const riskType = value('risk_type')
-  const severity = value('severity')
-  const evidence = value('evidence')
-  const confidence = Number(value('confidence'))
-  const affectedAssets = Number(value('affected_assets'))
-  if (!['data', 'collection', 'none'].includes(riskType ?? '')) return 'Risk Assessment risk_type must be data, collection or none'
-  if (!['critical', 'high', 'medium', 'low', 'unknown'].includes(severity ?? '')) return 'Risk Assessment severity is invalid'
-  if (!['fresh', 'stale', 'unavailable'].includes(evidence ?? '')) return 'Risk Assessment evidence is invalid'
-  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return 'Risk Assessment confidence must be between 0 and 1'
-  if (!Number.isInteger(affectedAssets) || affectedAssets < 0) return 'Risk Assessment affected_assets must be a non-negative integer'
-  if (riskType === 'data' && evidence !== 'fresh') return 'Data risk requires fresh versioned evidence; connector failures must use risk_type=collection'
-  if (riskType === 'data' && (severity === 'unknown' || affectedAssets === 0)) return 'Data risk requires a concrete severity and at least one affected asset'
-  if (riskType === 'collection' && affectedAssets > 0) return 'Collection reliability cannot claim affected data assets'
-  if (riskType === 'none' && (affectedAssets > 0 || !['unknown', 'low'].includes(severity ?? ''))) return 'risk_type=none cannot claim affected assets or elevated severity'
-  return undefined
-}
-
 function proposalWith(actions: ValidatedProposalAction[], metadata: Partial<ValidatedProposal> = {}) {
   return {
     title: metadata.title ?? 'Validate queued graph tools',
@@ -305,7 +282,7 @@ export class AgentToolSession {
         const rule = this.normalizedRule(kind, args.rule)
         if (kind === 'patch' && !rule?.startsWith('graph_only:')) throw new Error('Compatibility Patch rule must begin with graph_only:')
         if (kind === 'risk') {
-          const error = riskRuleError(rule)
+          const error = riskAssessmentRuleError(rule)
           if (error) throw new Error(error)
         }
         if (kind === 'monitor' && (!rule?.includes('on_change(metadata_fingerprint)') || !rule.includes('cooldown=') || !rule.includes('max_iterations='))) {
@@ -344,7 +321,7 @@ export class AgentToolSession {
           ? suppliedRule ? this.normalizedRule('monitor', suppliedRule) : null
           : kind ? this.normalizedRule(kind, args.rule) : suppliedRule
         if (effectiveKind === 'risk' && suppliedRule) {
-          const error = riskRuleError(rule)
+          const error = riskAssessmentRuleError(rule)
           if (error) throw new Error(error)
         }
         if (!kind && !label && !description && !owner && !rule) throw new Error('update_card requires at least one changed field')

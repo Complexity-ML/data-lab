@@ -68,6 +68,23 @@ describe('strict provider proposal contract', () => {
     expect(result.actions[0]).toMatchObject({ node_id: 'model-risk', kind: 'risk' })
   })
 
+  it.each([
+    ['missing rule', null, 'requires scope'],
+    ['stale data claim', 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.9 | evidence=stale | affected_assets=3 | action=retrain', 'Data risk requires fresh'],
+    ['collection failure claiming assets', 'scope=churn_model_v3 | risk_type=collection | severity=high | confidence=0.9 | evidence=unavailable | affected_assets=3 | action=repair_connector', 'cannot claim affected data assets'],
+  ])('rejects provider Risk Assessment with %s', (_label, rule, message) => {
+    const risk = { ...validProposal.actions[0], node_id: 'model-risk', kind: 'risk', label: 'Churn model risk', rule }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [risk] }, payload)).toThrow(message)
+  })
+
+  it('validates rule edits to an existing Risk Assessment without blocking metadata-only updates', () => {
+    const graphWithRisk = { graph: { nodes: [...payload.graph.nodes, { id: 'risk-existing', kind: 'risk' }], edges: payload.graph.edges } }
+    const metadataOnly = { ...validProposal.actions[0], type: 'update_card', node_id: 'risk-existing', kind: null, rule: null, label: 'Renamed risk' }
+    expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [metadataOnly] }, graphWithRisk).actions[0].label).toBe('Renamed risk')
+    const unsafeRule = { ...metadataOnly, label: null, rule: 'scope=model | risk_type=data | severity=high | confidence=0.8 | evidence=unavailable | affected_assets=1 | action=stop' }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [unsafeRule] }, graphWithRisk)).toThrow('Data risk requires fresh')
+  })
+
   it('accepts graph-only patches, live monitors, parallel agents and incident diagrams', () => {
     const patch = { ...validProposal.actions[0], node_id: 'compatibility-patch', kind: 'patch', label: 'Map legacy customer age', rule: 'graph_only: cast customer_age to number' }
     const monitor = { ...validProposal.actions[0], node_id: 'live-monitor', kind: 'monitor', label: 'Watch metadata drift', rule: 'on_change(metadata_fingerprint) | cooldown=60s | max_iterations=10' }
