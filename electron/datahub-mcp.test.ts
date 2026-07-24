@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -72,6 +72,12 @@ describe('DataHub MCP connection settings', () => {
     expect(buildDataHubSearchQuery('/q Customer_Analytics_Measures')).toBe('/q Customer_Analytics_Measures')
     expect(buildDataHubSearchQuery('*')).toBe('*')
     expect(() => buildDataHubSearchQuery(':: || ++')).toThrow('searchable characters')
+  })
+
+  it('keeps complete catalog pagination bounded without silently truncating at 500 datasets', () => {
+    expect(resolveCatalogSearchTotal(67)).toBe(67)
+    expect(resolveCatalogSearchTotal(1_250)).toBe(1_250)
+    expect(resolveCatalogSearchTotal(9_000)).toBe(2_000)
   })
 
   it('normalizes the exact write-back payload before any confirmation or MCP mutation', () => {

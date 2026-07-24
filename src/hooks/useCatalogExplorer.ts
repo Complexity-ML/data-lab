@@ -83,12 +83,13 @@ export function useCatalogExplorer(options: {
 
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
     const byUrn = new Map(input.assets.map((asset) => [asset.urn, asset]))
+    const inspectedByUrn = new Map(explored.inspections.map((inspection) => [inspection.asset.urn, inspection.asset]))
     const ranked = explored.progress.datasets.filter((dataset) => dataset.status !== 'unavailable').sort((left, right) => {
       const rank = (value: typeof left) => (value.status === 'healthy' ? 1_000 : value.status === 'warning' ? 100 : 0) + value.ownerCount * 10 + value.fieldCount
       return rank(right) - rank(left)
     })
-    let candidate = ranked.length ? byUrn.get(ranked[0]!.urn) : undefined
-    if (candidate && !explored.inspections.some((inspection) => inspection.asset.urn === candidate!.urn)) {
+    let candidate = ranked.length ? inspectedByUrn.get(ranked[0]!.urn) ?? byUrn.get(ranked[0]!.urn) : undefined
+    if (candidate && !inspectedByUrn.has(candidate.urn)) {
       try {
         const hydrated = await inspectAsset(candidate.urn)
         candidate = hydrated.asset
