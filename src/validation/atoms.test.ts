@@ -107,6 +107,49 @@ describe('atomic pipeline validation', () => {
     expect(findings.some((finding) => finding.id.startsWith('patch-'))).toBe(false)
   })
 
+  it('accepts an atomic ML risk assessment backed by fresh impact evidence', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const impact = { ...newCard('impact', 1), id: 'impact' }
+    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.91 | evidence=fresh | affected_assets=3 | action=repair_feature_then_retrain' } }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const findings = validatePipeline([source, impact, risk, output], [
+      { id: 'source-impact', source: source.id, target: impact.id },
+      { id: 'impact-risk', source: impact.id, target: risk.id },
+      { id: 'risk-output', source: risk.id, target: output.id },
+    ])
+    expect(findings.some((finding) => finding.id.startsWith('risk-'))).toBe(false)
+  })
+
+  it('blocks a dataset risk inferred only from unavailable connector evidence', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const impact = { ...newCard('impact', 1), id: 'impact' }
+    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=churn_model_v3 | risk_type=data | severity=critical | confidence=0.9 | evidence=unavailable | affected_assets=2 | action=stop_model' } }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const findings = validatePipeline([source, impact, risk, output], [
+      { id: 'source-impact', source: source.id, target: impact.id },
+      { id: 'impact-risk', source: impact.id, target: risk.id },
+      { id: 'risk-output', source: risk.id, target: output.id },
+    ])
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'risk-data-evidence-risk', severity: 'error' }),
+    ]))
+  })
+
+  it('keeps collection reliability from claiming affected data assets', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const analysis = { ...newCard('analysis', 1), id: 'analysis' }
+    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=datahub_mcp | risk_type=collection | severity=high | confidence=1 | evidence=unavailable | affected_assets=4 | action=retry_connector' } }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const findings = validatePipeline([source, analysis, risk, output], [
+      { id: 'source-analysis', source: source.id, target: analysis.id },
+      { id: 'analysis-risk', source: analysis.id, target: risk.id },
+      { id: 'risk-output', source: risk.id, target: output.id },
+    ])
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'risk-collection-impact-risk', severity: 'error' }),
+    ]))
+  })
+
   it('keeps feedback loops bounded and rejects feedback outside Output-to-Monitor', () => {
     const source = { ...newCard('source', 0), id: 'source' }
     const monitor = { ...newCard('monitor', 1), id: 'monitor' }

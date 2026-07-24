@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AgentToolSession } from './agent-tools.js'
-import { chatGPTDynamicTools, dynamicToolCallResponse, loginCompletionState } from './chatgpt-session.js'
+import { chatGPTDynamicTools, dynamicToolCallResponse, loginCompletionState, turnActivityState } from './chatgpt-session.js'
 
 describe('ChatGPT Codex dynamic DATA LAB tools', () => {
   it('maps the shared strict tool surface to App Server dynamic tools', () => {
@@ -28,5 +28,12 @@ describe('ChatGPT Codex dynamic DATA LAB tools', () => {
     expect(loginCompletionState('account/login/completed', { loginId: null, success: false, error: 'cancelled' }, 'login-1')).toEqual({ success: false, error: 'cancelled' })
     expect(loginCompletionState('account/updated', { authMode: 'chatgpt' }, 'login-1')).toEqual({ success: true })
     expect(loginCompletionState('account/login/completed', { loginId: 'login-2', success: true }, 'login-1')).toBeUndefined()
+  })
+
+  it('renews only the active turn deadline and completes on its terminal event', () => {
+    expect(turnActivityState('item/agentMessage/delta', { threadId: 'thread-1', delta: 'working' }, 'thread-1')).toBe('activity')
+    expect(turnActivityState('item/completed', { threadId: 'thread-1' }, 'thread-1')).toBe('activity')
+    expect(turnActivityState('turn/completed', { threadId: 'thread-1' }, 'thread-1')).toBe('complete')
+    expect(turnActivityState('turn/completed', { threadId: 'thread-2' }, 'thread-1')).toBe('ignore')
   })
 })

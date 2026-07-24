@@ -45,6 +45,13 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
     output: 'RankedImpactReport + RecommendedActions',
     allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
   },
+  risk: {
+    role: 'Evidence-backed risk assessor',
+    mission: 'Classify the operational and ML risk from versioned lineage evidence while keeping connector collection failures separate from data anomalies.',
+    input: 'VersionedImpactReport + EvidenceFreshness + CollectionReliability',
+    output: 'RiskContext + Severity + Confidence + AffectedAssets + RecommendedAction',
+    allowedTools: ['get_entities', 'list_schema_fields', 'get_lineage'],
+  },
   patch: {
     role: 'Compatibility patcher',
     mission: 'Apply a deterministic, reversible compatibility overlay to the DATA LAB graph without mutating the source dataset.',

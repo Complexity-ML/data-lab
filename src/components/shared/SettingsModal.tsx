@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Bot, CheckCircle2, Database, Download, FileDown, FolderKanban, FolderOpen, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, ShieldCheck, Sun, Trash2, UserRound, X } from 'lucide-react'
+import { Activity, AlertTriangle, Bot, CheckCircle2, Database, Download, FileDown, FolderKanban, FolderOpen, Gauge, History, KeyRound, Languages, LayoutTemplate, LogIn, LogOut, Moon, Network, Palette, Play, RefreshCw, Save, Settings, ShieldCheck, Sun, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ActiveAiSource, AiSettings, AiStatus, ApiProvider, ChatGPTSessionStatus } from '../../domain/ai'
 import type { PipelinePresetId } from '../../domain/pipeline'
@@ -11,14 +11,16 @@ import { WorkspaceManager } from './WorkspaceManager'
 import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
 import type { DiagnosticBundle, DiagnosticSettings } from '../../domain/diagnostics'
+import type { AutonomyPolicy } from '../../domain/autonomy-policy'
 
-export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
+export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'autonomy' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
   activeAiSource: ActiveAiSource
   appUpdateBusy: boolean
   appUpdateStatus: AppUpdateStatus
   aiStatus: AiStatus
+  autonomyPolicy: AutonomyPolicy
   chatGPTStatus: ChatGPTSessionStatus
   connectionMode: 'demo' | 'connected'
   dataHubSettings: {
@@ -38,6 +40,7 @@ interface SettingsModalProps {
   onAutoLayout: () => void
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
+  onAutonomyPolicyChange: (policy: AutonomyPolicy) => void
   onCheckForAppUpdate: () => Promise<AppUpdateStatus>
   onClearIncidentReports: () => Promise<{ deleted: number; workspaceId?: string }>
   onClose: () => void
@@ -86,7 +89,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, autonomyPolicy, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onAutonomyPolicyChange, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -362,6 +365,7 @@ export function SettingsModal(props: SettingsModalProps) {
         {menu('appearance', 'Appearance', 'Theme and interface', <Palette size={17} />)}
         {menu('workspaces', 'Workspaces', 'Save, switch and recover', <FolderKanban size={17} />)}
         {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
+        {menu('autonomy', 'Autonomy', 'Review and risk policy', <Gauge size={17} />)}
         {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
         {menu('updates', 'Updates', 'Signed stable and main builds', <Download size={17} />)}
         {menu('diagnostics', 'Diagnostics', 'Local, private and bounded', <Activity size={17} />)}
@@ -388,6 +392,35 @@ export function SettingsModal(props: SettingsModalProps) {
               <button aria-pressed={language === 'fr'} className={language === 'fr' ? 'is-active' : ''} onClick={() => setLanguage('fr')} type="button"><span><strong>Français</strong><small>Interface et réponses de l’agent</small></span></button>
             </div>
           </section>
+        </article>}
+
+        {activeSection === 'autonomy' && <article className="settings-page">
+          <div className="settings-page-heading"><small>AUTONOMY</small><h3>Choose how the agent works alone</h3><p>These policies are persisted locally and included in every autonomous planning turn.</p></div>
+          <section className="settings-section autonomy-settings">
+            <div className="settings-section-title"><span><UserRound size={15} /> Human Review frequency</span><small>Native approval boundary</small></div>
+            <div aria-label="Human Review frequency" className="autonomy-choice-grid" role="radiogroup">
+              <button aria-checked={autonomyPolicy.humanReview === 'frequent'} className={autonomyPolicy.humanReview === 'frequent' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, humanReview: 'frequent' })} role="radio" type="button"><strong>Frequent</strong><small>Every material graph diff waits for approval.</small></button>
+              <button aria-checked={autonomyPolicy.humanReview === 'risk-based'} className={autonomyPolicy.humanReview === 'risk-based' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, humanReview: 'risk-based' })} role="radio" type="button"><strong>Risk based</strong><small>Review uncertain, sensitive or structural changes.</small></button>
+              <button aria-checked={autonomyPolicy.humanReview === 'critical-only'} className={autonomyPolicy.humanReview === 'critical-only' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, humanReview: 'critical-only' })} role="radio" type="button"><strong>Critical only</strong><small>Low-risk reversible graph work may continue alone.</small></button>
+            </div>
+          </section>
+          <section className="settings-section autonomy-settings">
+            <div className="settings-section-title"><span><ShieldCheck size={15} /> Risk analysis depth</span><small>Evidence-backed only</small></div>
+            <div aria-label="Risk analysis depth" className="autonomy-choice-grid" role="radiogroup">
+              <button aria-checked={autonomyPolicy.riskAnalysis === 'standard'} className={autonomyPolicy.riskAnalysis === 'standard' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, riskAnalysis: 'standard' })} role="radio" type="button"><strong>Standard</strong><small>Assess material downstream impacts.</small></button>
+              <button aria-checked={autonomyPolicy.riskAnalysis === 'deep'} className={autonomyPolicy.riskAnalysis === 'deep' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, riskAnalysis: 'deep' })} role="radio" type="button"><strong>Deep</strong><small>Assess every material schema or lineage impact.</small></button>
+              <button aria-checked={autonomyPolicy.riskAnalysis === 'exhaustive'} className={autonomyPolicy.riskAnalysis === 'exhaustive' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, riskAnalysis: 'exhaustive' })} role="radio" type="button"><strong>Exhaustive</strong><small>Classify each affected dataset, feature and model branch.</small></button>
+            </div>
+          </section>
+          <section className="settings-section autonomy-settings">
+            <div className="settings-section-title"><span><AlertTriangle size={15} /> Incomplete or conflicting evidence</span><small>Never invent a data incident</small></div>
+            <div aria-label="Uncertainty policy" className="autonomy-choice-grid" role="radiogroup">
+              <button aria-checked={autonomyPolicy.uncertainty === 'review'} className={autonomyPolicy.uncertainty === 'review' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, uncertainty: 'review' })} role="radio" type="button"><strong>Ask a human</strong><small>Pause only the uncertain branch at a checkpoint.</small></button>
+              <button aria-checked={autonomyPolicy.uncertainty === 'no-change'} className={autonomyPolicy.uncertainty === 'no-change' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, uncertainty: 'no-change' })} role="radio" type="button"><strong>Report only</strong><small>Record the evidence gap and leave the graph unchanged.</small></button>
+              <button aria-checked={autonomyPolicy.uncertainty === 'bounded'} className={autonomyPolicy.uncertainty === 'bounded' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, uncertainty: 'bounded' })} role="radio" type="button"><strong>Bounded work</strong><small>Allow reversible graph-only work, never dataset claims.</small></button>
+            </div>
+          </section>
+          <p className="settings-note">External mutations and DataHub write-back always keep their separate native confirmation, regardless of autonomy level.</p>
         </article>}
 
         {activeSection === 'workspaces' && <article className="settings-page">

@@ -1,4 +1,5 @@
 import type { CardKind, PipelineNode } from '../domain/pipeline'
+import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
 
 function issue(atomId: string, value: Omit<ValidationIssue, 'atomId'>): ValidationIssue {
@@ -80,7 +81,7 @@ export const acyclicLineageAtom: ValidationAtom = {
 
 type CardContract = (context: ValidationContext, nodeId: string) => ValidationIssue[]
 
-function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: string): boolean {
+function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: string, acceptedKinds = ['profile', 'analysis', 'impact', 'risk']): boolean {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
   for (const edge of edges) if (edge.sourceHandle !== 'feedback') incoming.get(edge.target)?.push(edge.source)
@@ -92,7 +93,7 @@ function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: s
     visited.add(currentId)
     const current = byId.get(currentId)
     if (!current) continue
-    if (['profile', 'analysis', 'impact'].includes(current.data.kind)) return true
+    if (acceptedKinds.includes(current.data.kind)) return true
     queue.push(...(incoming.get(currentId) ?? []))
   }
   return false
@@ -142,6 +143,55 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
     for (const edge of outgoing) if (!['approved', 'quarantine'].includes(edge.sourceHandle ?? '')) findings.push(issue('card-contracts', { id: `split-handle-unknown-${edge.id}`, severity: 'error', nodeId, title: 'Unknown split handle', detail: `${edge.id} must use the approved or quarantine source handle.` }))
     return findings
   },
+  risk: (context, nodeId) => {
+    const node = context.nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const risk = parseRiskAssessmentRule(node.data.rule)
+    const findings: ValidationIssue[] = []
+    if (!risk.complete) findings.push(issue('card-contracts', {
+      id: `risk-contract-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Risk context is incomplete',
+      detail: 'Declare scope, risk_type, severity, confidence, evidence, affected_assets and action so this assessment is atomic and replayable.',
+    }))
+    if (!hasUpstreamContextReader(context, nodeId, ['profile', 'analysis', 'impact'])) findings.push(issue('card-contracts', {
+      id: `risk-evidence-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Risk assessment lacks upstream evidence',
+      detail: 'Place Data Profile, Data Analysis or Impact Analysis upstream before classifying data or ML risk.',
+    }))
+    if (risk.riskType === 'data' && risk.evidence !== 'fresh') findings.push(issue('card-contracts', {
+      id: `risk-data-evidence-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Data risk lacks fresh evidence',
+      detail: 'A dataset, feature or model risk may be asserted only from fresh versioned connector evidence. Use risk_type=collection for MCP or catalog-read failures.',
+    }))
+    if (risk.riskType === 'data' && (risk.severity === 'unknown' || risk.affectedAssets === 0)) findings.push(issue('card-contracts', {
+      id: `risk-data-impact-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Data risk has no concrete impact',
+      detail: 'Name a supported severity and at least one affected asset before treating this as a data or ML incident.',
+    }))
+    if (risk.riskType === 'collection' && risk.affectedAssets !== undefined && risk.affectedAssets > 0) findings.push(issue('card-contracts', {
+      id: `risk-collection-impact-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Collection failure is presented as data impact',
+      detail: 'Connector reliability can block analysis but cannot claim affected datasets, features or models without fresh evidence.',
+    }))
+    if (risk.riskType === 'none' && (risk.affectedAssets !== 0 || !['unknown', 'low'].includes(risk.severity ?? ''))) findings.push(issue('card-contracts', {
+      id: `risk-none-impact-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'No-risk assessment contains an impact claim',
+      detail: 'risk_type=none must keep affected_assets=0 and severity unknown or low.',
+    }))
+    return findings
+  },
   patch: (context, nodeId) => {
     const node = context.nodes.find((candidate) => candidate.id === nodeId)
     if (!node) return []
@@ -165,7 +215,7 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       severity: 'warning',
       nodeId,
       title: 'Patch lacks upstream context evidence',
-      detail: 'Place Data Profile, Data Analysis or Impact Analysis upstream so the patch is based on a complete versioned metadata reading.',
+      detail: 'Place Data Profile, Data Analysis, Impact Analysis or Risk Assessment upstream so the patch is based on a complete versioned metadata reading.',
     }))
     return findings
   },

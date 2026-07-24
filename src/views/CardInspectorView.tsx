@@ -5,6 +5,7 @@ import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
 import type { DataHubAssetSummary } from '../domain/datahub'
 import { cardLabels, type PipelineNode } from '../domain/pipeline'
 import { cardRoleContracts } from '../domain/agent-runner'
+import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import type { ValidationIssue } from '../validation'
 
 interface CardInspectorViewProps {
@@ -30,12 +31,14 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
   const role = selected ? cardRoleContracts[selected.data.kind] : undefined
   const lineage = useMemo(() => [...(selected?.data.datahubUpstream ?? []), ...(selected?.data.datahubDownstream ?? [])], [selected?.data.datahubDownstream, selected?.data.datahubUpstream])
   const visibleLineage = lineage.slice(0, lineageExpanded ? 30 : 12)
+  const risk = selected?.data.kind === 'risk' ? parseRiskAssessmentRule(selected.data.rule) : undefined
   return <>
     <PanelHeader action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
     {selected ? <div className="inspector-form">
       <section className="card-agent-workspace"><div><Sparkles size={15} /><span><strong>Agent workspace</strong><small>Analyze and rework this card from connected evidence.</small></span></div><button onClick={onAgentRework} type="button">Ask agent to rework</button></section>
       {selected.data.kind === 'diagram' && <section className="diagram-focus"><div><Focus size={15} /><span><strong>Incident workstream</strong><small>Frame the parallel incident branches merged by this diagram.</small></span></div><button onClick={() => onFocusDiagram(selected.id)} type="button">Focus subgraph</button></section>}
       {role && <section className="role-contract"><div><small>AGENT ROLE</small><strong>{role.role}</strong><p>{role.mission}</p></div><dl><div><dt>Input</dt><dd>{role.input}</dd></div><div><dt>Output</dt><dd>{role.output}</dd></div><div><dt>Tools</dt><dd>{role.allowedTools.length ? role.allowedTools.join(' · ') : 'No external tools'}</dd></div></dl></section>}
+      {risk && <section className={`risk-context severity-${risk.severity ?? 'unknown'}`}><h3>Evidence-backed risk context</h3><dl><div><dt>Type</dt><dd>{risk.riskType ?? 'Incomplete'}</dd></div><div><dt>Severity</dt><dd>{risk.severity ?? 'Incomplete'}</dd></div><div><dt>Confidence</dt><dd>{risk.confidence === undefined ? 'Incomplete' : `${Math.round(risk.confidence * 100)}%`}</dd></div><div><dt>Evidence</dt><dd>{risk.evidence ?? 'Incomplete'}</dd></div><div><dt>Affected assets</dt><dd>{risk.affectedAssets ?? 'Incomplete'}</dd></div><div><dt>Scope</dt><dd>{risk.scope || 'Incomplete'}</dd></div></dl><p>{risk.riskType === 'collection' ? 'Connector reliability issue only · no dataset anomaly is asserted.' : risk.action ? `Recommended action: ${risk.action}` : 'Recommended action is missing.'}</p></section>}
       {selected.data.kind === 'source' && <DataHubAssetPicker connected={dataHubConnected} onBind={onBindDataHubSource} onInspect={onInspectDataHubAsset} onOpenSettings={onOpenDataHubSettings} onSearch={onSearchDataHub} />}
       <label>Card name<input value={selected.data.label} onChange={(event) => onUpdate({ label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={selected.data.description} onChange={(event) => onUpdate({ description: event.target.value })} /></label>

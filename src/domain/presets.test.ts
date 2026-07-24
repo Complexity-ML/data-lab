@@ -20,6 +20,16 @@ describe('optional judge-readable presets', () => {
     expect(loadPipelinePreset('empty')).toEqual({ title: 'Untitled pipeline', nodes: [], edges: [] })
   })
 
+  it('shows the judge-readable ML chain from impact evidence to an explicit risk context', () => {
+    const preset = loadPipelinePreset('schema-drift')
+    const risk = preset.nodes.find((node) => node.data.kind === 'risk')
+    expect(risk?.data.rule).toContain('risk_type=data')
+    expect(preset.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'impact-lineage', target: risk?.id }),
+      expect.objectContaining({ source: risk?.id, target: 'drift-contract' }),
+    ]))
+  })
+
   it('returns isolated graphs so editing one loaded example cannot mutate the catalog', () => {
     const first = loadPipelinePreset('schema-drift')
     first.nodes[0].data.label = 'Changed locally'

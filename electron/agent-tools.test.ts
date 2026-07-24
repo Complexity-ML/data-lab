@@ -120,6 +120,53 @@ describe('bounded DATA LAB agent tools', () => {
     ])
   })
 
+  it('exposes the host autonomy policy to tool-driven planning turns', () => {
+    const session = new AgentToolSession({
+      ...payload,
+      autonomyPolicy: { humanReview: 'frequent', riskAnalysis: 'exhaustive', uncertainty: 'no-change' },
+    })
+    expect(session.execute('inspect_graph', { node_ids: [] }).autonomy_policy).toEqual({
+      humanReview: 'frequent',
+      riskAnalysis: 'exhaustive',
+      uncertainty: 'no-change',
+    })
+  })
+
+  it('supplies a non-claiming default Risk Assessment contract', () => {
+    const session = new AgentToolSession(payload)
+    expect(session.execute('add_card', {
+      node_id: 'risk-orders',
+      kind: 'risk',
+      label: 'Orders risk',
+      description: null,
+      owner: null,
+      rule: null,
+      reason: 'Classify evidence separately from collection reliability.',
+    }).ok).toBe(true)
+    expect(session.execute('inspect_graph', { node_ids: ['risk-orders'] }).queued_actions).toEqual([
+      expect.objectContaining({
+        kind: 'risk',
+        rule: 'scope=downstream_ml | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage',
+      }),
+    ])
+  })
+
+  it('rejects a data risk inferred from an unavailable connector', () => {
+    const session = new AgentToolSession(payload)
+    expect(session.execute('add_card', {
+      node_id: 'risk-orders',
+      kind: 'risk',
+      label: 'Orders risk',
+      description: null,
+      owner: null,
+      rule: 'scope=orders_model | risk_type=data | severity=critical | confidence=0.9 | evidence=unavailable | affected_assets=2 | action=stop_model',
+      reason: 'Classify the observed risk.',
+    })).toMatchObject({
+      ok: false,
+      summary: 'Data risk requires fresh versioned evidence; connector failures must use risk_type=collection',
+    })
+  })
+
   it('deduplicates cooldown clauses while preserving the first explicit cadence', () => {
     const session = new AgentToolSession(payload)
     const result = session.execute('add_card', {

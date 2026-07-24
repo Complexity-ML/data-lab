@@ -99,6 +99,8 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
         completed.push(node.id)
         const message = node.data.kind === 'impact'
           ? 'Impact Analysis atom committed from its versioned evidence snapshot.'
+          : node.data.kind === 'risk'
+            ? 'Risk Assessment atom committed with evidence type, severity, confidence and affected assets kept distinct from collection reliability.'
           : node.data.kind === 'monitor'
             ? 'Live Monitor evaluated one bounded evidence iteration.'
             : node.data.kind === 'parallel'

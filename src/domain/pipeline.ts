@@ -1,8 +1,9 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
 import { scenarioPresets } from './presets'
+import { defaultRiskAssessmentRule } from './risk-assessment'
 
-export type CardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -98,6 +99,7 @@ export const cardLabels: Record<CardKind, string> = {
   profile: 'Data Profile',
   analysis: 'Data Analysis',
   impact: 'Impact Analysis',
+  risk: 'Risk Assessment',
   patch: 'Compatibility Patch',
   monitor: 'Live Monitor',
   parallel: 'Parallel Agents',
@@ -291,6 +293,8 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
         ? 'condition = true'
         : kind === 'impact'
           ? 'scope(change) → DataHub lineage → ranked risks → recommended actions'
+          : kind === 'risk'
+            ? defaultRiskAssessmentRule
           : kind === 'patch'
             ? 'graph_only: map incompatible fields without mutating the source dataset'
             : kind === 'monitor'

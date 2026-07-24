@@ -1,4 +1,4 @@
-import { Bot, BrainCircuit, ChartColumn, ChartNetwork, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, UserCheck, WandSparkles } from 'lucide-react'
+import { Bot, BrainCircuit, ChartColumn, ChartNetwork, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, UserCheck, WandSparkles } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { cardLabels, type CardKind } from '../domain/pipeline'
 
@@ -8,6 +8,7 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
   { kind: 'profile', description: 'Compact reusable data reading', icon: ChartColumn },
   { kind: 'analysis', description: 'Read schema, quality and lineage', icon: BrainCircuit },
   { kind: 'impact', description: 'Trace change impact to models', icon: ChartNetwork },
+  { kind: 'risk', description: 'Classify evidence-backed data and ML risk', icon: ShieldAlert },
   { kind: 'patch', description: 'Reversible graph-only compatibility fix', icon: FileDiff },
   { kind: 'monitor', description: 'Restart safely when connected evidence changes', icon: Radar },
   { kind: 'parallel', description: 'Delegate independent graph branches', icon: Network },

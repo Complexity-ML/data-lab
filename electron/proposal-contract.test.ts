@@ -62,6 +62,12 @@ describe('strict provider proposal contract', () => {
     expect(result.actions.map((action) => action.kind)).toEqual(['impact', 'impact'])
   })
 
+  it('accepts an evidence-backed Risk Assessment atom', () => {
+    const risk = { ...validProposal.actions[0], node_id: 'model-risk', kind: 'risk', label: 'Churn model risk', rule: 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.9 | evidence=fresh | affected_assets=3 | action=retrain' }
+    const result = validateProposal({ ...validProposal, requires_human_review: false, actions: [risk] }, payload)
+    expect(result.actions[0]).toMatchObject({ node_id: 'model-risk', kind: 'risk' })
+  })
+
   it('accepts graph-only patches, live monitors, parallel agents and incident diagrams', () => {
     const patch = { ...validProposal.actions[0], node_id: 'compatibility-patch', kind: 'patch', label: 'Map legacy customer age', rule: 'graph_only: cast customer_age to number' }
     const monitor = { ...validProposal.actions[0], node_id: 'live-monitor', kind: 'monitor', label: 'Watch metadata drift', rule: 'on_change(metadata_fingerprint) | cooldown=60s | max_iterations=10' }

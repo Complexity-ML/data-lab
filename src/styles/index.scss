@@ -87,6 +87,13 @@ button { color: inherit; }
 .theme-switch span, .settings-setting-row > div:nth-child(2), .settings-tools button > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .theme-switch strong, .settings-setting-row strong, .settings-tools strong { font-size: 10px; }
 .theme-switch small, .settings-setting-row p, .settings-tools small { color: var(--muted); font-size: 8px; }
+.autonomy-settings { display: flex; flex-direction: column; gap: 1px; }
+.autonomy-choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.autonomy-choice-grid > button { display: flex; min-width: 0; min-height: 76px; flex-direction: column; gap: 5px; padding: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 11px; outline: none; background: var(--panel); text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.autonomy-choice-grid > button:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.autonomy-choice-grid > button.is-active { color: var(--accent); border-color: #818cf8; box-shadow: 0 0 0 3px rgb(99 102 241 / 9%); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.autonomy-choice-grid strong { color: var(--text); font-size: 10px; }
+.autonomy-choice-grid small { color: var(--muted); font-size: 8px; line-height: 1.45; }
 .settings-setting-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
 .settings-setting-row p { margin: 0; line-height: 1.45; }
 .settings-icon { display: grid; place-items: center; width: 38px; height: 38px; color: #b45309; border-radius: 10px; background: #fef3c7; }
@@ -469,6 +476,7 @@ button { color: inherit; }
 .palette-profile > span { color: #047857; background: var(--profile); }
 .palette-analysis > span { color: #4f46e5; background: var(--analysis); }
 .palette-impact > span { color: #c2410c; background: var(--impact); }
+.palette-risk > span { color: #b91c1c; background: var(--risk); }
 .palette-split > span { color: #7c3aed; background: var(--split); }
 .palette-decision > span { color: #9333ea; background: var(--decision); }
 .palette-transform > span { color: #b45309; background: var(--transform); }
@@ -535,6 +543,7 @@ button { color: inherit; }
 .pipeline-card.card-profile { border-left-color: var(--profile-strong); background: linear-gradient(120deg, var(--profile), #fff 55%); }
 .pipeline-card.card-analysis { border-left-color: var(--analysis-strong); background: linear-gradient(120deg, var(--analysis), #fff 55%); }
 .pipeline-card.card-impact { border-left-color: var(--impact-strong); background: linear-gradient(120deg, var(--impact), #fff 55%); }
+.pipeline-card.card-risk { border-left-color: var(--risk-strong); background: linear-gradient(120deg, var(--risk), #fff 55%); }
 .pipeline-card.card-patch { border-left-color: var(--patch-strong); background: linear-gradient(120deg, var(--patch), #fff 55%); }
 .pipeline-card.card-monitor { border-left-color: var(--monitor-strong); background: linear-gradient(120deg, var(--monitor), #fff 55%); }
 .pipeline-card.card-parallel { border-left-color: var(--parallel-strong); background: linear-gradient(120deg, var(--parallel), #fff 55%); }
@@ -552,12 +561,26 @@ button { color: inherit; }
 .profile-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
 .profile-summary span { padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--profile-strong) 25%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--profile) 72%, transparent); font-size: 7px; }
 .profile-summary strong { color: var(--text); font-size: 8px; }
+.risk-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
+.risk-summary span { overflow: hidden; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--risk-strong) 23%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--risk) 74%, transparent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.risk-summary strong { color: var(--text); font-size: 8px; }
 .pipeline-card header { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
 .card-icon { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid rgb(255 255 255 / 80%); border-radius: 8px; background: rgb(255 255 255 / 78%); }
 .card-kind { color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .agent-badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; color: #6d28d9; border: 1px solid #ddd6fe; border-radius: 6px; background: #f5f3ff; font-size: 7px; font-weight: 700; }
 .patch-scope-badge { display: inline-flex; padding: 3px 5px; color: #be185d; border: 1px solid #fbcfe8; border-radius: 6px; background: #fdf2f8; font-size: 7px; font-weight: 800; white-space: nowrap; }
 .monitor-mode-badge { display: inline-flex; padding: 3px 5px; color: #0e7490; border: 1px solid #a5f3fc; border-radius: 6px; background: #ecfeff; font-size: 7px; font-weight: 800; white-space: nowrap; }
+.risk-mode-badge { display: inline-flex; padding: 3px 5px; color: #991b1b; border: 1px solid #fecaca; border-radius: 6px; background: #fff1f2; font-size: 7px; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
+.risk-mode-badge.severity-low, .risk-mode-badge.severity-unknown { color: #475569; border-color: var(--line-strong); background: var(--surface); }
+.risk-mode-badge.severity-medium { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+.risk-mode-badge.severity-critical { color: #fff; border-color: #991b1b; background: #b91c1c; }
+.risk-context { padding: 12px; border: 1px solid color-mix(in srgb, var(--risk-strong) 28%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--risk) 70%, var(--panel)); }
+.risk-context h3 { margin: 0 0 9px; font-size: 11px; }
+.risk-context dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0; }
+.risk-context dl div { min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 82%, transparent); }
+.risk-context dt { color: var(--faint); font-size: 7px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.risk-context dd { overflow: hidden; margin: 3px 0 0; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.risk-context p { margin: 9px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .control-mode-badge { display: inline-flex; padding: 3px 5px; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 6px; background: #eef2ff; font-size: 7px; font-weight: 800; white-space: nowrap; }
 .parallel-mode-badge { display: inline-flex; padding: 3px 5px; color: #6d28d9; border: 1px solid #ddd6fe; border-radius: 6px; background: #f5f3ff; font-size: 7px; font-weight: 800; white-space: nowrap; }
 .diagram-mode-badge { display: inline-flex; padding: 3px 5px; color: #a16207; border: 1px solid #fde68a; border-radius: 6px; background: #fffbeb; font-size: 7px; font-weight: 800; white-space: nowrap; }
@@ -843,6 +866,7 @@ button { color: inherit; }
 :root[data-theme='dark'] .pipeline-card.card-profile { background: linear-gradient(118deg, rgb(5 150 105 / 31%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(52 211 153 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-analysis { background: linear-gradient(118deg, rgb(79 70 229 / 34%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(129 140 248 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-impact { background: linear-gradient(118deg, rgb(234 88 12 / 30%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(251 146 60 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
+:root[data-theme='dark'] .pipeline-card.card-risk { background: linear-gradient(118deg, rgb(220 38 38 / 30%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(248 113 113 / 20%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-patch { background: linear-gradient(118deg, rgb(219 39 119 / 30%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(244 114 182 / 22%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-monitor { background: linear-gradient(118deg, rgb(8 145 178 / 30%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(34 211 238 / 22%), 0 8px 26px rgb(0 0 0 / 22%); }
 :root[data-theme='dark'] .pipeline-card.card-parallel { background: linear-gradient(118deg, rgb(124 58 237 / 31%), var(--panel) 64%); box-shadow: inset 0 0 0 1px rgb(167 139 250 / 22%), 0 8px 26px rgb(0 0 0 / 22%); }
