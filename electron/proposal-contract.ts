@@ -43,11 +43,14 @@ export function riskAssessmentRuleError(rule: string | null): string | undefined
     return 'Risk Assessment requires scope, risk_type, severity, confidence, evidence, affected_assets and action'
   }
   const value = (key: string) => normalizedRule.match(new RegExp(`(?:^|\\|)\\s*${key}\\s*=\\s*([^|]+)`, 'i'))?.[1].trim().toLowerCase()
+  const scope = value('scope')
   const riskType = value('risk_type')
   const severity = value('severity')
   const evidence = value('evidence')
   const confidence = Number(value('confidence'))
   const affectedAssets = Number(value('affected_assets'))
+  const action = value('action')
+  if (!scope || !action) return 'Risk Assessment scope and action must be non-empty'
   if (!['data', 'collection', 'none'].includes(riskType ?? '')) return 'Risk Assessment risk_type must be data, collection or none'
   if (!['critical', 'high', 'medium', 'low', 'unknown'].includes(severity ?? '')) return 'Risk Assessment severity is invalid'
   if (!['fresh', 'stale', 'unavailable'].includes(evidence ?? '')) return 'Risk Assessment evidence is invalid'

@@ -70,6 +70,8 @@ describe('strict provider proposal contract', () => {
 
   it.each([
     ['missing rule', null, 'requires scope'],
+    ['empty scope', 'scope= | risk_type=data | severity=high | confidence=0.9 | evidence=fresh | affected_assets=3 | action=retrain', 'scope and action must be non-empty'],
+    ['empty action', 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.9 | evidence=fresh | affected_assets=3 | action=', 'scope and action must be non-empty'],
     ['stale data claim', 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.9 | evidence=stale | affected_assets=3 | action=retrain', 'Data risk requires fresh'],
     ['collection failure claiming assets', 'scope=churn_model_v3 | risk_type=collection | severity=high | confidence=0.9 | evidence=unavailable | affected_assets=3 | action=repair_connector', 'cannot claim affected data assets'],
   ])('rejects provider Risk Assessment with %s', (_label, rule, message) => {
