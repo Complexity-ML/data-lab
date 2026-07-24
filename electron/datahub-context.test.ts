@@ -29,6 +29,17 @@ describe('DataHub MCP context normalization', () => {
     expect(parseSearchResults(payload)).toEqual([{ urn, name: 'customers' }])
   })
 
+  it('keeps the MCP page cap by default but accepts a larger explicit GraphQL page bound', () => {
+    const searchResults = Array.from({ length: 67 }, (_, index) => ({
+      entity: {
+        urn: `urn:li:dataset:(urn:li:dataPlatform:snowflake,dataset_${index},PROD)`,
+        properties: { name: `dataset_${index}` },
+      },
+    }))
+    expect(parseSearchResults({ searchResults })).toHaveLength(20)
+    expect(parseSearchResults({ searchResults }, 250)).toHaveLength(67)
+  })
+
   it('reads the bounded catalog total used for complete pagination', () => {
     expect(parseSearchTotal({ start: 0, count: 10, total: 67 })).toBe(67)
     expect(parseSearchTotal({ total: 50_000 })).toBe(2_000)
@@ -64,16 +75,35 @@ describe('DataHub MCP context normalization', () => {
         tags: { tags: [{ tag: { properties: { name: 'PII' } } }] },
         domain: { domain: { properties: { name: 'Customer' } } },
         assertions: [{ runEvents: [{ result: { type: 'SUCCESS' } }] }],
+        editableSchemaMetadata: {
+          editableSchemaFieldInfo: [{
+            fieldPath: 'email',
+            globalTags: { tags: [{ tag: { properties: { name: 'Restricted' } } }] },
+          }],
+        },
       }],
     }
-    const schemaPayload = { fields: [{ fieldPath: 'email', nativeDataType: 'VARCHAR', editedTags: ['PII'] }, { fieldPath: 'lifetime_value', nativeDataType: 'NUMBER' }] }
+    const schemaPayload = {
+      fields: [
+        {
+          fieldPath: 'email',
+          nativeDataType: 'VARCHAR',
+          globalTags: { tags: [{ tag: { properties: { name: 'PII' } } }] },
+          glossaryTerms: { terms: [{ term: { properties: { name: 'Personal Data' } } }] },
+        },
+        { fieldPath: 'lifetime_value', nativeDataType: 'NUMBER' },
+      ],
+    }
     const upstreamPayload = { relationships: [{ entity: { urn: 'urn:li:dataset:(urn:li:dataPlatform:s3,raw.customers,PROD)' } }] }
     const downstreamPayload = { relationships: [{ entity: { urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,activation.customers,PROD)', tags: ['PII'] } }] }
 
     const asset = parseAssetContext({ urn, entityPayload, schemaPayload, upstreamPayload, downstreamPayload })
 
     expect(asset).toMatchObject({ name: 'customers', platform: 'snowflake', environment: 'PROD', owners: ['Growth Data'], domain: 'Customer', tags: ['PII'], qualityStatus: 'healthy' })
-    expect(asset.fields).toEqual([{ name: 'email', type: 'string', tags: ['PII'] }, { name: 'lifetime_value', type: 'number', tags: undefined }])
+    expect(asset.fields).toEqual([
+      { name: 'email', type: 'string', tags: ['PII', 'Personal Data', 'Restricted'] },
+      { name: 'lifetime_value', type: 'number', tags: undefined },
+    ])
     expect(asset.upstream).toHaveLength(1)
     expect(asset.downstream[0]).toMatchObject({ name: 'customers', sensitive: true })
   })
