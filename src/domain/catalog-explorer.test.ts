@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, shouldCallAgentForCatalog, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, shouldCallAgentForCatalog, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -105,6 +105,44 @@ describe('Catalog Explorer', () => {
       incidents: 0,
       state: 'failed',
     })
+  })
+
+  it('retries one unavailable inspection with a forced fresh read', async () => {
+    const value = asset(1)
+    const unavailable = {
+      asset: value,
+      evidence: [{
+        ...inspection(value).evidence[0]!,
+        status: 'error' as const,
+        stale: true,
+      }],
+    }
+    const inspect = vi.fn(async (_urn: string, force = false) => force ? inspection(value) : unavailable)
+
+    const result = await inspectWithBoundedRetry(value.urn, inspect)
+
+    expect(result).toEqual(inspection(value))
+    expect(inspect).toHaveBeenNthCalledWith(1, value.urn, false)
+    expect(inspect).toHaveBeenNthCalledWith(2, value.urn, true)
+  })
+
+  it('never retries a healthy inspection or exceeds one unavailable retry', async () => {
+    const value = asset(1)
+    const healthyInspect = vi.fn(async () => inspection(value))
+    await inspectWithBoundedRetry(value.urn, healthyInspect)
+    expect(healthyInspect).toHaveBeenCalledTimes(1)
+
+    const unavailable = {
+      asset: value,
+      evidence: [{
+        ...inspection(value).evidence[0]!,
+        status: 'error' as const,
+        stale: true,
+      }],
+    }
+    const unavailableInspect = vi.fn(async () => unavailable)
+    expect(await inspectWithBoundedRetry(value.urn, unavailableInspect)).toEqual(unavailable)
+    expect(unavailableInspect).toHaveBeenCalledTimes(2)
   })
 
   it('opens the connector circuit after a later unavailable batch', async () => {

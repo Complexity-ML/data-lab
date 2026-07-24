@@ -108,7 +108,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const proposalApprovalRunning = useRef(false)
   const monitorBootstrapAttempted = useRef(false)
   const autonomousStepTimer = useRef<number | undefined>(undefined)
-  const catalog = useCatalogExplorer({ inspectAsset: inspectDataHubAsset, logIncident, setActivity, setNodes })
+  const catalog = useCatalogExplorer({ incidentSummaries, inspectAsset: inspectDataHubAsset, logIncident, setActivity, setNodes })
 
   const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current, delayMs = 650) => {
     if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)

@@ -17,6 +17,20 @@ export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
   return checkpoint.issues.some((issue) => governanceIssues.has(issue))
 }
 
+export function isInspectionUnavailable(inspection: CatalogInspection) {
+  return inspection.evidence.length === 0
+    || inspection.evidence.every((read) => read.status !== 'ok' || read.stale)
+}
+
+export async function inspectWithBoundedRetry(
+  urn: string,
+  inspect: (urn: string, force?: boolean) => Promise<CatalogInspection>,
+) {
+  const first = await inspect(urn, false)
+  if (!isInspectionUnavailable(first)) return first
+  return inspect(urn, true)
+}
+
 export function shouldCallAgentForCatalog(
   previous: CatalogExplorationProgress | undefined,
   current: CatalogExplorationProgress,
@@ -40,7 +54,7 @@ function fingerprint(value: string) {
 
 export function checkpointForInspection(inspection: CatalogInspection): CatalogDatasetCheckpoint {
   const { asset, evidence } = inspection
-  const unavailable = evidence.length === 0 || evidence.every((read) => read.status !== 'ok' || read.stale)
+  const unavailable = isInspectionUnavailable(inspection)
   const issues = [
     ...(unavailable ? ['metadata unavailable'] : []),
     ...(asset.freshness.stale ? ['stale evidence'] : []),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDataProfileToProposal, canReuseDataProfile, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh } from './data-profile'
+import { addDataProfileToProposal, canReuseDataProfile, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh, isHostVerifiedMetadataOnlyProfile } from './data-profile'
 import { compactGraph } from './ai'
 import type { DataHubAssetSummary } from './datahub'
 import type { AgentProposal } from './pipeline'
@@ -22,11 +22,19 @@ describe('bounded data profile memory', () => {
     expect(profile.fieldCount).toBe(40)
     expect(profile.sensitiveFieldCount).toBe(1)
     expect(profile.anomalies).toEqual(expect.arrayContaining(['No accountable owner is recorded.', 'DataHub quality checks are failing.']))
-    expect(JSON.stringify(profile)).not.toContain('rawRows')
+    expect(profile.storage).toEqual({ kind: 'bounded-metadata', version: 1, rawRowsStored: false, hostVerified: true })
+    expect(isHostVerifiedMetadataOnlyProfile(profile)).toBe(true)
+    expect(Object.hasOwn(profile, 'rawRows')).toBe(false)
     expect(profile.tokenEstimate).toBeGreaterThan(0)
     expect(isDataProfileFresh(profile)).toBe(true)
     expect(canReuseDataProfile(profile, false)).toBe(true)
     expect(canReuseDataProfile(profile, true)).toBe(false)
+  })
+
+  it('rejects a claimed metadata-only profile when raw samples or untrusted proof are present', () => {
+    const profile = createDataProfileSnapshot(asset)
+    expect(isHostVerifiedMetadataOnlyProfile({ ...profile, sampleRows: [{ email: 'person@example.com' }] })).toBe(false)
+    expect(isHostVerifiedMetadataOnlyProfile({ ...profile, storage: { ...profile.storage, hostVerified: false } })).toBe(false)
   })
 
   it('adds one sidecar profile card and reuses it as compact evidence', () => {

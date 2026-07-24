@@ -255,6 +255,7 @@ export function compactGraph(nodes: PipelineNode[], edges: Edge[]) {
           downstreamCount: node.data.profile.downstreamCount,
           anomalies: node.data.profile.anomalies,
           tokenEstimate: node.data.profile.tokenEstimate,
+          storage: node.data.profile.storage,
         } : undefined,
       }
     }),

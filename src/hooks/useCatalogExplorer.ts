@@ -1,17 +1,18 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry } from '../domain/catalog-explorer'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
-import type { IncidentEventInput } from '../domain/incidents'
+import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
 import type { AgentProposal, CatalogExplorationProgress, PipelineNode } from '../domain/pipeline'
 
 export function useCatalogExplorer(options: {
-  inspectAsset(urn: string): Promise<CatalogInspection>
+  incidentSummaries: IncidentSummary[]
+  inspectAsset(urn: string, force?: boolean): Promise<CatalogInspection>
   logIncident(event: IncidentEventInput): Promise<void>
   setActivity(value: string): void
   setNodes: Dispatch<SetStateAction<PipelineNode[]>>
 }) {
-  const { inspectAsset, logIncident, setActivity, setNodes } = options
+  const { incidentSummaries, inspectAsset, logIncident, setActivity, setNodes } = options
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
   const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
     if (!isCurrent()) return
@@ -54,7 +55,7 @@ export function useCatalogExplorer(options: {
     }, input.isCurrent)
 
     const explored = await inspectCatalogInParallel(input.assets, async (urn) => {
-      const inspection = await inspectAsset(urn)
+      const inspection = await inspectWithBoundedRetry(urn, inspectAsset)
       return {
         asset: inspection.asset,
         evidence: inspection.evidence.map((read) => ({
@@ -106,10 +107,23 @@ export function useCatalogExplorer(options: {
     if (input.isCurrent()) {
       const unavailable = explored.progress.datasets.filter((dataset) => dataset.status === 'unavailable')
       const connectorGroups = new Map<string, typeof unavailable>()
+      const inspectedConnectors = new Map<string, { sourceSystem: string; cardId: string }>()
+      explored.progress.datasets.forEach((dataset) => {
+        const asset = byUrn.get(dataset.urn)
+        const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
+        inspectedConnectors.set(key, {
+          sourceSystem: asset?.sourceSystem ?? 'Catalog',
+          cardId: input.explorer.id,
+        })
+      })
       unavailable.forEach((dataset) => {
         const asset = byUrn.get(dataset.urn)
         const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
         connectorGroups.set(key, [...(connectorGroups.get(key) ?? []), dataset])
+      })
+      const recoveredConnectors = [...inspectedConnectors.entries()].filter(([connector]) => {
+        if (connectorGroups.has(connector)) return false
+        return incidentSummaries.some((incident) => incident.incidentKey === `catalog-explorer:connectivity:${connector}` && incident.status !== 'resolved')
       })
       await Promise.all([
         ...[...connectorGroups.entries()].map(([connector, datasets]) => logIncident({
@@ -122,6 +136,17 @@ export function useCatalogExplorer(options: {
           sourceRef: connector,
           fingerprint: datasets.map((dataset) => dataset.fingerprint).join(':'),
           cardId: input.explorer.id,
+          branchId: connector,
+        })),
+        ...recoveredConnectors.map(([connector, source]) => logIncident({
+          incidentKey: `catalog-explorer:connectivity:${connector}`,
+          transition: 'recovered' as const,
+          severity: 'info' as const,
+          title: `Catalog connection restored · ${source.sourceSystem}`,
+          detail: 'A fresh bounded catalog inspection completed successfully. Dataset health classification may resume from the saved checkpoint.',
+          sourceSystem: source.sourceSystem,
+          sourceRef: connector,
+          cardId: source.cardId,
           branchId: connector,
         })),
         ...explored.progress.datasets.filter(hasDataIncident).map((dataset) => logIncident({
@@ -150,7 +175,7 @@ export function useCatalogExplorer(options: {
         }),
       ],
     }
-  }, [inspectAsset, logIncident, updateProgress])
+  }, [incidentSummaries, inspectAsset, logIncident, updateProgress])
 
   const attachProgress = useCallback((proposal: AgentProposal, explorer: PipelineNode, progress: CatalogExplorationProgress) => {
     const existingUpdate = proposal.updatedNodes.find((update) => update.nodeId === explorer.id)
