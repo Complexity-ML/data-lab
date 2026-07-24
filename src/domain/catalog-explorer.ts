@@ -17,6 +17,10 @@ export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
   return checkpoint.issues.some((issue) => governanceIssues.has(issue))
 }
 
+export function shouldOpenCatalogConnectivityIncident(progress: CatalogExplorationProgress) {
+  return progress.state === 'failed' && progress.failed > 0
+}
+
 export function isInspectionUnavailable(inspection: CatalogInspection) {
   return inspection.evidence.length === 0
     || inspection.evidence.every((read) => read.status !== 'ok' || read.stale)

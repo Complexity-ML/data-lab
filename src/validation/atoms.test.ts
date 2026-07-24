@@ -77,6 +77,15 @@ describe('atomic pipeline validation', () => {
     ]))
   })
 
+  it('does not treat host-owned discovery sidecars as an incomplete runnable pipeline', () => {
+    const control = { ...newCard('control', 0), id: 'control' }
+    const explorer = { ...newCard('explorer', 1), id: 'explorer' }
+    const findings = validatePipeline([control, explorer], [])
+
+    expect(findings.some((finding) => finding.atomId === 'pipeline-terminals')).toBe(false)
+    expect(findings.some((finding) => finding.severity === 'error')).toBe(false)
+  })
+
   it('validates exact split handle contracts', () => {
     const split = { ...newCard('split', 0), id: 'split' }
     const approved = { ...newCard('output', 1), id: 'approved-output' }
