@@ -47,7 +47,7 @@ describe('governed DataHub write-back review', () => {
     expect(screen.queryByLabelText('DataHub mutation preview')).toBeNull()
     fireEvent.click(screen.getByRole('checkbox', { name: /Also publish this approved Decision to DataHub/ }))
     const preview = screen.getByLabelText('DataHub mutation preview')
-    expect(preview.textContent).toContain('save_document')
+    expect(preview.textContent).toContain('Governed DataHub Decision write-back')
     expect(preview.textContent).toContain('Decision')
     expect(preview.textContent).toContain('revision-42')
     expect(preview.textContent).toContain(proposal.rationale)

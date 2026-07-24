@@ -57,6 +57,24 @@ describe('strict provider proposal contract', () => {
     expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...worker, rule: 'role=audit | batch_size=8 | max_concurrency=99 | retry=checkpoint | context=branch_only | merge=atomic' }] }, payload)).toThrow('max_concurrency')
   })
 
+  it('accepts registered Query Check reads and requires review for governed writes', () => {
+    const readRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=entity.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_metadata'
+    const read = { ...validProposal.actions[0], node_id: 'query-read', kind: 'query', label: 'Verify entity read', rule: readRule }
+    expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [read] }, payload).actions[0].kind).toBe('query')
+
+    const writeRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=metadata.update | mode=governed_write | variables=host_validated | timeout_ms=8000 | review=required | dry_run=required | rollback=versioned | response=mutation_receipt'
+    const write = { ...read, node_id: 'query-write', label: 'Verify metadata update', rule: writeRule }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [write] }, payload)).toThrow('requires_human_review=true')
+    expect(validateProposal({ ...validProposal, requires_human_review: true, actions: [write, validProposal.actions[1]] }, payload).actions[0].kind).toBe('query')
+  })
+
+  it('enforces semantic edge compatibility in provider proposals', () => {
+    const profile = { ...validProposal.actions[0], node_id: 'profile-a', kind: 'profile', label: 'Profile A' }
+    const transform = { ...validProposal.actions[0], node_id: 'transform-a', kind: 'transform', label: 'Transform A' }
+    const edge = { ...validProposal.actions[3], source: 'profile-a', target: 'transform-a' }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [profile, transform, edge] }, payload)).toThrow('profile cannot connect to transform')
+  })
+
   it('rejects lineage edges to the host-owned Catalog Explorer sidecar', () => {
     const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true' }
     const source = { ...validProposal.actions[0], node_id: 'orders-source', kind: 'source', label: 'Orders' }

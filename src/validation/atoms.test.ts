@@ -181,6 +181,45 @@ describe('atomic pipeline validation', () => {
     expect(findings.some((finding) => finding.id.startsWith('patch-'))).toBe(false)
   })
 
+  it('accepts Query Check reads and graph-only patch revalidation paths', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const query = { ...newCard('query', 1), id: 'query' }
+    const analysis = { ...newCard('analysis', 2), id: 'analysis' }
+    const patch = { ...newCard('patch', 3), id: 'patch' }
+    const recheck = { ...newCard('query', 4), id: 'recheck' }
+    const output = { ...newCard('output', 5), id: 'output' }
+    const findings = validatePipeline([source, query, analysis, patch, recheck, output], [
+      { id: 'source-query', source: source.id, target: query.id },
+      { id: 'query-analysis', source: query.id, target: analysis.id },
+      { id: 'analysis-patch', source: analysis.id, target: patch.id },
+      { id: 'patch-recheck', source: patch.id, target: recheck.id },
+      { id: 'recheck-output', source: recheck.id, target: output.id },
+    ])
+    expect(findings.some((finding) => finding.id.startsWith('query-') || finding.id.startsWith('patch-') || finding.id.startsWith('compatibility-'))).toBe(false)
+  })
+
+  it('requires a downstream Human Review for governed Query Check writes', () => {
+    const writeRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=metadata.update | mode=governed_write | variables=host_validated | timeout_ms=8000 | review=required | dry_run=required | rollback=versioned | response=mutation_receipt'
+    const source = { ...newCard('source', 0), id: 'source' }
+    const query = { ...newCard('query', 1), id: 'query', data: { ...newCard('query', 1).data, rule: writeRule } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const withoutReview = validatePipeline([source, query, output], [
+      { id: 'source-query', source: source.id, target: query.id },
+      { id: 'query-output', source: query.id, target: output.id },
+    ])
+    expect(withoutReview).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'query-write-review-query', severity: 'error' }),
+    ]))
+
+    const review = { ...newCard('review', 3), id: 'review' }
+    const withReview = validatePipeline([source, query, review, output], [
+      { id: 'source-query', source: source.id, target: query.id },
+      { id: 'query-review', source: query.id, target: review.id },
+      { id: 'review-output', source: review.id, target: output.id },
+    ])
+    expect(withReview.some((finding) => finding.id === 'query-write-review-query')).toBe(false)
+  })
+
   it('accepts an atomic ML risk assessment backed by fresh impact evidence', () => {
     const source = { ...newCard('source', 0), id: 'source' }
     const impact = { ...newCard('impact', 1), id: 'impact' }
@@ -240,7 +279,7 @@ describe('atomic pipeline validation', () => {
       { id: 'invalid-feedback', source: source.id, target: monitor.id, sourceHandle: 'feedback' },
       { id: 'monitor-output', source: monitor.id, target: output.id },
     ])
-    expect(invalid).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'feedback-contract-invalid-feedback', severity: 'error' })]))
+    expect(invalid).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'compatibility-invalid-feedback', severity: 'error' })]))
   })
 
   it('requires Parallel Agents to fan out with branch-only context and atomic merge', () => {

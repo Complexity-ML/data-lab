@@ -71,7 +71,7 @@ contextBridge.exposeInMainWorld('dataLab', {
   loadDatasetContext: (urn: string) => ipcRenderer.invoke(datasetChannel, { urn }),
   getDataHubMcpStatus: () => ipcRenderer.invoke(mcpStatusChannel),
   connectDataHubMcp: () => ipcRenderer.invoke(mcpConnectChannel),
-  saveDataHubMcpSettings: (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => ipcRenderer.invoke(mcpSettingsSaveChannel, payload),
+  saveDataHubMcpSettings: (payload: { transport: 'http' | 'stdio'; url: string; catalogReadRoute?: 'auto' | 'gms' | 'mcp'; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => ipcRenderer.invoke(mcpSettingsSaveChannel, payload),
   auditDataHubWithMcp: (urn: string, force = false) => ipcRenderer.invoke(mcpAuditChannel, { urn, force }),
   searchDataHubAssets: (query: string) => ipcRenderer.invoke(mcpSearchChannel, { query }),
   inspectDataHubAsset: (urn: string, force = false, mode: 'summary' | 'deep' = 'deep') => ipcRenderer.invoke(mcpInspectChannel, { urn, force, mode }),

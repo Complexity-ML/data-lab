@@ -3,6 +3,7 @@ import { FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, P
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
 import { ElasticEdge } from '../components/shared/ElasticEdge'
+import { canConnectCardKinds } from '../domain/card-compatibility'
 import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { graphPerformanceTargets } from '../domain/performance'
 
@@ -12,6 +13,7 @@ const miniMapColors: Record<CardKind, string> = {
   control: '#818cf8',
   explorer: '#5eead4',
   worker: '#fdba74',
+  query: '#99f6e4',
   source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', risk: '#fecaca', patch: '#fbcfe8', monitor: '#a5f3fc', parallel: '#c4b5fd', diagram: '#fde68a',
   split: '#ddd6fe', decision: '#e9d5ff', transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
 }
@@ -49,6 +51,7 @@ interface PipelineCanvasViewProps {
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
   const { activityBusy, actionsOpen, contextMenu, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onPaneClick, onReconnect, onSelectNode, reportCount, reportsOpen, theme } = props
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
+  const nodeKinds = useMemo(() => new Map(nodes.map((node) => [node.id, node.data.kind])), [nodes])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
     <div className="canvas-sticker-stack is-left">
@@ -69,6 +72,11 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      isValidConnection={(connection) => {
+        const source = connection.source ? nodeKinds.get(connection.source) : undefined
+        const target = connection.target ? nodeKinds.get(connection.target) : undefined
+        return Boolean(source && target && connection.source !== connection.target && canConnectCardKinds(source, target, connection.sourceHandle))
+      }}
       onReconnect={onReconnect}
       onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
       onDrop={onDrop}

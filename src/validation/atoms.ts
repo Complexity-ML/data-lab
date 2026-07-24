@@ -1,6 +1,8 @@
 import type { CardKind, PipelineNode } from '../domain/pipeline'
+import { cardConnectionError } from '../domain/card-compatibility'
 import { catalogExplorerPolicyError } from '../domain/catalog-explorer-policy'
 import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
+import { parseQueryCheckRule, queryCheckRuleError } from '../domain/query-check'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import { parseWorkerPolicy, workerPolicyError } from '../domain/worker-policy'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
@@ -66,12 +68,15 @@ export const edgeIntegrityAtom: ValidationAtom = {
       const findings: ValidationIssue[] = []
       if (!byId.has(edge.source) || !byId.has(edge.target)) findings.push(issue(this.id, { id: `dangling-${edge.id}`, severity: 'error', title: 'Dangling connection', detail: `${edge.source} → ${edge.target} references a missing card.` }))
       if (edge.source === edge.target) findings.push(issue(this.id, { id: `self-${edge.id}`, severity: 'error', nodeId: edge.source, title: 'Invalid direction', detail: 'A card cannot send data to itself.' }))
-      if (edge.sourceHandle === 'feedback' && (byId.get(edge.source)?.data.kind !== 'output' || byId.get(edge.target)?.data.kind !== 'monitor')) findings.push(issue(this.id, {
-        id: `feedback-contract-${edge.id}`,
+      const sourceKind = byId.get(edge.source)?.data.kind
+      const targetKind = byId.get(edge.target)?.data.kind
+      const compatibilityError = sourceKind && targetKind ? cardConnectionError(sourceKind, targetKind, edge.sourceHandle) : undefined
+      if (compatibilityError) findings.push(issue(this.id, {
+        id: `compatibility-${edge.id}`,
         severity: 'error',
-        nodeId: edge.target,
-        title: 'Invalid feedback boundary',
-        detail: 'A feedback edge must connect an Output to a Live Monitor and represents a new atomic iteration.',
+        nodeId: edge.source,
+        title: 'Incompatible card connection',
+        detail: compatibilityError,
       }))
       return findings
     })
@@ -102,6 +107,24 @@ function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: s
     if (!current) continue
     if (acceptedKinds.includes(current.data.kind)) return true
     queue.push(...(incoming.get(currentId) ?? []))
+  }
+  return false
+}
+
+function hasDownstreamKind({ nodes, edges }: ValidationContext, nodeId: string, acceptedKinds: CardKind[]): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
+  for (const edge of edges) if (edge.sourceHandle !== 'feedback') outgoing.get(edge.source)?.push(edge.target)
+  const queue = [...(outgoing.get(nodeId) ?? [])]
+  const visited = new Set<string>()
+  while (queue.length) {
+    const currentId = queue.shift()!
+    if (visited.has(currentId)) continue
+    visited.add(currentId)
+    const current = byId.get(currentId)
+    if (!current) continue
+    if (acceptedKinds.includes(current.data.kind)) return true
+    queue.push(...(outgoing.get(currentId) ?? []))
   }
   return false
 }
@@ -177,6 +200,37 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       detail: policyError ?? 'Worker Node must use bounded execution with branch-only context and atomic checkpoints.',
     })]
     return []
+  },
+  query: (context, nodeId) => {
+    const node = context.nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const policy = parseQueryCheckRule(node.data.rule)
+    const policyError = queryCheckRuleError(node.data.rule)
+    const findings: ValidationIssue[] = []
+    if (policyError) findings.push(issue('card-contracts', {
+      id: `query-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Query Check contract is incomplete',
+      detail: policyError,
+    }))
+    const incoming = context.edges.filter((edge) => edge.target === nodeId && edge.sourceHandle !== 'feedback')
+    const outgoing = context.edges.filter((edge) => edge.source === nodeId && edge.sourceHandle !== 'feedback')
+    if (!incoming.length || !outgoing.length) findings.push(issue('card-contracts', {
+      id: `query-path-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Query Check is not part of a complete path',
+      detail: 'Place Query Check between an evidence-producing card and a card that consumes its verified contract.',
+    }))
+    if (policy.mode === 'governed_write' && !hasDownstreamKind(context, nodeId, ['review'])) findings.push(issue('card-contracts', {
+      id: `query-write-review-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Governed query write lacks Human Review',
+      detail: 'Every governed GraphQL write must reach a Human Review checkpoint before any mutation is executed.',
+    }))
+    return findings
   },
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
   split: ({ edges }, nodeId) => {
@@ -258,7 +312,7 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       title: 'Patch rule is not explicit',
       detail: 'Declare a deterministic rule beginning with “graph_only:” so the compatibility overlay is replayable and reversible.',
     }))
-    if (!hasUpstreamContextReader(context, nodeId)) findings.push(issue('card-contracts', {
+    if (!hasUpstreamContextReader(context, nodeId, ['profile', 'analysis', 'impact', 'risk', 'query'])) findings.push(issue('card-contracts', {
       id: `patch-evidence-${nodeId}`,
       severity: 'warning',
       nodeId,
@@ -462,7 +516,7 @@ export const dataHubGovernanceAtom: ValidationAtom = {
       if (!node.data.owner.trim() || node.data.owner === 'Unassigned') findings.push(issue(this.id, { id: `missing-owner-${node.id}`, severity: 'error', nodeId: node.id, title: 'DataHub ownership is missing', detail: 'Publishing is blocked because the bound asset has no accountable owner.' }))
       if (node.data.datahubQuality === 'failing') findings.push(issue(this.id, { id: `quality-failing-${node.id}`, severity: 'error', nodeId: node.id, title: 'DataHub quality checks are failing', detail: 'Publishing is blocked until failing DataHub assertions are resolved or explicitly reviewed.' }))
       if (node.data.datahubQuality === 'unavailable') findings.push(issue(this.id, { id: `quality-unavailable-${node.id}`, severity: 'warning', nodeId: node.id, title: 'Data quality metadata is unavailable', detail: 'Unavailable quality metadata is not treated as a healthy signal.' }))
-      if (node.data.datahubFreshness?.stale) findings.push(issue(this.id, { id: `metadata-stale-${node.id}`, severity: sensitive ? 'error' : 'warning', nodeId: node.id, title: 'DataHub evidence is stale', detail: sensitive ? 'Sensitive-data evidence expired, so the agent cannot proceed until MCP context is refreshed.' : 'Refresh DataHub context before relying on this metadata.' }))
+      if (node.data.datahubFreshness?.stale) findings.push(issue(this.id, { id: `metadata-stale-${node.id}`, severity: sensitive ? 'error' : 'warning', nodeId: node.id, title: 'DataHub evidence is stale', detail: sensitive ? 'Sensitive-data evidence expired, so the agent cannot proceed until connector context is refreshed.' : 'Refresh DataHub context before relying on this metadata.' }))
       return findings
     })
   },

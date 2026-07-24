@@ -107,7 +107,7 @@ export function ReviewPanel({ applying = false, assistant, proposal, relatedAsse
             {writebackRequested && <div className="writeback-mutation-preview" role="region" aria-label="DataHub mutation preview">
               <strong>Exact mutation preview</strong>
               <dl>
-                <div><dt>Tool</dt><dd><code>save_document</code></dd></div>
+                <div><dt>Operation</dt><dd><code>Governed DataHub Decision write-back</code></dd></div>
                 <div><dt>Type</dt><dd><code>Decision</code></dd></div>
                 <div><dt>Title</dt><dd>DATA LAB · {proposal.title}</dd></div>
                 <div><dt>Revision</dt><dd><code>{revisionId}</code></dd></div>

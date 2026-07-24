@@ -1,4 +1,4 @@
-import { riskAssessmentRuleError, validateProposal, workerPolicyError, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
+import { proposalCardCompatibility, queryCheckRuleError, riskAssessmentRuleError, validateProposal, workerPolicyError, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
 
 type JsonRecord = Record<string, unknown>
 type ToolStatus = 'read' | 'accepted' | 'rejected'
@@ -9,7 +9,7 @@ export interface AgentToolTrace {
   summary: string
 }
 
-const kinds = ['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
+const kinds = ['control', 'explorer', 'worker', 'query', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
 const nullableText = { type: ['string', 'null'] }
 const objectSchema = (properties: JsonRecord) => ({
   type: 'object',
@@ -117,6 +117,7 @@ const cardRoles: Record<ProposalCardKind, string> = {
   control: 'Persist the autonomous objective and player resume/monitor policy.',
   explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. Update its checkpoint but never connect it to dataset lineage.',
   worker: 'Process any connected card work as bounded deterministic batches with branch-only context and atomic checkpoints.',
+  query: 'Verify a host-registered GraphQL read or governed write contract without accepting arbitrary query text.',
   source: 'Resolve a governed DataHub dataset.',
   profile: 'Keep compact versioned schema, quality and freshness memory without raw rows.',
   analysis: 'Read trusted metadata and produce findings.',
@@ -222,6 +223,7 @@ export class AgentToolSession {
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
     if (kind === 'explorer') return supplied ?? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
     if (kind === 'worker') return supplied ?? 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic'
+    if (kind === 'query') return supplied ?? 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=entity.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_metadata'
     if (kind === 'risk') return supplied ?? 'scope=downstream_ml | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage'
     if (kind === 'monitor') {
       let rule = supplied ?? ''
@@ -254,7 +256,18 @@ export class AgentToolSession {
     try {
       if (tool === 'list_card_kinds') {
         return this.result(tool, 'read', `${kinds.length} card kinds available`, {
-          cards: kinds.map((kind) => ({ kind, role: cardRoles[kind] })),
+          cards: kinds.map((kind) => ({
+            kind,
+            role: cardRoles[kind],
+            accepts_from: kinds.filter((source) => proposalCardCompatibility[source].includes(kind)),
+            connects_to: proposalCardCompatibility[kind],
+            source_handles: kind === 'split' ? ['approved', 'quarantine'] : kind === 'output' ? ['feedback'] : [],
+          })),
+          connection_policy: {
+            sidecars: ['control', 'explorer'],
+            lineage_start: 'source',
+            feedback: 'output.feedback -> monitor',
+          },
         })
       }
       if (tool === 'inspect_graph') {
@@ -291,6 +304,10 @@ export class AgentToolSession {
         }
         if (kind === 'worker') {
           const error = workerPolicyError(rule)
+          if (error) throw new Error(error)
+        }
+        if (kind === 'query') {
+          const error = queryCheckRuleError(rule)
           if (error) throw new Error(error)
         }
         if (kind === 'monitor' && (!rule?.includes('on_change(metadata_fingerprint)') || !rule.includes('cooldown=') || !rule.includes('max_iterations='))) {
@@ -334,6 +351,10 @@ export class AgentToolSession {
         }
         if (effectiveKind === 'worker' && suppliedRule) {
           const error = workerPolicyError(rule)
+          if (error) throw new Error(error)
+        }
+        if (effectiveKind === 'query' && suppliedRule) {
+          const error = queryCheckRuleError(rule)
           if (error) throw new Error(error)
         }
         if (!kind && !label && !description && !owner && !rule) throw new Error('update_card requires at least one changed field')

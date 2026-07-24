@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, callToolWithSdkTimeout, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, callToolWithSdkTimeout, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, inspectDataHubAsset, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -29,9 +29,11 @@ beforeEach(() => {
   process.env.DATAHUB_MCP_TOKEN = ''
   process.env.DATAHUB_GMS_URL = ''
   process.env.DATAHUB_GMS_TOKEN = ''
+  process.env.DATAHUB_CATALOG_READ_ROUTE = ''
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   closeWorkspaceDatabase()
   rmSync(directory, { force: true, recursive: true })
 })
@@ -185,6 +187,92 @@ describe('DataHub MCP connection settings', () => {
     expect(electronState.availabilityChecks).toBe(0)
     expect(electronState.decryptions).toBe(0)
     expect(readFileSync(join(directory, 'data-lab.sqlite')).toString('utf8')).not.toContain('datahub-private-token')
+  })
+
+  it('defaults local Docker dataset reads to GraphQL and preserves an explicit MCP-only override', async () => {
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    expect(getDataHubMcpConfigurationStatus().settings.catalogReadRoute).toBe('auto')
+
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', catalogReadRoute: 'mcp' })
+    expect(getDataHubMcpConfigurationStatus().settings.catalogReadRoute).toBe('mcp')
+
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', catalogReadRoute: 'gms' })
+    expect(getDataHubMcpConfigurationStatus().settings.catalogReadRoute).toBe('gms')
+  })
+
+  it('reads deep local dataset evidence through one GraphQL request without opening MCP stdio', async () => {
+    const urn = 'urn:li:dataset:(urn:li:dataPlatform:dbt,orders,PROD)'
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', catalogReadRoute: 'gms' })
+    const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({
+      data: {
+        entity: {
+          urn,
+          type: 'DATASET',
+          name: 'orders',
+          platform: { name: 'dbt' },
+          properties: { description: 'Governed orders' },
+          ownership: { owners: [] },
+          tags: { tags: [] },
+          schemaMetadata: { fields: [{ fieldPath: 'order_id', nativeDataType: 'VARCHAR' }] },
+          health: [{ status: 'PASS' }],
+          upstream: { relationships: [] },
+          downstream: { relationships: [] },
+        },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const inspection = await inspectDataHubAsset(urn, false, 'deep')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('http://localhost:8080/api/graphql')
+    expect(inspection.asset).toMatchObject({ urn, name: 'orders', qualityStatus: 'healthy' })
+    expect(inspection.asset.fields).toEqual([{ name: 'order_id', type: 'string', tags: undefined }])
+    expect(inspection.evidence.map((read) => read.capability)).toEqual(['entity.read', 'schema.read', 'lineage.read', 'lineage.read'])
+    expect(inspection.evidence.every((read) => read.summary.includes('GraphQL'))).toBe(true)
+  })
+
+  it('coalesces concurrent catalog summaries into one GraphQL entities request', async () => {
+    const urns = [
+      'urn:li:dataset:(urn:li:dataPlatform:dbt,orders,PROD)',
+      'urn:li:dataset:(urn:li:dataPlatform:dbt,customers,PROD)',
+    ]
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { variables: { urns: string[] } }
+      return new Response(JSON.stringify({
+        data: {
+          entities: body.variables.urns.map((urn) => ({
+            urn,
+            type: 'DATASET',
+            name: urn.includes('orders') ? 'orders' : 'customers',
+            schemaMetadata: { fields: [] },
+          })),
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const inspections = await Promise.all(urns.map((urn) => inspectDataHubAsset(urn, false, 'summary')))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(inspections.map((inspection) => inspection.asset.name)).toEqual(['orders', 'customers'])
+    expect(inspections.every((inspection) => inspection.evidence[0]?.capability === 'entity.read')).toBe(true)
+  })
+
+  it('does not silently fall back to MCP when the local GraphQL route fails', async () => {
+    const urn = 'urn:li:dataset:(urn:li:dataPlatform:dbt,orders,PROD)'
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080' })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))
+
+    const inspection = await inspectDataHubAsset(urn, true, 'summary')
+
+    expect(inspection.evidence[0]).toMatchObject({
+      capability: 'entity.read',
+      status: 'error',
+      stale: true,
+    })
+    expect(inspection.evidence[0]?.summary).toContain('HTTP 503')
   })
 
   it('keeps governed write-back disabled by default and persists explicit opt-in', async () => {

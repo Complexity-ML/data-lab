@@ -120,12 +120,12 @@ export function listCatalogConnectors(): CatalogConnectorSummary[] {
   return [{
     id: 'datahub',
     name: 'DataHub',
-    kind: 'mcp',
+    kind: dataHub.settings.transport === 'stdio' ? 'http-api' : 'mcp',
     url: dataHub.settings.url,
     enabled: Boolean(dataHub.settings.url),
     contract: 'data-lab.catalog.v1',
-    searchTool: 'search',
-    inspectTool: 'get_entities · list_schema_fields · get_lineage',
+    searchTool: dataHub.settings.transport === 'stdio' ? 'GraphQL search' : 'search',
+    inspectTool: dataHub.settings.transport === 'stdio' ? 'entity.read · schema.read · lineage.read' : 'get_entities · list_schema_fields · get_lineage',
     builtIn: true,
     tokenConfigured: dataHub.settings.tokenConfigured,
   }, ...storedManifests().map(publicSummary)]

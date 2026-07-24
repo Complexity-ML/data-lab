@@ -2,9 +2,10 @@ import type { Edge, Node } from '@xyflow/react'
 import type { DataHubEvidence } from './datahub'
 import { scenarioPresets } from './presets'
 import { defaultRiskAssessmentRule } from './risk-assessment'
+import { defaultQueryCheckRule } from './query-check'
 import { workerPolicyRule, defaultWorkerPolicy } from './worker-policy'
 
-export type CardKind = 'control' | 'explorer' | 'worker' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'control' | 'explorer' | 'worker' | 'query' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -157,6 +158,7 @@ export const cardLabels: Record<CardKind, string> = {
   control: 'DATA LAB Control',
   explorer: 'Catalog Explorer',
   worker: 'Worker Node',
+  query: 'Query Check',
   source: 'Data Source',
   profile: 'Data Profile',
   analysis: 'Data Analysis',
@@ -371,6 +373,8 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
                       ? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
                       : kind === 'worker'
                         ? workerPolicyRule(defaultWorkerPolicy)
+                        : kind === 'query'
+                          ? defaultQueryCheckRule
             : undefined,
       patchScope: kind === 'patch' ? 'graph-only' : undefined,
       monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
