@@ -214,6 +214,56 @@ describe('visual pipeline workspace regressions', () => {
     expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({ incidentKey: 'source-discovery:datahub', transition: 'opened' }))
   })
 
+  it('waits for the catalog objective to complete before calling the model on a blank workbench', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    const assets = Array.from({ length: 9 }, (_, index) => ({
+      urn: `urn:li:dataset:(urn:li:dataPlatform:dbt,analytics.dataset_${index},PROD)`,
+      name: `dataset_${index}`,
+      platform: 'dbt',
+      environment: 'PROD',
+      description: 'Governed dataset',
+      owners: ['Data Platform'],
+      tags: ['governed'],
+      fields: [{ name: 'id', type: 'string' as const }],
+      qualityStatus: 'healthy' as const,
+      upstream: [],
+      downstream: [],
+      freshness: { capturedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), stale: false },
+    }))
+    api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
+    api.searchDataHubAssets = vi.fn(async () => assets)
+    api.inspectDataHubAsset = vi.fn(async (urn: string) => ({
+      asset: assets.find((asset) => asset.urn === urn)!,
+      evidence: [{
+        name: 'get_entities' as const,
+        status: 'ok' as const,
+        summary: 'Governed dataset identity returned.',
+        capturedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        cached: false,
+        stale: false,
+      }],
+    }))
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    let inspectedBeforeProposal = new Set<string>()
+    api.runChatGPTProposal = vi.fn(async () => {
+      inspectedBeforeProposal = new Set((api.inspectDataHubAsset as ReturnType<typeof vi.fn>).mock.calls.map(([urn]) => String(urn)))
+      return {
+        model: 'gpt-5.6-sol',
+        proposal: { title: 'Catalog complete', summary: 'Build from the completed checkpoint.', rationale: 'Every catalog identity received a bounded read.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+      }
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    expect(inspectedBeforeProposal).toEqual(new Set(assets.map((asset) => asset.urn)))
+  })
+
   it('pauses future autonomous iterations and Stop cancels the active provider channels', async () => {
     const user = userEvent.setup()
     const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })

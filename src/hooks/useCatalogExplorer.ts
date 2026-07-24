@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { catalogExplorerCheckpointScope, parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -192,7 +192,9 @@ export function useCatalogExplorer(options: {
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
     const byUrn = new Map(assets.map((asset) => [asset.urn, asset]))
     const inspectedByUrn = new Map(explored.inspections.map((inspection) => [inspection.asset.urn, inspection.asset]))
-    const rankedUrns = rankCatalogCandidateUrns(explored.progress)
+    const rankedUrns = shouldCallAgentForCatalog(previousProgress, explored.progress)
+      ? rankCatalogCandidateUrns(explored.progress)
+      : []
     const candidateUrn = rankedUrns.find((urn) => inspectedByUrn.has(urn) || byUrn.has(urn))
     let candidate = candidateUrn ? inspectedByUrn.get(candidateUrn) ?? byUrn.get(candidateUrn) : undefined
     if (candidate) {
