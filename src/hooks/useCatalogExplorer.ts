@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -179,21 +179,32 @@ export function useCatalogExplorer(options: {
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
     const byUrn = new Map(assets.map((asset) => [asset.urn, asset]))
     const inspectedByUrn = new Map(explored.inspections.map((inspection) => [inspection.asset.urn, inspection.asset]))
-    const ranked = explored.progress.datasets.filter((dataset) => dataset.status !== 'unavailable' && inspectedByUrn.has(dataset.urn)).sort((left, right) => {
-      const rank = (value: typeof left) => (value.status === 'healthy' ? 1_000 : value.status === 'warning' ? 100 : 0) + value.ownerCount * 10 + value.fieldCount
-      return rank(right) - rank(left)
-    })
-    let candidate = ranked.length ? inspectedByUrn.get(ranked[0]!.urn) ?? byUrn.get(ranked[0]!.urn) : undefined
+    const rankedUrns = rankCatalogCandidateUrns(explored.progress)
+    const candidateUrn = rankedUrns.find((urn) => inspectedByUrn.has(urn) || byUrn.has(urn))
+    let candidate = candidateUrn ? inspectedByUrn.get(candidateUrn) ?? byUrn.get(candidateUrn) : undefined
     if (candidate) {
+      const checkpoint = explored.progress.datasets.find((dataset) => dataset.urn === candidate!.urn)
+      if (checkpoint && !evidence.some((read) => read.urn === checkpoint.urn && read.status === 'ok' && !read.stale)) {
+        evidence.push({
+          tool: 'catalog_checkpoint',
+          urn: checkpoint.urn,
+          capturedAt: checkpoint.capturedAt,
+          expiresAt: checkpoint.expiresAt,
+          status: 'ok',
+          summary: `Versioned catalog checkpoint: ${checkpoint.status}; fields=${checkpoint.fieldCount}; owners=${checkpoint.ownerCount}; upstream=${checkpoint.upstreamCount}; downstream=${checkpoint.downstreamCount}.`,
+          cached: true,
+          stale: Date.parse(checkpoint.expiresAt) <= Date.now(),
+        })
+      }
       try {
         // One evidence-backed candidate per atomic batch receives the expensive
         // schema + upstream/downstream lineage audit. The remaining catalog
         // assets keep their bounded entity summaries until promoted.
         const hydrated = await inspectAsset(candidate.assetRef ?? candidate.urn, false, candidate.connectorId, 'deep')
-        candidate = hydrated.asset
+        if (!isInspectionUnavailable(hydrated)) candidate = hydrated.asset
         evidence.push(...hydrated.evidence.map((read) => ({
           tool: read.tool,
-          urn: candidate!.urn,
+          urn: hydrated.asset.urn,
           capturedAt: read.capturedAt,
           expiresAt: read.expiresAt,
           status: read.status,
@@ -201,9 +212,7 @@ export function useCatalogExplorer(options: {
           cached: read.cached,
           stale: read.stale,
         })))
-      } catch {
-        candidate = undefined
-      }
+      } catch { /* Keep the versioned catalog identity as a bounded fallback. */ }
     }
     if (input.isCurrent()) {
       const unavailable = explored.progress.datasets.filter((dataset) => dataset.status === 'unavailable')

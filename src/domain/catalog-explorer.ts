@@ -120,6 +120,20 @@ export function shouldCallAgentForCatalog(
     || current.incidents > (previous?.incidents ?? 0)
 }
 
+export function rankCatalogCandidateUrns(progress: CatalogExplorationProgress) {
+  const score = (checkpoint: CatalogDatasetCheckpoint) =>
+    (checkpoint.status === 'healthy' ? 1_000 : checkpoint.status === 'warning' ? 100 : 0)
+    + checkpoint.ownerCount * 10
+    + checkpoint.fieldCount
+    + checkpoint.upstreamCount
+    + checkpoint.downstreamCount
+
+  return progress.datasets
+    .filter((checkpoint) => checkpoint.status !== 'unavailable')
+    .sort((left, right) => score(right) - score(left) || left.urn.localeCompare(right.urn))
+    .map((checkpoint) => checkpoint.urn)
+}
+
 function fingerprint(value: string) {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {

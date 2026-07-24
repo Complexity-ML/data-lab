@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -39,6 +39,29 @@ function inspection(value: DataHubAssetSummary): CatalogInspection {
 }
 
 describe('Catalog Explorer', () => {
+  it('ranks reusable candidates from the complete checkpoint instead of only the latest batch', () => {
+    const healthy = checkpointForInspection(inspection(asset(1)))
+    const governedWarning = checkpointForInspection(inspection({ ...asset(2), owners: [], fields: [{ name: 'id', type: 'string' }, { name: 'email', type: 'string' }] }))
+    const unavailable = checkpointForInspection({
+      asset: asset(3),
+      evidence: [{ ...inspection(asset(3)).evidence[0]!, status: 'error', stale: true, summary: 'timed out' }],
+    })
+
+    expect(rankCatalogCandidateUrns({
+      query: '*',
+      total: 3,
+      discovered: 3,
+      inspected: 3,
+      failed: 1,
+      incidents: 0,
+      governanceGaps: 1,
+      concurrency: 1,
+      datasets: [unavailable, governedWarning, healthy],
+      checkpointAt: capturedAt,
+      state: 'complete',
+    })).toEqual([healthy.urn, governedWarning.urn])
+  })
+
   it('audits the complete catalog with bounded concurrency', async () => {
     const assets = Array.from({ length: 17 }, (_, index) => asset(index))
     let active = 0
