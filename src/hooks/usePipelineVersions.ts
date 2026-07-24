@@ -25,6 +25,11 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [pendingVersionId, setPendingVersionId] = useState<string>()
 
+  const layoutAddedCards = (nextNodes: PipelineNode[], nextEdges: Edge[], addedNodeIds: Iterable<string>) => {
+    const ids = [...addedNodeIds]
+    return ids.length > 0 ? layoutPipeline(nextNodes, nextEdges, ids) : nextNodes
+  }
+
   const recordPendingReview = (nextProposal: AgentProposal) => {
     const preview = applyProposal(nodes, edges, nextProposal)
     const previewIssues = validatePipeline(preview.nodes, preview.edges)
@@ -48,7 +53,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
       recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'error', detail: { blockerIds: blocking.map((issue) => issue.id) } })
       return undefined
     }
-    const layouted = layoutPipeline(next.nodes, next.edges)
+    const layouted = layoutAddedCards(next.nodes, next.edges, nextProposal.addedNodes.map((node) => node.id))
     const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
     const version = createPipelineVersion(committedNodes, next.edges, nextProposal.title, 'agent', nextIssues)
     version.blockingIssues = 0
@@ -85,7 +90,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
       })
       return false
     }
-    const layouted = layoutPipeline(next.nodes, next.edges)
+    const layouted = layoutAddedCards(next.nodes, next.edges, proposal.addedNodes.map((node) => node.id))
     const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
     const version = createPipelineVersion(committedNodes, next.edges, proposal.title, 'agent', nextIssues)
     // A safe incremental graph transaction may still have pipeline-readiness
@@ -132,7 +137,8 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     const versionIssues = validatePipeline(version.nodes, version.edges)
     const blocking = atomicTransactionBlockers(versionIssues)
     if (blocking.length > 0) { setActivity(`Review cannot be approved · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed`); return false }
-    const layouted = layoutPipeline(version.nodes, version.edges)
+    const activeNodeIds = new Set(nodes.map((node) => node.id))
+    const layouted = layoutAddedCards(version.nodes, version.edges, version.nodes.filter((node) => !activeNodeIds.has(node.id)).map((node) => node.id))
     const committedNodes = resolveApprovedExecution?.(layouted, version.edges) ?? layouted
     setNodes(committedNodes)
     setEdges(version.edges)

@@ -6,7 +6,7 @@ const cardWidth = 232
 // Cards with a wrapped description, rule and footer render much taller than
 // their CSS minimum. Keep the layout collision box aligned with the common
 // rendered height so neighbouring components cannot visually overlap.
-const cardHeight = 192
+const cardHeight = 240
 const gridSpacing = 24
 const horizontalGap = 96
 const verticalGap = 60
@@ -18,6 +18,7 @@ const verticalStep = Math.ceil((cardHeight + verticalGap) / gridSpacing) * gridS
 const controlLaneHeight = Math.ceil((cardHeight + componentGap) / gridSpacing) * gridSpacing
 
 type Position = { x: number; y: number }
+type OccupiedBox = Position & { width: number; height: number }
 
 const snap = (value: number) => Math.round(value / gridSpacing) * gridSpacing
 const mean = (values: number[]) => values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
@@ -177,8 +178,21 @@ function layoutComponent(nodes: PipelineNode[], edges: Edge[]): { positions: Map
   }
 }
 
-function collides(position: Position, occupied: Position[]): boolean {
-  return occupied.some((other) => Math.abs(other.x - position.x) < cardWidth + 24 && Math.abs(other.y - position.y) < cardHeight + 36)
+function nodeBox(node: PipelineNode, position = node.position): OccupiedBox {
+  return {
+    ...position,
+    width: Math.max(cardWidth, node.measured?.width ?? node.width ?? cardWidth),
+    height: Math.max(cardHeight, node.measured?.height ?? node.height ?? cardHeight),
+  }
+}
+
+function collides(candidate: OccupiedBox, occupied: OccupiedBox[]): boolean {
+  return occupied.some((other) => (
+    candidate.x < other.x + other.width + 24
+    && candidate.x + candidate.width + 24 > other.x
+    && candidate.y < other.y + other.height + 36
+    && candidate.y + candidate.height + 36 > other.y
+  ))
 }
 
 export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
@@ -188,7 +202,7 @@ export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
   for (let column = 0; column < 4; column += 1) {
     for (let row = 0; row < 80; row += 1) {
       const candidate = { x: baseX + column * horizontalStep, y: baseY + row * verticalStep }
-      if (!collides(candidate, nodes.map((node) => node.position))) return candidate
+      if (!collides({ ...candidate, width: cardWidth, height: cardHeight }, nodes.map((node) => nodeBox(node)))) return candidate
     }
   }
   return { x: baseX + 4 * horizontalStep, y: baseY }
@@ -210,7 +224,7 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
   ))
   const lineageArranged = new Set([...arranged].filter((id) => !systemCards.some((card) => card.id === id)))
   const external = nodes.filter((node) => !arranged.has(node.id))
-  const occupied = external.map((node) => ({ ...node.position }))
+  const occupied = external.map((node) => nodeBox(node))
   const positions = new Map<string, Position>()
   let fullCursorY = layoutStartY
 
@@ -219,9 +233,9 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
     // lineage atoms. Keep them in a reserved lane so topology never overlaps.
     for (const [index, card] of systemCards.entries()) {
       let placed = { x: snap(layoutStartX + index * horizontalStep), y: snap(layoutStartY) }
-      while (collides(placed, occupied)) placed = { ...placed, y: placed.y + verticalStep }
+      while (collides(nodeBox(card, placed), occupied)) placed = { ...placed, y: placed.y + verticalStep }
       positions.set(card.id, placed)
-      occupied.push(placed)
+      occupied.push(nodeBox(card, placed))
     }
     if (systemCards.length > 0) fullCursorY += controlLaneHeight
 
@@ -241,15 +255,18 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
       baseY = snap(baseY)
       if (external.length > 0) {
         const offsets = [0, ...Array.from({ length: 16 }, (_, index) => [index + 1, -(index + 1)]).flat()]
-        const clear = offsets.find((step) => [...local.positions.values()].every((position) => !collides({ x: position.x + baseX, y: position.y + baseY + step * verticalStep }, occupied)))
+        const clear = offsets.find((step) => [...local.positions].every(([id, position]) => {
+          const node = localNodes.find((candidate) => candidate.id === id)!
+          return !collides(nodeBox(node, { x: position.x + baseX, y: position.y + baseY + step * verticalStep }), occupied)
+        }))
         baseY = clear === undefined
-          ? snap(Math.max(layoutStartY, ...occupied.map((position) => position.y + cardHeight + verticalGap)))
+          ? snap(Math.max(layoutStartY, ...occupied.map((position) => position.y + position.height + verticalGap)))
           : baseY + clear * verticalStep
       }
       for (const [id, position] of local.positions) {
         const placed = { x: snap(position.x + baseX), y: snap(position.y + baseY) }
         positions.set(id, placed)
-        occupied.push(placed)
+        occupied.push(nodeBox(localNodes.find((node) => node.id === id)!, placed))
       }
       if (external.length === 0) fullCursorY += local.height + componentGap
     }

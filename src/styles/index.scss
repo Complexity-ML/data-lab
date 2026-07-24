@@ -630,9 +630,10 @@ button { color: inherit; }
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 .healthy-icon { margin-left: auto; color: #22c55e; }
 .pipeline-card > strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.pipeline-card > p { min-height: 25px; margin: 5px 0 8px; color: var(--muted); font-size: 8.5px; line-height: 1.45; }
+.pipeline-card > p { display: -webkit-box; overflow: hidden; min-height: 25px; max-height: 49px; margin: 5px 0 8px; color: var(--muted); font-size: 8.5px; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .pipeline-card > code { display: block; overflow: hidden; margin: 0 0 8px; padding: 5px 6px; color: #475569; border: 1px solid rgb(203 213 225 / 70%); border-radius: 6px; background: rgb(255 255 255 / 72%); font: 7.5px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.pipeline-card footer { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; color: var(--muted); border-top: 1px solid rgb(203 213 225 / 50%); font-size: 7.5px; }
+.pipeline-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; color: var(--muted); border-top: 1px solid rgb(203 213 225 / 50%); font-size: 7.5px; }
+.pipeline-card footer > span:first-child { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
 .datahub-badge { padding: 2px 5px; color: #2563eb; border: 1px solid #bfdbfe; border-radius: 5px; background: #eff6ff; font-weight: 700; }
 .pipeline-handle { width: 9px !important; height: 9px !important; border: 2px solid #fff !important; background: #94a3b8 !important; box-shadow: 0 0 0 1px #cbd5e1; }
 .split-approved { top: 39% !important; background: #22c55e !important; }

@@ -39,10 +39,10 @@ const proposal: AgentProposal = {
 
 afterEach(cleanup)
 
-function useApprovalHarness(resolveApprovedExecution?: (nodes: PipelineNode[], edges: Edge[]) => PipelineNode[]) {
-  const [nodes, setNodes] = useState<PipelineNode[]>([])
-  const [edges, setEdges] = useState<Edge[]>([])
-  const [currentProposal, setProposal] = useState<AgentProposal | undefined>(proposal)
+function useApprovalHarness(resolveApprovedExecution?: (nodes: PipelineNode[], edges: Edge[]) => PipelineNode[], initialNodes: PipelineNode[] = [], initialEdges: Edge[] = [], initialProposal = proposal) {
+  const [nodes, setNodes] = useState<PipelineNode[]>(initialNodes)
+  const [edges, setEdges] = useState<Edge[]>(initialEdges)
+  const [currentProposal, setProposal] = useState<AgentProposal | undefined>(initialProposal)
   const [activity, setActivity] = useState('idle')
   const [, setProjectTitle] = useState('Untitled pipeline')
   const [, setSelectedId] = useState('')
@@ -97,6 +97,33 @@ describe('agent proposal approval', () => {
       runSequence: 7,
     })
     expect(result.current.versions.at(-1)?.nodes.find((node) => node.id === review.id)?.data.runState).toBe('completed')
+  })
+
+  it('preserves existing XY positions while placing newly approved cards in open space', () => {
+    const existing = { ...source, position: { x: 620, y: 340 }, measured: { width: 232, height: 360 } }
+    const addedReview = { ...review, id: 'new-review', position: { x: 620, y: 340 } }
+    const output: PipelineNode = {
+      id: 'new-output',
+      type: 'pipeline',
+      position: { x: 620, y: 340 },
+      data: { kind: 'output', label: 'Reviewed output', description: 'Terminal output.', owner: 'Agent', status: 'draft', schema: [] },
+    }
+    const incremental: AgentProposal = {
+      ...proposal,
+      addedNodes: [addedReview, output],
+      addedEdges: [
+        { id: 'source-review', source: existing.id, target: addedReview.id, type: 'elastic' },
+        { id: 'review-output', source: addedReview.id, target: output.id, type: 'elastic' },
+      ],
+    }
+    const { result } = renderHook(() => useApprovalHarness(undefined, [existing], [], incremental))
+
+    act(() => { result.current.recordPendingReview(incremental) })
+    act(() => { result.current.approveProposal() })
+
+    expect(result.current.nodes.find((node) => node.id === existing.id)?.position).toEqual(existing.position)
+    expect(result.current.nodes.find((node) => node.id === addedReview.id)?.position).not.toEqual(existing.position)
+    expect(result.current.nodes.find((node) => node.id === output.id)?.position).not.toEqual(existing.position)
   })
 
   it('discards an atomically invalid implementation while preserving it in history for agent repair', () => {

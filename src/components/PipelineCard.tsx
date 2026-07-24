@@ -29,6 +29,16 @@ const icons = {
   output: Send,
 }
 
+function cardTextPreview(value: string) {
+  return value
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const updateNodeInternals = useUpdateNodeInternals()
   const Icon = icons[data.kind]
@@ -41,6 +51,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
   const exploration = data.kind === 'explorer' ? data.exploration : undefined
   const explorerPolicy = data.kind === 'explorer' ? parseCatalogExplorerPolicy(data.rule) : undefined
+  const descriptionPreview = cardTextPreview(data.description)
 
   useEffect(() => {
     updateNodeInternals(id)
@@ -69,7 +80,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.status === 'healthy' && <CheckCircle2 className="healthy-icon" size={14} />}
     </header>
     <strong>{data.label}</strong>
-    <p>{data.description}</p>
+    <p>{descriptionPreview}</p>
     {data.profile && <div className="profile-summary" aria-label="Compact data profile">
       <span><strong>{data.profile.fieldCount}</strong> fields</span>
       <span><strong>{data.profile.sensitiveFieldCount}</strong> sensitive</span>

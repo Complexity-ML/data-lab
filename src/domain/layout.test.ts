@@ -103,4 +103,29 @@ describe('pipeline XY layout', () => {
     expect(system.every((node) => node.position.y < lineageTop)).toBe(true)
     expect(new Set(system.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(2)
   })
+
+  it('places only new agent cards around measured existing cards without moving user work', () => {
+    const existing = {
+      ...newCard('source', 0),
+      id: 'existing-source',
+      position: { x: 624, y: 336 },
+      measured: { width: 232, height: 420 },
+    }
+    const review = { ...newCard('review', 1), id: 'new-review', position: { x: 624, y: 336 } }
+    const output = { ...newCard('output', 2), id: 'new-output', position: { x: 624, y: 336 } }
+    const edges = [
+      { id: 'existing-review', source: existing.id, target: review.id },
+      { id: 'review-output', source: review.id, target: output.id },
+    ]
+
+    const arranged = layoutPipeline([existing, review, output], edges, [review.id, output.id])
+    const placedExisting = arranged.find((node) => node.id === existing.id)!
+    const placedReview = arranged.find((node) => node.id === review.id)!
+    const placedOutput = arranged.find((node) => node.id === output.id)!
+
+    expect(placedExisting.position).toEqual(existing.position)
+    expect(placedReview.position.x).toBeGreaterThan(existing.position.x + existing.measured.width)
+    expect(placedOutput.position.x).toBeGreaterThan(placedReview.position.x)
+    expect(new Set(arranged.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(3)
+  })
 })
