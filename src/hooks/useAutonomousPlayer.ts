@@ -332,24 +332,27 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
-        if (catalogExplorer) catalog.updateProgress(catalogExplorer, {
-          query: dataHubDiscoveryQuery(agentRequest),
-          total: 0,
-          discovered: 0,
-          inspected: 0,
-          failed: 0,
-          incidents: 0,
-          governanceGaps: 0,
-          concurrency: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? 4,
-          batchSize: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.batchSize ?? 8,
-          remaining: 0,
-          mode: explorerPolicy?.scope === 'dataset' ? 'dataset' : 'catalog',
-          cacheMode: explorerPolicy?.cacheMode ?? 'prefer',
-          phase: 'discover',
-          state: 'discovering',
-          checkpointAt: new Date().toISOString(),
-          datasets: [],
-        }, () => agentRunId.current === runId)
+        if (catalogExplorer) {
+          const checkpoint = catalogExplorer.data.exploration
+          catalog.updateProgress(catalogExplorer, {
+            query: dataHubDiscoveryQuery(agentRequest),
+            total: checkpoint?.total ?? 0,
+            discovered: checkpoint?.discovered ?? 0,
+            inspected: checkpoint?.inspected ?? 0,
+            failed: checkpoint?.failed ?? 0,
+            incidents: checkpoint?.incidents ?? 0,
+            governanceGaps: checkpoint?.governanceGaps ?? 0,
+            concurrency: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? checkpoint?.concurrency ?? 4,
+            batchSize: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.batchSize ?? checkpoint?.batchSize ?? 8,
+            remaining: checkpoint?.remaining ?? Math.max(0, (checkpoint?.total ?? 0) - (checkpoint?.inspected ?? 0)),
+            mode: explorerPolicy?.scope === 'dataset' ? 'dataset' : checkpoint?.mode ?? 'catalog',
+            cacheMode: explorerPolicy?.cacheMode ?? checkpoint?.cacheMode ?? 'prefer',
+            phase: 'discover',
+            state: 'discovering',
+            checkpointAt: new Date().toISOString(),
+            datasets: checkpoint?.datasets ?? [],
+          }, () => agentRunId.current === runId)
+        }
         let candidates: DataHubAssetSummary[] = []
         let discoveryError: unknown
         const discoveryQuery = dataHubDiscoveryQuery(agentRequest)

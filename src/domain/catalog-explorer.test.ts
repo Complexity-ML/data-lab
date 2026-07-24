@@ -66,7 +66,7 @@ describe('Catalog Explorer', () => {
       return inspection(assets.find((candidate) => candidate.urn === urn)!)
     }, { concurrency: 3 })
 
-    expect(result.progress).toMatchObject({ inspected: 5, failed: 1, incidents: 0, state: 'complete' })
+    expect(result.progress).toMatchObject({ inspected: 5, failed: 1, incidents: 0, remaining: 1, state: 'inspecting' })
     expect(result.progress.datasets.find((dataset) => dataset.urn.endsWith('2'))).toMatchObject({
       status: 'unavailable',
       issues: ['inspection failed: connector timed out'],
@@ -91,23 +91,25 @@ describe('Catalog Explorer', () => {
     })
   })
 
-  it('pauses the connector circuit after a complete unavailable batch and preserves the checkpoint', async () => {
+  it('keeps catalog coverage moving when a complete dataset batch is unavailable', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     const inspect = vi.fn(async () => { throw new Error('MCP unavailable') })
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(4)
+    expect(inspect).toHaveBeenCalledTimes(12)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 4,
-      failed: 4,
-      concurrency: 1,
+      inspected: 12,
+      failed: 12,
+      remaining: 12,
+      concurrency: 4,
+      connectorRetryCount: 0,
       connectorRecoveryStreak: 0,
       incidents: 0,
-      state: 'paused',
-      pauseReason: 'connector_unavailable',
+      state: 'inspecting',
     })
+    expect(result.progress.pauseReason).toBeUndefined()
   })
 
   it('retries one unavailable inspection with a forced fresh read', async () => {
@@ -208,7 +210,7 @@ describe('Catalog Explorer', () => {
     expect(result.progress).toMatchObject({ batchProcessed: 3, batchCached: 3, batchFailed: 0 })
   })
 
-  it('pauses the connector circuit after a later unavailable batch', async () => {
+  it('continues after a later unavailable batch instead of opening a global circuit', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     let calls = 0
     const inspect = vi.fn(async (urn: string) => {
@@ -219,16 +221,18 @@ describe('Catalog Explorer', () => {
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(8)
+    expect(inspect).toHaveBeenCalledTimes(12)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 8,
-      failed: 4,
-      concurrency: 1,
+      inspected: 12,
+      failed: 8,
+      remaining: 8,
+      concurrency: 4,
+      connectorRetryCount: 0,
       incidents: 0,
-      state: 'paused',
-      pauseReason: 'connector_unavailable',
+      state: 'inspecting',
     })
+    expect(result.progress.pauseReason).toBeUndefined()
   })
 
   it('keeps one worker until two fresh recovery batches succeed', async () => {
@@ -303,6 +307,11 @@ describe('Catalog Explorer', () => {
   })
 
   it('resets connector retry exhaustion for a new player session without losing coverage', () => {
+    const unavailable = {
+      ...checkpointForInspection(inspection(asset(0))),
+      status: 'unavailable' as const,
+      attemptCount: 3,
+    }
     const progress = {
       query: '*',
       total: 67,
@@ -320,7 +329,7 @@ describe('Catalog Explorer', () => {
       state: 'paused' as const,
       pauseReason: 'retry_exhausted' as const,
       checkpointAt: capturedAt,
-      datasets: [checkpointForInspection(inspection(asset(0)))],
+      datasets: [unavailable],
     }
 
     expect(resetCatalogRetryState(progress)).toMatchObject({
@@ -329,8 +338,8 @@ describe('Catalog Explorer', () => {
       connectorRetryCount: 0,
       connectorRecoveryStreak: 0,
       state: 'idle',
-      datasets: progress.datasets,
     })
+    expect(resetCatalogRetryState(progress).datasets[0]).toMatchObject({ urn: unavailable.urn, status: 'unavailable', attemptCount: 0 })
     expect(resetCatalogRetryState(progress).pauseReason).toBeUndefined()
     expect(resetCatalogRetryState(progress).connectorFailureFingerprint).toBeUndefined()
   })
@@ -366,21 +375,20 @@ describe('Catalog Explorer', () => {
     expect(result.progress).toMatchObject({
       inspected: 12,
       failed: 8,
-      connectorRetryCount: 2,
-      state: 'paused',
-      pauseReason: 'connector_unavailable',
+      connectorRetryCount: 0,
+      state: 'inspecting',
     })
     expect(new Set(result.progress.datasets.map((checkpoint) => checkpoint.urn)).size).toBe(12)
   })
 
-  it('stops connector retries after the persisted limit without calling the connector', async () => {
+  it('does not let legacy connector retry exhaustion block never-inspected datasets', async () => {
     const assets = Array.from({ length: 4 }, (_, index) => asset(index))
     const unavailable = {
       ...checkpointForInspection(inspection(assets[0]!)),
       status: 'unavailable' as const,
       expiresAt: capturedAt,
     }
-    const inspect = vi.fn(async () => inspection(assets[0]!))
+    const inspect = vi.fn(async (urn: string) => inspection(assets.find((candidate) => candidate.urn === urn)!))
     const result = await inspectCatalogInParallel(assets, inspect, {
       previous: [unavailable],
       previousProgress: {
@@ -401,12 +409,41 @@ describe('Catalog Explorer', () => {
       },
     })
 
+    expect(inspect).toHaveBeenCalledTimes(4)
+    expect(inspect).toHaveBeenNthCalledWith(1, assets[1]!.urn)
+    expect(inspect).toHaveBeenNthCalledWith(2, assets[2]!.urn)
+    expect(inspect).toHaveBeenNthCalledWith(3, assets[3]!.urn)
+    expect(inspect).toHaveBeenNthCalledWith(4, assets[0]!.urn)
+    expect(result.progress).toMatchObject({
+      inspected: 4,
+      connectorRetryCount: 0,
+      remaining: 0,
+      state: 'complete',
+    })
+    expect(result.progress.pauseReason).toBeUndefined()
+  })
+
+  it('finishes with unavailable evidence after each dataset exhausts its own retry budget', async () => {
+    const value = asset(0)
+    const unavailable = {
+      ...checkpointForInspection(inspection(value)),
+      status: 'unavailable' as const,
+      attemptCount: 3,
+      expiresAt: capturedAt,
+    }
+    const inspect = vi.fn(async () => inspection(value))
+
+    const result = await inspectCatalogInParallel([value], inspect, {
+      previous: [unavailable],
+      retryLimit: 3,
+    })
+
     expect(inspect).not.toHaveBeenCalled()
     expect(result.progress).toMatchObject({
       inspected: 1,
-      connectorRetryCount: 3,
-      state: 'paused',
-      pauseReason: 'retry_exhausted',
+      failed: 1,
+      remaining: 0,
+      state: 'complete',
     })
   })
 
@@ -470,6 +507,7 @@ describe('Catalog Explorer', () => {
 
     expect(shouldCallAgentForCatalog(undefined, base)).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, governanceGaps: 8 })).toBe(false)
+    expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, failed: 4 })).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, incidents: 1 })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
