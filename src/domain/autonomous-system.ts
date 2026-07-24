@@ -34,6 +34,7 @@ export function ensureAutonomousSystemCards(nodes: PipelineNode[]) {
           inspected: 0,
           failed: 0,
           incidents: 0,
+          governanceGaps: 0,
           concurrency: 4,
           state: 'idle',
           checkpointAt: new Date().toISOString(),

@@ -41,6 +41,7 @@ export interface CatalogExplorationProgress {
   inspected: number
   failed: number
   incidents: number
+  governanceGaps: number
   concurrency: number
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
   checkpointAt: string

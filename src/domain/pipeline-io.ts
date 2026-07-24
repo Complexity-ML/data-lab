@@ -88,6 +88,7 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     inspected: bounded('inspected'),
     failed: bounded('failed'),
     incidents: bounded('incidents'),
+    governanceGaps: bounded('governanceGaps'),
     concurrency: Math.max(1, Math.min(16, bounded('concurrency', 16) || 4)),
     state,
     checkpointAt: typeof source.checkpointAt === 'string' ? source.checkpointAt : new Date(0).toISOString(),
