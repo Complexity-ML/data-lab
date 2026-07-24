@@ -81,7 +81,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
     {data.rule && <code>{data.rule}</code>}
     <footer>
       <span>{data.owner}</span>
-      {data.datahubUrn && <span className="datahub-badge">DataHub</span>}
+      {(data.assetRef || data.datahubUrn) && <span className="datahub-badge">{data.sourceSystem ?? 'DataHub'}</span>}
     </footer>
     {!isOutput && !isSplit && !isSystem && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
     {isOutput && <>

@@ -417,7 +417,7 @@ export const sensitiveDataAtom: ValidationAtom = {
         const stateKey = `${node.id}:${protectedPath}`
         if (visited.has(stateKey)) continue
         visited.add(stateKey)
-        const governedRestrictedSink = node.data.kind === 'output' && /quarantine|secure|vault|restricted|steward|hold/i.test(`${node.data.label} ${node.data.description} ${node.data.datahubUrn ?? ''}`)
+        const governedRestrictedSink = node.data.kind === 'output' && /quarantine|secure|vault|restricted|steward|hold/i.test(`${node.data.label} ${node.data.description} ${node.data.assetRef ?? node.data.datahubUrn ?? ''}`)
         if (node.data.kind === 'output' && !protectedPath && !governedRestrictedSink) unsafeOutputs.set(node.id, source.id)
         for (const target of outgoing.get(node.id) ?? []) queue.push({ id: target, protected: protectedPath })
       }
@@ -431,7 +431,7 @@ export const dataHubGovernanceAtom: ValidationAtom = {
   label: 'DataHub governance signals',
   run({ nodes }) {
     return nodes.flatMap((node) => {
-      if (!node.data.datahubUrn) return []
+      if (!(node.data.assetRef || node.data.datahubUrn)) return []
       const findings: ValidationIssue[] = []
       const sensitive = node.data.datahubTags?.some((tag) => /pii|sensitive|gdpr|personal/i.test(tag))
         || node.data.schema.some((field) => field.tags?.some((tag) => /pii|sensitive|gdpr|personal/i.test(tag)))

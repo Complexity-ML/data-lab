@@ -94,7 +94,10 @@ export function usePipelineInteractions(options: {
       ...node,
       data: {
         ...node.data,
-        datahubUrn: asset.urn,
+        connectorId: asset.connectorId ?? 'datahub',
+        sourceSystem: asset.sourceSystem ?? 'DataHub',
+        assetRef: asset.assetRef ?? asset.urn,
+        datahubUrn: (asset.connectorId ?? 'datahub') === 'datahub' ? asset.urn : undefined,
         datahubPlatform: asset.platform,
         datahubEnvironment: asset.environment,
         datahubDomain: asset.domain,

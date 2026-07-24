@@ -24,7 +24,8 @@ function objectiveTerms(objective: string) {
 function sourceText(source: PipelineNode) {
   return normalize([
     source.data.label,
-    source.data.datahubUrn,
+    source.data.assetRef ?? source.data.datahubUrn,
+    source.data.sourceSystem,
     source.data.datahubPlatform,
     source.data.datahubEnvironment,
     source.data.datahubDomain,
@@ -55,7 +56,7 @@ export function workspaceNameFromObjective(objective: string) {
 }
 
 export function selectDataSources(nodes: PipelineNode[], objective: string, maximum = 4): SourceSelection {
-  const sources = nodes.filter((node) => node.data.kind === 'source' && node.data.datahubUrn)
+  const sources = nodes.filter((node) => node.data.kind === 'source' && (node.data.assetRef || node.data.datahubUrn))
   if (sources.length === 0) return { mode: 'none', sources: [], matchedTerms: [] }
   if (sources.length === 1) return { mode: 'single', sources, matchedTerms: [] }
 
@@ -64,7 +65,7 @@ export function selectDataSources(nodes: PipelineNode[], objective: string, maxi
   const scored = sources.map((source) => {
     const haystack = sourceText(source)
     const label = normalize(source.data.label)
-    const urn = normalize(source.data.datahubUrn ?? '')
+    const urn = normalize(source.data.assetRef ?? source.data.datahubUrn ?? '')
     const matchedTerms = terms.filter((term) => haystack.includes(term))
     const score = matchedTerms.length
       + (label.length >= 3 && normalizedObjective.includes(label) ? 12 : 0)

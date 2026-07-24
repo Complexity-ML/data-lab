@@ -72,6 +72,8 @@ function canonicalGraph(nodes: PipelineNode[], edges: Edge[]) {
     description: node.data.description,
     owner: node.data.owner,
     rule: node.data.rule,
+    connectorId: node.data.connectorId,
+    assetRef: node.data.assetRef,
     datahubUrn: node.data.datahubUrn,
     schema: node.data.schema,
   })).sort((left, right) => left.id.localeCompare(right.id))

@@ -144,7 +144,7 @@ export default function App() {
     approveProposal: pipelineVersions.approveProposal,
     autonomyPolicy,
     commitAutonomousProposal: pipelineVersions.commitAutonomousProposal,
-    connectionMode: dataHub.connectionMode,
+    connectionMode: dataHub.catalogConnectionMode,
     edges,
     fitCommittedGraph: pipeline.fitCommittedGraph,
     incidentSummaries: incidents.summaries,
@@ -289,6 +289,7 @@ export default function App() {
       aiStatus={ai.aiStatus}
       autonomyPolicy={autonomyPolicy}
       chatGPTStatus={ai.chatGPTStatus}
+      catalogConnectors={dataHub.catalogConnectors}
       connectionMode={dataHub.connectionMode}
       dataHubSettings={dataHub.settings}
       appUpdateBusy={appUpdates.busy}
@@ -321,6 +322,7 @@ export default function App() {
       onConnectChatGPT={ai.connectChatGPT}
       onCreateWorkspace={workspace.createWorkspace}
       onDeleteWorkspace={workspace.deleteWorkspace}
+      onDeleteCatalogConnector={dataHub.deleteCatalogConnector}
       onDisconnectChatGPT={ai.disconnectChatGPT}
       onEmergencyStop={player.stopAgent}
       onDuplicateWorkspace={workspace.duplicateWorkspace}
@@ -343,10 +345,12 @@ export default function App() {
       onRemindHumanReview={(version) => { if (window.dataLab) void window.dataLab.notifyHumanReview({ cardLabel: version.label, reason: version.description ?? 'Human Review is still pending.', versionId: version.id, remind: true }) }}
       onRenameWorkspace={workspace.renameWorkspace}
       onSaveAiSettings={ai.saveAiConnection}
+      onSaveCatalogConnector={dataHub.saveCatalogConnector}
       onSaveDataHubSettings={dataHub.saveSettings}
       onSelectActiveAiSource={ai.selectActiveAgentSource}
       onSetAppUpdateChannel={appUpdates.setChannel}
       onSyncDataHub={dataHub.syncDataHub}
+      onTestCatalogConnector={dataHub.testCatalogConnector}
       onTestAiConnection={ai.testAiConnection}
       onThemeChange={setTheme}
       onValidate={() => {
@@ -406,7 +410,7 @@ export default function App() {
       {reportsOpen
         ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
         : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
-          <CardInspectorView dataHubConnected={dataHub.connectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={pipeline.bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={pipeline.focusIncidentDiagram} onInspectDataHubAsset={dataHub.inspectAsset} onOpenDataHubSettings={() => { setSettingsSection('datahub'); setSettingsOpen(true) }} onSearchDataHub={dataHub.searchAssets} onSelectNode={setSelectedId} onUpdate={pipeline.updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => node.data.datahubUrn ? [[node.data.datahubUrn, { nodeId: node.id, label: node.data.label }]] : []))} />
+          <CardInspectorView dataHubConnected={dataHub.catalogConnectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={pipeline.bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={pipeline.focusIncidentDiagram} onInspectDataHubAsset={dataHub.inspectAsset} onOpenDataHubSettings={() => { setSettingsSection('connections'); setSettingsOpen(true) }} onSearchDataHub={dataHub.searchAssets} onSelectNode={setSelectedId} onUpdate={pipeline.updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => (node.data.assetRef ?? node.data.datahubUrn) ? [[node.data.assetRef ?? node.data.datahubUrn!, { nodeId: node.id, label: node.data.label }]] : []))} />
         </aside>}
     </section>
 

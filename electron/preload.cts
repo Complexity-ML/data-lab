@@ -10,6 +10,12 @@ const mcpSearchChannel = 'data-lab:datahub-mcp-search'
 const mcpInspectChannel = 'data-lab:datahub-mcp-inspect'
 const mcpInvalidateChannel = 'data-lab:datahub-mcp-invalidate'
 const mcpWritebackChannel = 'data-lab:datahub-mcp-writeback'
+const catalogConnectorsListChannel = 'data-lab:catalog-connectors-list'
+const catalogConnectorSaveChannel = 'data-lab:catalog-connector-save'
+const catalogConnectorDeleteChannel = 'data-lab:catalog-connector-delete'
+const catalogConnectorTestChannel = 'data-lab:catalog-connector-test'
+const catalogSearchChannel = 'data-lab:catalog-search'
+const catalogInspectChannel = 'data-lab:catalog-inspect'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
 const windowStateChangedChannel = 'data-lab:window-state-changed'
@@ -69,6 +75,12 @@ contextBridge.exposeInMainWorld('dataLab', {
   inspectDataHubAsset: (urn: string, force = false) => ipcRenderer.invoke(mcpInspectChannel, { urn, force }),
   invalidateDataHubContext: (urn?: string) => ipcRenderer.invoke(mcpInvalidateChannel, { urn }),
   writeDataHubDecision: (payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }) => ipcRenderer.invoke(mcpWritebackChannel, payload),
+  listCatalogConnectors: () => ipcRenderer.invoke(catalogConnectorsListChannel),
+  saveCatalogConnector: (payload: unknown) => ipcRenderer.invoke(catalogConnectorSaveChannel, payload),
+  deleteCatalogConnector: (id: string) => ipcRenderer.invoke(catalogConnectorDeleteChannel, { id }),
+  testCatalogConnector: (id: string) => ipcRenderer.invoke(catalogConnectorTestChannel, { id }),
+  searchCatalogAssets: (query: string) => ipcRenderer.invoke(catalogSearchChannel, { query }),
+  inspectCatalogAsset: (connectorId: string, assetRef: string, force = false) => ipcRenderer.invoke(catalogInspectChannel, { connectorId, assetRef, force }),
   notifyHumanReview: (payload: { cardLabel: string; reason: string; versionId?: string; remind?: boolean }) => ipcRenderer.invoke(humanReviewNotificationChannel, payload),
   getAiStatus: () => ipcRenderer.invoke(aiStatusChannel),
   saveAiSettings: (payload: unknown) => ipcRenderer.invoke(aiSaveChannel, payload),

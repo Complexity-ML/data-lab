@@ -68,6 +68,9 @@ export interface PipelineNodeData extends Record<string, unknown> {
   owner: string
   status: PipelineStatus
   schema: SchemaField[]
+  connectorId?: string
+  sourceSystem?: string
+  assetRef?: string
   datahubUrn?: string
   datahubPlatform?: string
   datahubEnvironment?: string

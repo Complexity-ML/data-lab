@@ -1,6 +1,10 @@
 import type { SchemaField } from './pipeline'
+import type { CatalogAssetSummary, CatalogEvidence } from './catalog-connectors'
 
-export interface DataHubEvidence {
+export interface DataHubEvidence extends Omit<CatalogEvidence, 'connectorId' | 'sourceSystem' | 'assetRef'> {
+  connectorId?: string
+  sourceSystem?: string
+  assetRef?: string
   tool: string
   urn: string
   capturedAt: string
@@ -11,7 +15,10 @@ export interface DataHubEvidence {
   stale: boolean
 }
 
-export interface DataHubAssetSummary {
+export interface DataHubAssetSummary extends Omit<CatalogAssetSummary, 'connectorId' | 'sourceSystem' | 'assetRef'> {
+  connectorId?: string
+  sourceSystem?: string
+  assetRef?: string
   urn: string
   name: string
   platform: string
