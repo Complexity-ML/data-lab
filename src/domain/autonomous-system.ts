@@ -1,4 +1,5 @@
 import { newCard, type PipelineNode } from './pipeline'
+import { parseWorkerPolicy, workerPolicyRule } from './worker-policy'
 
 export function ensureAutonomousSystemCards(nodes: PipelineNode[]) {
   let controller = nodes.find((node) => node.data.kind === 'control' && node.data.controlMode === 'autonomous-player')
@@ -16,6 +17,29 @@ export function ensureAutonomousSystemCards(nodes: PipelineNode[]) {
       },
     }
     added.push(controller)
+  }
+  if (!nodes.some((node) => node.data.kind === 'worker'
+    && node.data.workerMode === 'bounded-execution'
+    && parseWorkerPolicy(node.data.rule).role === 'exploration')) {
+    const worker = newCard('worker', nodes.length + added.length)
+    added.push({
+      ...worker,
+      data: {
+        ...worker.data,
+        label: 'Catalog Audit Worker',
+        description: 'Runs bounded catalog inspection batches with branch-only context, checkpoint recovery and atomic results.',
+        owner: 'DATA LAB Agent',
+        status: 'healthy',
+        rule: workerPolicyRule({
+          role: 'exploration',
+          batchSize: 8,
+          concurrency: 4,
+          retry: 'checkpoint',
+          context: 'branch_only',
+          merge: 'atomic',
+        }),
+      },
+    })
   }
   if (!nodes.some((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')) {
     const explorer = newCard('explorer', nodes.length + added.length)

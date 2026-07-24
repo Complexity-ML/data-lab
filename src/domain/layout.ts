@@ -1,5 +1,6 @@
 import type { Edge } from '@xyflow/react'
 import type { PipelineNode } from './pipeline'
+import { parseWorkerPolicy } from './worker-policy'
 
 const cardWidth = 232
 // Cards with a wrapped description, rule and footer render much taller than
@@ -202,7 +203,11 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
   const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
   const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
   if (arranged.size === 0) return nodes
-  const systemCards = nodes.filter((node) => arranged.has(node.id) && (node.data.kind === 'control' || node.data.kind === 'explorer'))
+  const systemCards = nodes.filter((node) => arranged.has(node.id) && (
+    node.data.kind === 'control'
+    || node.data.kind === 'explorer'
+    || (node.data.kind === 'worker' && parseWorkerPolicy(node.data.rule).role === 'exploration')
+  ))
   const lineageArranged = new Set([...arranged].filter((id) => !systemCards.some((card) => card.id === id)))
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => ({ ...node.position }))

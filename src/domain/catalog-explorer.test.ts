@@ -97,11 +97,13 @@ describe('Catalog Explorer', () => {
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(4)
+    expect(inspect).toHaveBeenCalledTimes(1)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 4,
-      failed: 4,
+      inspected: 1,
+      failed: 1,
+      concurrency: 1,
+      connectorRecoveryStreak: 0,
       incidents: 0,
       state: 'paused',
       pauseReason: 'connector_unavailable',
@@ -183,13 +185,15 @@ describe('Catalog Explorer', () => {
     }
 
     expect(resolveAdaptiveCatalogConcurrency()).toBe(4)
-    expect(resolveAdaptiveCatalogConcurrency(base)).toBe(6)
-    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 7 })).toBe(8)
+    expect(resolveAdaptiveCatalogConcurrency(base)).toBe(4)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 7 }, 8)).toBe(8)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, batchDurationMs: 20_000 })).toBe(3)
-    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchFailed: 1 })).toBe(2)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchFailed: 1 })).toBe(1)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, batchCached: 4 })).toBe(4)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, batchCached: 2 })).toBe(4)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(1)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, connectorRecoveryStreak: 1 })).toBe(1)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, connectorRecoveryStreak: 2 })).toBe(2)
   })
 
   it('records whether the latest adaptive batch was served from cache', async () => {
@@ -215,15 +219,55 @@ describe('Catalog Explorer', () => {
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(8)
+    expect(inspect).toHaveBeenCalledTimes(9)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 8,
-      failed: 4,
+      inspected: 9,
+      failed: 5,
+      concurrency: 1,
       incidents: 0,
       state: 'paused',
       pauseReason: 'connector_unavailable',
     })
+  })
+
+  it('keeps one worker until two fresh recovery batches succeed', async () => {
+    const assets = Array.from({ length: 6 }, (_, index) => asset(index))
+    const paused = {
+      query: '*',
+      total: 6,
+      discovered: 6,
+      inspected: 1,
+      failed: 1,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 1,
+      batchSize: 2,
+      batchFailed: 1,
+      batchProcessed: 1,
+      batchCached: 0,
+      connectorRecoveryStreak: 0,
+      state: 'paused' as const,
+      pauseReason: 'connector_unavailable' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+    const firstConcurrency = resolveAdaptiveCatalogConcurrency(paused, 4)
+    const first = await inspectCatalogInParallel(
+      assets,
+      async (urn) => inspection(assets.find((candidate) => candidate.urn === urn)!),
+      { concurrency: firstConcurrency, maxInspections: 2, previousProgress: paused },
+    )
+    expect(first.progress).toMatchObject({ concurrency: 1, connectorRecoveryStreak: 1, batchFailed: 0 })
+
+    const secondConcurrency = resolveAdaptiveCatalogConcurrency(first.progress, 4)
+    const second = await inspectCatalogInParallel(
+      assets,
+      async (urn) => inspection(assets.find((candidate) => candidate.urn === urn)!),
+      { concurrency: secondConcurrency, maxInspections: 2, previous: first.progress.datasets, previousProgress: first.progress },
+    )
+    expect(second.progress).toMatchObject({ concurrency: 1, connectorRecoveryStreak: 2, batchFailed: 0 })
+    expect(resolveAdaptiveCatalogConcurrency(second.progress, 4)).toBe(2)
   })
 
   it('resumes from fresh versioned checkpoints and retries unavailable reads', async () => {

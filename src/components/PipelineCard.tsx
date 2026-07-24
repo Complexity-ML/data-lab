@@ -33,11 +33,11 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
-  const isSystem = data.kind === 'control' || data.kind === 'explorer'
+  const workerPolicy = data.kind === 'worker' ? parseWorkerPolicy(data.rule) : undefined
+  const isSystem = data.kind === 'control' || data.kind === 'explorer' || workerPolicy?.role === 'exploration'
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
   const exploration = data.kind === 'explorer' ? data.exploration : undefined
   const explorerPolicy = data.kind === 'explorer' ? parseCatalogExplorerPolicy(data.rule) : undefined
-  const workerPolicy = data.kind === 'worker' ? parseWorkerPolicy(data.rule) : undefined
 
   useEffect(() => {
     updateNodeInternals(id)

@@ -5,6 +5,7 @@ import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
 import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
 import type { AgentProposal, CatalogExplorationProgress, PipelineNode } from '../domain/pipeline'
+import { parseWorkerPolicy } from '../domain/worker-policy'
 
 export function useCatalogExplorer(options: {
   incidentSummaries: IncidentSummary[]
@@ -15,21 +16,36 @@ export function useCatalogExplorer(options: {
 }) {
   const { incidentSummaries, inspectAsset, logIncident, setActivity, setNodes } = options
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
-  const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
+  const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean, worker?: PipelineNode) => {
     if (!isCurrent()) return
     const connectorPaused = progress.pauseReason === 'connector_unavailable'
     const scopeLabel = progress.mode === 'dataset' ? 'Focused dataset audit' : 'Connected-catalog audit'
     const phase = progress.state === 'failed' || connectorPaused ? `${scopeLabel} paused for connector recovery` : progress.state === 'complete' ? `${scopeLabel} complete` : `${scopeLabel} running`
-    setNodes((current) => current.map((node) => node.id === explorer.id ? {
-      ...node,
-      data: {
-        ...node.data,
-        exploration: progress,
-        description: `${phase} · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? Math.max(0, progress.total - progress.inspected)} queued · ${progress.concurrency} worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s) · ${progress.failed} connector read(s) unavailable.`,
-        status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
-        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'waiting' : progress.state === 'failed' ? 'failed' : 'running',
-      },
-    } : node))
+    const recovering = connectorPaused || progress.concurrency === 1 && (progress.connectorRecoveryStreak ?? 0) < 2
+    setNodes((current) => current.map((node) => {
+      if (node.id === explorer.id) return {
+        ...node,
+        data: {
+          ...node.data,
+          exploration: progress,
+          description: `${phase} · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? Math.max(0, progress.total - progress.inspected)} queued · ${progress.concurrency} worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s) · ${progress.failed} connector read(s) unavailable.`,
+          status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
+          runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'waiting' : progress.state === 'failed' ? 'failed' : 'running',
+        },
+      }
+      if (worker && node.id === worker.id) return {
+        ...node,
+        data: {
+          ...node.data,
+          description: recovering
+            ? `Connector recovery · 1 worker · checkpoint preserved · ${progress.connectorRecoveryStreak ?? 0}/2 healthy recovery batches.`
+            : `Catalog audit worker · ${progress.concurrency} concurrent task(s) · batch ${progress.batchSize ?? 1} · atomic checkpoint merge.`,
+          status: progress.failed > 0 ? 'warning' : 'healthy',
+          runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'waiting' : 'running',
+        },
+      }
+      return node
+    }))
     setActivity(progress.state === 'failed' || connectorPaused
       ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry scheduled`
       : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? 0} queued · ${progress.concurrency} adaptive worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s)`)
@@ -38,10 +54,12 @@ export function useCatalogExplorer(options: {
   const explore = useCallback(async (input: {
     assets: DataHubAssetSummary[]
     explorer: PipelineNode
+    worker?: PipelineNode
     isCurrent(): boolean
     query: string
   }) => {
     const policy = parseCatalogExplorerPolicy(input.explorer.data.rule)
+    const workerPolicy = input.worker ? parseWorkerPolicy(input.worker.data.rule) : undefined
     const focusedAsset = policy.scope === 'dataset' && policy.datasetUrn
       ? input.assets.find((asset) => asset.urn === policy.datasetUrn) ?? {
           urn: policy.datasetUrn,
@@ -64,7 +82,8 @@ export function useCatalogExplorer(options: {
     const assets = focusedAsset ? [focusedAsset] : input.assets
     catalogAssets.current.set(input.explorer.id, assets)
     const previousProgress = input.explorer.data.exploration
-    const configuredConcurrency = policy.scope === 'dataset' ? 1 : policy.concurrency
+    const configuredConcurrency = policy.scope === 'dataset' ? 1 : workerPolicy?.concurrency ?? policy.concurrency
+    const configuredBatchSize = policy.scope === 'dataset' ? 1 : workerPolicy?.batchSize ?? policy.batchSize
     const concurrency = policy.scope === 'dataset'
       ? 1
       : resolveAdaptiveCatalogConcurrency(previousProgress, configuredConcurrency)
@@ -77,15 +96,16 @@ export function useCatalogExplorer(options: {
       incidents: previousProgress?.incidents ?? 0,
       governanceGaps: previousProgress?.governanceGaps ?? 0,
       concurrency,
-      batchSize: policy.scope === 'dataset' ? 1 : policy.batchSize,
+      batchSize: configuredBatchSize,
       remaining: Math.max(0, assets.length - (previousProgress?.inspected ?? 0)),
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
       cacheMode: policy.cacheMode,
       phase: 'inspect',
       state: 'inspecting',
       checkpointAt: new Date().toISOString(),
+      connectorRecoveryStreak: previousProgress?.connectorRecoveryStreak ?? 0,
       datasets: previousProgress?.datasets ?? [],
-    }, input.isCurrent)
+    }, input.isCurrent, input.worker)
 
     const explored = await inspectCatalogInParallel(assets, async (urn) => {
       // A failed catalog read is retried from the versioned checkpoint. Repeating
@@ -109,14 +129,15 @@ export function useCatalogExplorer(options: {
       }
     }, {
       concurrency,
-      batchSize: policy.scope === 'dataset' ? 1 : policy.batchSize,
+      batchSize: configuredBatchSize,
       cacheMode: policy.cacheMode,
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
-      maxInspections: policy.scope === 'dataset' ? 1 : policy.batchSize,
+      maxInspections: configuredBatchSize,
       previous: input.explorer.data.exploration?.datasets,
+      previousProgress,
       query: input.query,
       isCancelled: () => !input.isCurrent(),
-      onCheckpoint: (progress) => updateProgress(input.explorer, progress, input.isCurrent),
+      onCheckpoint: (progress) => updateProgress(input.explorer, progress, input.isCurrent, input.worker),
     })
 
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)

@@ -2,7 +2,7 @@ import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { catalogExplorerPolicyError } from '../domain/catalog-explorer-policy'
 import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
-import { workerPolicyError } from '../domain/worker-policy'
+import { parseWorkerPolicy, workerPolicyError } from '../domain/worker-policy'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
 
 function issue(atomId: string, value: Omit<ValidationIssue, 'atomId'>): ValidationIssue {
@@ -46,7 +46,9 @@ export const pipelineTerminalsAtom: ValidationAtom = {
   label: 'Required pipeline terminals',
   run({ nodes }) {
     if (nodes.length === 0) return []
-    const hasLineageIntent = nodes.some((node) => node.data.kind !== 'control' && node.data.kind !== 'explorer')
+    const hasLineageIntent = nodes.some((node) => node.data.kind !== 'control'
+      && node.data.kind !== 'explorer'
+      && !(node.data.kind === 'worker' && parseWorkerPolicy(node.data.rule).role === 'exploration'))
     if (!hasLineageIntent) return []
     const findings: ValidationIssue[] = []
     if (!nodes.some((node) => node.data.kind === 'source')) findings.push(issue(this.id, { id: 'missing-source', severity: 'error', title: 'Data Source is required', detail: 'A runnable pipeline must start from at least one Data Source card.' }))
@@ -367,7 +369,9 @@ export const cardContractsAtom: ValidationAtom = {
     return context.nodes.flatMap((node) => {
       if (node.data.kind === 'profile') return []
       const findings: ValidationIssue[] = []
-      const globalSystemCard = node.data.kind === 'control' || node.data.kind === 'explorer'
+      const globalSystemCard = node.data.kind === 'control'
+        || node.data.kind === 'explorer'
+        || (node.data.kind === 'worker' && parseWorkerPolicy(node.data.rule).role === 'exploration')
       if (!globalSystemCard && node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
       if (!globalSystemCard && node.data.kind !== 'output' && node.data.kind !== 'review' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
