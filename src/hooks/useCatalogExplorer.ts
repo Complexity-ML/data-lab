@@ -14,17 +14,20 @@ export function useCatalogExplorer(options: {
   const { inspectAsset, logIncident, setActivity, setNodes } = options
   const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
     if (!isCurrent()) return
+    const phase = progress.state === 'failed' ? 'Catalog audit paused' : progress.state === 'complete' ? 'Complete connected-catalog audit' : 'Connected-catalog audit running'
     setNodes((current) => current.map((node) => node.id === explorer.id ? {
       ...node,
       data: {
         ...node.data,
         exploration: progress,
-        description: `Complete connected-catalog audit · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
+        description: `${phase} · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} data attention signal(s) · ${progress.failed} connector read(s) unavailable.`,
         status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
-        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : 'running',
+        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : progress.state === 'failed' ? 'failed' : 'running',
       },
     } : node))
-    setActivity(`Catalog Explorer · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s)`)
+    setActivity(progress.state === 'failed'
+      ? `Catalog Explorer paused · catalog connection unavailable after ${progress.inspected}/${progress.total || '?'} inspections`
+      : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} data attention signal(s)`)
   }, [setActivity, setNodes])
 
   const explore = useCallback(async (input: {
@@ -96,18 +99,39 @@ export function useCatalogExplorer(options: {
       }
     }
     if (input.isCurrent()) {
-      await Promise.all(explored.progress.datasets.filter((dataset) => dataset.status !== 'healthy').map((dataset) => logIncident({
+      const unavailable = explored.progress.datasets.filter((dataset) => dataset.status === 'unavailable')
+      const connectorGroups = new Map<string, typeof unavailable>()
+      unavailable.forEach((dataset) => {
+        const asset = byUrn.get(dataset.urn)
+        const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
+        connectorGroups.set(key, [...(connectorGroups.get(key) ?? []), dataset])
+      })
+      await Promise.all([
+        ...[...connectorGroups.entries()].map(([connector, datasets]) => logIncident({
+          incidentKey: `catalog-explorer:connectivity:${connector}`,
+          transition: 'opened' as const,
+          severity: 'critical' as const,
+          title: `Catalog connection unavailable · ${byUrn.get(datasets[0]!.urn)?.sourceSystem ?? connector}`,
+          detail: `${datasets.length} bounded inspection read(s) failed. The audit stopped before classifying unavailable metadata as dataset health.`,
+          sourceSystem: byUrn.get(datasets[0]!.urn)?.sourceSystem ?? 'DATA LAB connectivity',
+          sourceRef: connector,
+          fingerprint: datasets.map((dataset) => dataset.fingerprint).join(':'),
+          cardId: input.explorer.id,
+          branchId: connector,
+        })),
+        ...explored.progress.datasets.filter((dataset) => dataset.status === 'warning').map((dataset) => logIncident({
         incidentKey: `catalog-explorer:${dataset.urn}`,
         transition: 'opened',
-        severity: dataset.status === 'unavailable' ? 'critical' : 'warning',
-        title: dataset.status === 'unavailable' ? `Metadata unavailable · ${dataset.name}` : `Governance attention · ${dataset.name}`,
+        severity: 'warning',
+        title: `Governance attention · ${dataset.name}`,
         detail: dataset.issues.join(', ') || 'Catalog Explorer detected a metadata signal requiring attention.',
-        sourceSystem: dataset.status === 'unavailable' ? 'DATA LAB connectivity' : byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
+        sourceSystem: byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
         sourceRef: dataset.urn,
         fingerprint: dataset.fingerprint,
         cardId: input.explorer.id,
         branchId: dataset.urn,
-      })))
+        })),
+      ])
     }
     return {
       candidate,
