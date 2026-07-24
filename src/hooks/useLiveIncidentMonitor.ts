@@ -11,6 +11,8 @@ export interface LiveIncidentTrigger {
   audit: DataHubMcpAudit
   incidentKey: string
   monitor: BoundLiveMonitor
+  reason: 'evidence-change' | 'retry-exhausted'
+  attempts: number
 }
 
 interface UseLiveIncidentMonitorOptions {
@@ -86,8 +88,14 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
             cardId: monitor.monitorId,
             branchId: monitor.monitorId,
           })
-          if (decision.triggerAgent) {
-            const trigger = { audit: auditResult, incidentKey, monitor }
+          if (decision.triggerAgent || decision.escalateToHumanReview) {
+            const trigger: LiveIncidentTrigger = {
+              audit: auditResult,
+              incidentKey,
+              monitor,
+              reason: decision.escalateToHumanReview ? 'retry-exhausted' : 'evidence-change',
+              attempts: decision.next.iterations,
+            }
             if (blocked.current || triggering.current || agentTriggered) {
               pendingTriggers.current.set(bindingKey, trigger)
             } else {

@@ -26,6 +26,7 @@ export interface MonitorDecision {
   next: MonitorRuntimeState
   transition?: Extract<IncidentTransition, 'opened' | 'worsened' | 'recovered'>
   triggerAgent: boolean
+  escalateToHumanReview: boolean
 }
 
 export interface BoundLiveMonitor {
@@ -81,7 +82,7 @@ export function observeDataHubAudit(audit: DataHubMcpAudit): MonitorObservation 
 export function evaluateMonitorObservation(previous: MonitorRuntimeState | undefined, observation: MonitorObservation, policy: LiveMonitorPolicy): MonitorDecision {
   const baseline: MonitorRuntimeState = previous ?? { severity: 'info', open: false, iterations: 0 }
   if (baseline.fingerprint === observation.fingerprint && baseline.severity === observation.severity) {
-    return { next: baseline, triggerAgent: false }
+    return { next: baseline, triggerAgent: false, escalateToHumanReview: false }
   }
 
   if (observation.severity === 'info') {
@@ -89,16 +90,18 @@ export function evaluateMonitorObservation(previous: MonitorRuntimeState | undef
       next: { fingerprint: observation.fingerprint, severity: 'info', open: false, iterations: 0 },
       transition: baseline.open ? 'recovered' : undefined,
       triggerAgent: false,
+      escalateToHumanReview: false,
     }
   }
 
   const transition = baseline.open ? 'worsened' : 'opened'
   const iterations = baseline.iterations + 1
+  const changedOrWorse = !baseline.open || baseline.fingerprint !== observation.fingerprint || severityRank[observation.severity] > severityRank[baseline.severity]
   return {
     next: { fingerprint: observation.fingerprint, severity: observation.severity, open: true, iterations },
     transition,
-    triggerAgent: iterations <= policy.maxIterations
-      && (!baseline.open || baseline.fingerprint !== observation.fingerprint || severityRank[observation.severity] > severityRank[baseline.severity]),
+    triggerAgent: iterations <= policy.maxIterations && changedOrWorse,
+    escalateToHumanReview: iterations === policy.maxIterations + 1 && changedOrWorse,
   }
 }
 
