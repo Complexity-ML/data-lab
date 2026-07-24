@@ -90,6 +90,40 @@ function normalizedType(value: unknown): 'string' | 'number' | 'boolean' | 'time
   return 'string'
 }
 
+const failedQualityResults = new Set(['FAIL', 'FAILED', 'FAILURE', 'ERROR', 'CRITICAL'])
+const healthyQualityResults = new Set(['PASS', 'PASSED', 'SUCCESS', 'SUCCEEDED'])
+
+function qualityResultValues(value: unknown, results: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => qualityResultValues(entry, results))
+    return results
+  }
+  const candidate = record(value)
+  Object.entries(candidate).forEach(([key, entry]) => {
+    if (['result', 'status', 'type'].includes(key.toLowerCase())) {
+      if (typeof entry === 'string') results.push(entry.trim().toUpperCase())
+      else {
+        const nested = record(entry)
+        ;['type', 'status', 'result'].forEach((nestedKey) => {
+          if (typeof nested[nestedKey] === 'string') results.push(nested[nestedKey].trim().toUpperCase())
+        })
+      }
+    }
+    if (typeof entry === 'object' && entry !== null) qualityResultValues(entry, results)
+  })
+  return results
+}
+
+export function qualityStatusFromEntity(entityValue: unknown): DataHubAssetSummary['qualityStatus'] {
+  const entity = record(entityValue)
+  const qualityRoots = [entity.assertions, entity.quality, entity.dataQuality, entity.health]
+    .filter((value) => value !== undefined && value !== null)
+  const results = qualityRoots.flatMap((value) => qualityResultValues(value))
+  if (results.some((value) => failedQualityResults.has(value))) return 'failing'
+  if (results.some((value) => healthyQualityResults.has(value))) return 'healthy'
+  return 'unavailable'
+}
+
 function names(values: unknown[], resolver: (value: JsonRecord) => unknown): string[] {
   return [...new Set(values.map((value) => sanitizeCatalogText(resolver(record(value)), 160)).filter(Boolean))]
 }
@@ -147,7 +181,6 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
     const fieldTags = [...new Set([...array(field.editedTags), ...array(field.editedGlossaryTerms)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 160)))]
     return { name: sanitizeCatalogText(field.fieldPath, 240), type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }
   }).filter((field) => field.name).slice(0, 250)
-  const serialized = JSON.stringify(entity)
   const capturedAt = options.capturedAt ?? new Date().toISOString()
   const expiresAt = options.expiresAt ?? new Date(Date.now() + 2 * 60_000).toISOString()
 
@@ -161,7 +194,7 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
     domain: sanitizeCatalogText(domainName, 160) || undefined,
     tags: [...new Set([...tags, ...terms])],
     fields,
-    qualityStatus: /"result"\s*:\s*"?(FAIL|ERROR)|failing|critical/i.test(serialized) ? 'failing' : /assertion|quality|health/i.test(serialized) ? 'healthy' : 'unavailable',
+    qualityStatus: qualityStatusFromEntity(entity),
     upstream: lineageAssets(options.upstreamPayload, urn),
     downstream: lineageAssets(options.downstreamPayload, urn),
     freshness: { capturedAt, expiresAt, stale: new Date(expiresAt).getTime() <= Date.now() },
