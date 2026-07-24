@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -78,6 +78,28 @@ describe('DataHub MCP connection settings', () => {
     expect(resolveCatalogSearchTotal(67)).toBe(67)
     expect(resolveCatalogSearchTotal(1_250)).toBe(1_250)
     expect(resolveCatalogSearchTotal(9_000)).toBe(2_000)
+  })
+
+  it('reconnects and retries only failed catalog pages while preserving successful pages', async () => {
+    const calls = new Map<number, number>()
+    const reconnect = vi.fn(async () => undefined)
+    const result = await mapWithRetryConcurrency([10, 20, 30], 3, async (offset, _index, attempt) => {
+      calls.set(offset, (calls.get(offset) ?? 0) + 1)
+      if (offset === 20 && attempt === 1) throw new Error('search page timed out')
+      return `page-${offset}`
+    }, { attempts: 2, beforeRetry: reconnect, label: 'catalog pages' })
+
+    expect(result).toEqual(['page-10', 'page-20', 'page-30'])
+    expect(calls).toEqual(new Map([[10, 1], [20, 2], [30, 1]]))
+    expect(reconnect).toHaveBeenCalledWith([20], 1)
+  })
+
+  it('reports the exact page after bounded catalog retries are exhausted', async () => {
+    await expect(mapWithRetryConcurrency([40], 1, async () => {
+      throw new Error('search page 5 attempt 2 timed out')
+    }, { attempts: 2, label: 'DataHub catalog pages' })).rejects.toThrow(
+      'DataHub catalog pages failed after 2 attempts (40: search page 5 attempt 2 timed out)',
+    )
   })
 
   it('normalizes the exact write-back payload before any confirmation or MCP mutation', () => {

@@ -440,23 +440,81 @@ export async function mapWithConcurrency<T, R>(values: T[], concurrency: number,
   return results
 }
 
+export async function mapWithRetryConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T, index: number, attempt: number) => Promise<R>,
+  options: {
+    attempts?: number
+    beforeRetry?(failedValues: T[], attempt: number): Promise<void>
+    label?: string
+  } = {},
+): Promise<Awaited<R>[]> {
+  const attempts = Math.max(1, Math.min(3, Math.floor(options.attempts ?? 2)))
+  const results = new Array<Awaited<R>>(values.length)
+  let pending = values.map((value, index) => ({ value, index }))
+  let lastErrors = new Map<number, unknown>()
+  for (let attempt = 1; attempt <= attempts && pending.length; attempt += 1) {
+    const outcomes = await mapWithConcurrency(pending, concurrency, async (item) => {
+      try {
+        return { ok: true, item, result: await worker(item.value, item.index, attempt) } as const
+      } catch (error) {
+        return { ok: false, item, error } as const
+      }
+    })
+    const failed: typeof pending = []
+    lastErrors = new Map()
+    for (const outcome of outcomes) {
+      if (outcome.ok) results[outcome.item.index] = outcome.result
+      else {
+        failed.push(outcome.item)
+        lastErrors.set(outcome.item.index, outcome.error)
+      }
+    }
+    pending = failed
+    if (pending.length && attempt < attempts) await options.beforeRetry?.(pending.map((item) => item.value), attempt)
+  }
+  if (pending.length) {
+    const details = pending.map((item) => {
+      const error = lastErrors.get(item.index)
+      return `${String(item.value)}: ${error instanceof Error ? error.message : String(error)}`
+    }).join(' | ')
+    throw new Error(`${options.label ?? 'operation'} failed after ${attempts} attempts (${details})`)
+  }
+  return results
+}
+
 export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
   const structuredQuery = buildDataHubSearchQuery(query)
-  const client = await connectClient()
-  const available = await discoverReadableToolNames(client)
-  if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
   const pageSize = 10
-  const searchPage = async (offset: number) => {
-    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }), 45_000, `search page ${Math.floor(offset / pageSize) + 1}`), 'search response')
+  const searchPage = async (offset: number, attempt: number) => {
+    const client = await connectClient()
+    const available = await discoverReadableToolNames(client)
+    if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
+    const page = Math.floor(offset / pageSize) + 1
+    const result = assertBoundedMcpPayload(await withTimeout(
+      client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }),
+      20_000,
+      `search page ${page} attempt ${attempt}`,
+    ), 'search response')
     if (result.isError) throw new Error(summarizeResult(result))
     const payload = readStructuredToolResult(result)
     return { matches: parseSearchResults(payload), total: parseSearchTotal(payload) }
   }
-  const first = await searchPage(0)
+  const reconnectBeforeRetry = async () => { await closeDataHubMcp() }
+  const [first] = await mapWithRetryConcurrency([0], 1, searchPage, {
+    attempts: 2,
+    beforeRetry: reconnectBeforeRetry,
+    label: 'DataHub catalog first page',
+  })
   if (!first.matches.length) return []
   const total = resolveCatalogSearchTotal(first.total)
   const offsets = Array.from({ length: Math.max(0, Math.ceil(total / pageSize) - 1) }, (_, index) => (index + 1) * pageSize)
-  const pages = await mapWithConcurrency(offsets, 6, (offset) => searchPage(offset))
+  const pages = await mapWithRetryConcurrency(offsets, 3, searchPage, {
+    attempts: 2,
+    beforeRetry: reconnectBeforeRetry,
+    label: 'DataHub catalog pages',
+  })
   const seen = new Set<string>()
   return [first, ...pages].flatMap((page) => page.matches).flatMap((match) => {
     if (seen.has(match.urn)) return []
