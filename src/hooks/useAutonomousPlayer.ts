@@ -5,6 +5,7 @@ import type { SettingsSection } from '../components/shared/SettingsModal'
 import { materializeAiProposal, type ActiveAiSource } from '../domain/ai'
 import { buildPipelineAgentRequest } from '../domain/agent-context'
 import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, type AtomicPipelineRun } from '../domain/atomic-execution'
+import { maximumAtomicRepairAttempts, planAtomicRepair, type AtomicRepairState } from '../domain/atomic-repair'
 import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
@@ -105,21 +106,31 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const [playerState, setPlayerState] = useState<AgentPlayerState>('stopped')
   const [proposalApprovalBusy, setProposalApprovalBusy] = useState(false)
   const [pendingWorkspacePrompt, setPendingWorkspacePrompt] = useState<string>()
-  const [autonomousStepRequest, setAutonomousStepRequest] = useState<{ objective: string; sessionId: number }>()
+  const [autonomousStepRequest, setAutonomousStepRequest] = useState<{ objective: string; sessionId: number; stepId: number }>()
+  const [autonomousStepScheduled, setAutonomousStepScheduled] = useState(false)
   const playerSessionId = useRef(0)
   const playerStartupBlocked = useRef(false)
   const proposalApprovalRunning = useRef(false)
   const monitorBootstrapAttempted = useRef(false)
   const autonomousStepTimer = useRef<number | undefined>(undefined)
+  const autonomousStepId = useRef(0)
+  const autonomousSchedulingBlocked = useRef(true)
+  const atomicRepairState = useRef<AtomicRepairState | undefined>(undefined)
   const catalog = useCatalogExplorer({ incidentSummaries, inspectAsset: inspectDataHubAsset, logIncident, setActivity, setNodes })
 
   const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current, delayMs = 650) => {
+    if (autonomousSchedulingBlocked.current || playerSessionId.current !== sessionId) return
     if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
+    const stepId = ++autonomousStepId.current
+    setAutonomousStepScheduled(true)
     setActivity(delayMs > 1_000 ? 'Autonomous retry scheduled · waiting for fresh external evidence…' : 'Next autonomous iteration scheduled · rereading the graph and checkpoint…')
     autonomousStepTimer.current = window.setTimeout(() => {
       autonomousStepTimer.current = undefined
-      if (playerSessionId.current !== sessionId) return
-      setAutonomousStepRequest({ objective, sessionId })
+      if (playerSessionId.current !== sessionId) {
+        if (autonomousStepId.current === stepId) setAutonomousStepScheduled(false)
+        return
+      }
+      setAutonomousStepRequest({ objective, sessionId, stepId })
     }, delayMs)
   }
 
@@ -622,6 +633,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       const preview = applyProposal(nodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
       if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
+        atomicRepairState.current = undefined
         const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
         const hasMonitor = nodes.some((node) => node.data.kind === 'monitor')
         if (autonomousSessionActive && !hasMonitor && !monitorBootstrapAttempted.current) {
@@ -649,6 +661,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         const autonomousVersionId = commitAutonomousProposal(nextProposal)
         if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))
         if (autonomousVersionId) {
+          atomicRepairState.current = undefined
           if (monitored) {
             await logIncident({
               incidentKey: monitored.incidentKey,
@@ -668,12 +681,32 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           }
         } else if (autonomousSessionActive) {
           const blockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
-          const feedback = blockers.map((issue) => `${issue.title}: ${issue.detail}`).join(' | ')
-          queueAutonomousStep(`The previous graph diff was rejected atomically and was not committed. Repair the proposal itself in one smaller coherent diff. Resolve these exact blockers without weakening validation or duplicating cards: ${feedback}`, expectedPlayerSessionId, 1_200)
-          setActivity(`Autonomous correction rejected safely · ${blockers.length} atomic check${blockers.length === 1 ? '' : 's'} failed · agent retry scheduled`)
+          const repair = planAtomicRepair(atomicRepairState.current, expectedPlayerSessionId, blockers.map((issue) => issue.id))
+          atomicRepairState.current = repair.nextState
+          if (repair.shouldRetry) {
+            const feedback = blockers.map((issue) => `${issue.id} · ${issue.title}: ${issue.detail}`).join(' | ')
+            queueAutonomousStep(`The previous graph diff was rejected atomically and was not committed. This is the single bounded repair turn. Repair the proposal itself in one smaller coherent diff. Resolve these exact blockers without weakening validation or duplicating cards: ${feedback}`, expectedPlayerSessionId, 1_200)
+            setActivity(`Autonomous correction rejected safely · ${blockers.length} atomic check${blockers.length === 1 ? '' : 's'} failed · bounded repair 1/${maximumAtomicRepairAttempts} scheduled`)
+            recordDiagnostic({
+              category: 'revision',
+              action: 'proposal.atomic-repair',
+              status: 'warning',
+              detail: { blockerIds: blockers.map((issue) => issue.id), attempt: repair.nextState.attempts, maximumAttempts: maximumAtomicRepairAttempts },
+            })
+          } else {
+            setActivity(`Atomic repair stopped safely · ${blockers.length} blocker${blockers.length === 1 ? '' : 's'} remain · waiting for a new event or Human Review`)
+            notifyToast('The graph stayed unchanged. DATA LAB exhausted the bounded repair turn and will not hot-loop on the same invalid diff.', 'error', 'Atomic repair stopped')
+            recordDiagnostic({
+              category: 'revision',
+              action: 'proposal.atomic-repair.exhausted',
+              status: 'error',
+              detail: { blockerIds: blockers.map((issue) => issue.id), blockerFingerprint: repair.blockerFingerprint, maximumAttempts: maximumAtomicRepairAttempts },
+            })
+          }
         }
         return
       }
+      atomicRepairState.current = undefined
       resumePlayerAfterReview.current = playerState === 'running' && expectedPlayerSessionId !== undefined
       setProposal(nextProposal)
       setProposalReviewOpen(true)
@@ -735,7 +768,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     if (!autonomousStepRequest || playerState !== 'running' || proposal || agentRunning || playerStarting) return
     const request = autonomousStepRequest
     setAutonomousStepRequest(undefined)
-    void auditWithAgent(request.objective, undefined, request.sessionId)
+    void auditWithAgent(request.objective, undefined, request.sessionId).finally(() => {
+      if (autonomousStepId.current === request.stepId) setAutonomousStepScheduled(false)
+    })
   }, [agentRunning, autonomousStepRequest, playerStarting, playerState, proposal])
 
   useEffect(() => () => {
@@ -752,8 +787,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     }
     if (playerState === 'stopped') catalog.resetRetriesOnNextExplore()
     const sessionId = ++playerSessionId.current
+    autonomousSchedulingBlocked.current = false
+    atomicRepairState.current = undefined
     monitorBootstrapAttempted.current = false
     setAutonomousStepRequest(undefined)
+    setAutonomousStepScheduled(false)
     playerStartupBlocked.current = true
     setPlayerStarting(true)
     setPlayerState('running')
@@ -762,9 +800,12 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     if (systemCards.added.length) {
       setNodes((current) => [...current, ...systemCards.added])
       setActivity(`${systemCards.added.map((node) => node.data.label).join(' and ')} created · preparing complete catalog exploration…`)
+      const stepId = ++autonomousStepId.current
+      setAutonomousStepScheduled(true)
       setAutonomousStepRequest({
         objective: `Execute the persistent DATA LAB Control policy as coherent versioned iterations: ${controller.data.rule}`,
         sessionId,
+        stepId,
       })
       playerStartupBlocked.current = false
       setPlayerStarting(false)
@@ -789,6 +830,14 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const pauseAgent = () => {
     if (playerState !== 'running') return
     resumePlayerAfterReview.current = false
+    autonomousSchedulingBlocked.current = true
+    autonomousStepId.current += 1
+    setAutonomousStepScheduled(false)
+    setAutonomousStepRequest(undefined)
+    if (autonomousStepTimer.current !== undefined) {
+      window.clearTimeout(autonomousStepTimer.current)
+      autonomousStepTimer.current = undefined
+    }
     setPlayerState('paused')
     setActivity(agentRunning
       ? 'Autonomous player pause armed · current atomic iteration may finish · no next iteration will start'
@@ -798,9 +847,13 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const stopAgent = () => {
     const cancellingActiveRun = agentRunning
     setPlayerState('stopped')
+    autonomousSchedulingBlocked.current = true
     playerSessionId.current += 1
     agentRunId.current += 1
+    autonomousStepId.current += 1
+    atomicRepairState.current = undefined
     setPlayerStarting(false)
+    setAutonomousStepScheduled(false)
     setAutonomousStepRequest(undefined)
     if (autonomousStepTimer.current !== undefined) {
       window.clearTimeout(autonomousStepTimer.current)
@@ -879,19 +932,29 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       const approvalBlockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
       if (approvalBlockers.length) {
         const feedback = approvalBlockers.map((issue) => `${issue.id} · ${issue.title}: ${issue.detail}`).join(' | ')
+        const repair = planAtomicRepair(atomicRepairState.current, playerSessionId.current, approvalBlockers.map((issue) => issue.id))
+        atomicRepairState.current = repair.nextState
         discardInvalidProposal(approvalBlockers.map((issue) => issue.id))
         setProposalReviewOpen(false)
         resumePlayerAfterReview.current = false
         setPlayerState('running')
-        queueAutonomousStep(`The human approved the intent of "${currentProposal.title}", but DATA LAB rejected its implementation atomically. Preserve that human approval as intent, discard the invalid diff, and produce a smaller corrected proposal that resolves every blocker without weakening validation: ${feedback}`, playerSessionId.current, 200)
-        notifyToast('Your approval was preserved as intent. The invalid diff was discarded and the agent is correcting its atomic blockers.', 'info', 'Agent repair started')
+        if (repair.shouldRetry) {
+          autonomousSchedulingBlocked.current = false
+          queueAutonomousStep(`The human approved the intent of "${currentProposal.title}", but DATA LAB rejected its implementation atomically. This is the single bounded repair turn. Preserve that human approval as intent, discard the invalid diff, and produce a smaller corrected proposal that resolves every blocker without weakening validation: ${feedback}`, playerSessionId.current, 200)
+          notifyToast('Your approval was preserved as intent. The invalid diff was discarded and the agent gets one bounded repair turn.', 'info', 'Agent repair started')
+        } else {
+          setActivity(`Human intent preserved · atomic repair budget exhausted · ${approvalBlockers.length} blocker${approvalBlockers.length === 1 ? '' : 's'} remain · graph unchanged`)
+          notifyToast('The invalid diff was discarded. DATA LAB will wait for a new event or a new Human Review instead of retrying forever.', 'error', 'Atomic repair stopped')
+        }
         return true
       }
       if (!approveProposal()) return false
+      atomicRepairState.current = undefined
       const shouldResumePlayer = playerState === 'running' || resumePlayerAfterReview.current
       const continuePlayer = (objective: string) => {
         if (!shouldResumePlayer) return
         resumePlayerAfterReview.current = false
+        autonomousSchedulingBlocked.current = false
         setPlayerState('running')
         queueAutonomousStep(objective, playerSessionId.current)
       }
@@ -960,7 +1023,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     queueAutonomousStep,
     rejectAgentProposal,
     setAgentRunning,
-    stepPending: Boolean(autonomousStepRequest),
+    stepPending: autonomousStepScheduled || Boolean(autonomousStepRequest),
     stopAgent,
   }
 }
