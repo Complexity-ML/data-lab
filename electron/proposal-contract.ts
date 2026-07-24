@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>
 
 export type ProposalActionType = 'add_card' | 'update_card' | 'add_edge' | 'remove_edge'
-export type ProposalCardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type ProposalCardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 
 export interface ValidatedProposalAction {
   type: ProposalActionType
@@ -30,9 +30,9 @@ export interface ValidatedProposal {
 
 const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'confidence', 'writeback', 'evidence', 'actions'] as const
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
-const kinds = new Set<ProposalCardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<ProposalCardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
-const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
+const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800

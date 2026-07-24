@@ -62,7 +62,7 @@ export interface AiProposalResponse {
   toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
-const kinds = new Set<CardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)

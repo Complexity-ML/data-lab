@@ -12,6 +12,7 @@ Most visual pipeline builders let users connect blocks without understanding the
 
 - Is this connection flowing in the right direction?
 - Which downstream outputs will receive a PII field?
+- Which feature, training dataset or production model is at risk after a schema change?
 - Is a Split missing a governed branch?
 - What change should be proposed, and what should be written back to the catalog?
 
@@ -21,7 +22,7 @@ The starter scenario detects that `customers_360.email` is tagged as PII while t
 
 - Electron desktop shell with a bright, accessible visual system.
 - Directional card graph powered by React Flow.
-- Data Source, Data Analysis, Split, Agent Decision, Transform, Human Review, Validation and Output cards.
+- Data Source, Data Profile, Data Analysis, Impact Analysis, Risk Assessment, Compatibility Patch, Live Monitor, Parallel Agents, Incident Diagram, Split, Agent Decision, Transform, Human Review, Validation and Output cards.
 - Editable card metadata and DataHub URNs.
 - Local validation for cycles, orphan cards, reversed sources/outputs and incomplete splits.
 - DataHub-aware PII path check.
@@ -30,11 +31,13 @@ The starter scenario detects that `customers_360.email` is tagged as PII while t
 - A real Electron-side MCP client using the official TypeScript SDK.
 - Local stdio and remote Streamable HTTP transports for the official DataHub MCP Server.
 - Live `get_entities`, `list_schema_fields` and `get_lineage` reads before an agent proposal.
+- Atomic Risk Assessment cards that separate verified data/ML risk from MCP collection reliability and record severity, confidence, evidence freshness, affected assets and the recommended action.
 - Card-role runner that follows the primary graph route and passes typed contracts between cards.
 - Data-adaptive protection rules generated from the classified fields in the source schema.
 - Confidence policy that turns Agent Decision into Human Review when evidence is sensitive or incomplete.
+- Persisted **Settings → Autonomy** policies for Human Review frequency, risk-analysis depth and incomplete/conflicting evidence; Frequent mode is enforced by the Electron host before any material diff can auto-commit.
 - Transactional pipeline versions: invalid candidates are rejected and previous checkpoints can be restored.
-- Collapsible inspector and a portal-based Settings modal with Appearance, MCP, Pipeline and Versions sections.
+- Collapsible inspector and a portal-based Settings modal with Appearance, Autonomy, MCP, Pipeline and Versions sections.
 - Optional bounded GraphQL adapter for direct dataset refresh; tokens never enter the renderer.
 - Sample agent output and a ready-to-record hackathon demo script.
 
@@ -84,6 +87,8 @@ Choose **Stable** for the latest published DATA LAB application release (recomme
 With a bound Data Source and a Live Monitor card, DATA LAB fingerprints DataHub metadata, deduplicates repeated findings, records every incident transition in local SQLite, and can ask the agent for a bounded, versioned graph correction. Low-risk branches continue autonomously; uncertain or high-risk branches wait at their own Human Review checkpoint while unrelated branches remain runnable. Recovery and recurrence are preserved as an inspectable incident history.
 
 The normal workflow has no permanent command prompt. **Play** starts the autonomous player and selects relevant sources from labels, URNs, platforms, domains and incident context; **Pause** lets the current atomic iteration finish but prevents the next one; **Stop** cancels the active provider turn and monitoring without changing the last validated graph. On an empty workbench, Play discovers the best available governed source; without a catalog connection it may propose only an unbound Data Source and Human Review, never invented metadata.
+
+Long ChatGPT/Codex planning turns use an activity-aware wait: tool calls and agent messages reset the idle timer, while a separate absolute bound still prevents a permanently stuck run. A timeout never applies a partial proposal, so the current graph remains unchanged and retryable.
 
 When a proposal reaches Human Review, its giant review modal exposes a dedicated read-only agent assistant. The reviewer can ask why the change is needed, what evidence is missing, what could break, or which alternative is safer. Electron rejects every graph mutation tool in this mode: the assistant can explain and recommend, but only the human can approve, reject or request external DataHub write-back.
 

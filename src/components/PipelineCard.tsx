@@ -1,7 +1,8 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
+import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 
 const icons = {
   control: Bot,
@@ -9,6 +10,7 @@ const icons = {
   profile: ChartColumn,
   analysis: BrainCircuit,
   impact: ChartNetwork,
+  risk: ShieldAlert,
   patch: FileDiff,
   monitor: Radar,
   parallel: Network,
@@ -28,6 +30,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
   const isControl = data.kind === 'control'
+  const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
 
   useEffect(() => {
     updateNodeInternals(id)
@@ -44,6 +47,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'parallel' && <span className="parallel-mode-badge">Fan out</span>}
       {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
+      {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
       {data.runState === 'waiting' && <span className="run-badge is-waiting"><CirclePause size={10} /> Review</span>}
@@ -58,6 +62,12 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{data.profile.sensitiveFieldCount}</strong> sensitive</span>
       <span><strong>{data.profile.anomalies.length}</strong> signals</span>
       <span><strong>~{data.profile.tokenEstimate}</strong> tokens</span>
+    </div>}
+    {risk && <div className="risk-summary" aria-label="Evidence-backed risk context">
+      <span><strong>{risk.affectedAssets ?? '—'}</strong> affected</span>
+      <span><strong>{risk.confidence === undefined ? '—' : `${Math.round(risk.confidence * 100)}%`}</strong> confidence</span>
+      <span><strong>{risk.evidence ?? '—'}</strong> evidence</span>
+      <span><strong>{risk.scope || '—'}</strong> scope</span>
     </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>

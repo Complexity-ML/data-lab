@@ -388,6 +388,24 @@ describe('visual pipeline workspace regressions', () => {
     expect(await screen.findByText('0 incident report events in this workspace')).toBeTruthy()
   })
 
+  it('persists autonomy controls and exposes review, risk and uncertainty policies', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    await user.click(await screen.findByRole('button', { name: 'AutonomyReview and risk policy' }))
+    await user.click(screen.getByRole('radio', { name: /Frequent/ }))
+    await user.click(screen.getByRole('radio', { name: /Exhaustive/ }))
+    await user.click(screen.getByRole('radio', { name: /Report only/ }))
+
+    expect(JSON.parse(window.localStorage.getItem('data-lab-autonomy-policy') ?? '{}')).toEqual({
+      humanReview: 'frequent',
+      riskAnalysis: 'exhaustive',
+      uncertainty: 'no-change',
+    })
+    expect(screen.getByText('External mutations and DataHub write-back always keep their separate native confirmation, regardless of autonomy level.')).toBeTruthy()
+  })
+
   it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)

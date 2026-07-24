@@ -29,6 +29,14 @@ describe('Pipeline card ports', () => {
     expect(screen.getAllByTestId('pipeline-handle').map((handle) => handle.getAttribute('data-type'))).toEqual(['target', 'source'])
   })
 
+  it('renders the structured risk context without losing normal graph ports', () => {
+    const risk = newCard('risk', 0)
+    render(<PipelineCard {...cardProps(risk)} />)
+    expect(screen.getByText('none · unknown')).toBeTruthy()
+    expect(screen.getByText('0%')).toBeTruthy()
+    expect(screen.getAllByTestId('pipeline-handle').map((handle) => handle.getAttribute('data-type'))).toEqual(['target', 'source'])
+  })
+
   it('exposes only a feedback source on Output for a next monitor iteration', () => {
     const output = newCard('output', 0)
     render(<PipelineCard {...cardProps(output)} />)

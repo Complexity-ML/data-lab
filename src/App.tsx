@@ -37,8 +37,15 @@ import { summarizeIncidentEvents, type IncidentEvent, type IncidentEventInput } 
 import { incidentDiagramNodeIds } from './domain/incident-diagram'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from './domain/source-routing'
 import { defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
+import { defaultAutonomyPolicy, normalizeAutonomyPolicy, policyForcesProposalReview, type AutonomyPolicy } from './domain/autonomy-policy'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
+const autonomyPolicyStorageKey = 'data-lab-autonomy-policy'
+function storedAutonomyPolicy() {
+  try { return normalizeAutonomyPolicy(JSON.parse(window.localStorage.getItem(autonomyPolicyStorageKey) ?? 'null')) }
+  catch { return defaultAutonomyPolicy }
+}
+
 export default function App() {
   const { language } = useLanguage()
   const platformClass = window.dataLab?.platform ? `platform-${window.dataLab.platform}` : 'platform-web'
@@ -116,6 +123,7 @@ export default function App() {
   const workspacePersistence = useWorkspacePersistence({ edges, inspectorOpen, libraryOpen, nodes, projectTitle, setActivity, setEdges, setInspectorOpen, setLibraryOpen, setNodes, setProjectTitle, setSelectedId, setVersions, versions })
   const graphHistory = useGraphHistory({ edges, nodes, setActivity, setEdges, setNodes })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
+  const [autonomyPolicy, setAutonomyPolicy] = useState<AutonomyPolicy>(storedAutonomyPolicy)
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
   const errors = issues.filter((issue) => issue.severity === 'error')
@@ -132,6 +140,10 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     window.localStorage.setItem('data-lab-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    window.localStorage.setItem(autonomyPolicyStorageKey, JSON.stringify(autonomyPolicy))
+  }, [autonomyPolicy])
 
   useEffect(() => {
     setActionHistory((current) => {
@@ -449,6 +461,7 @@ export default function App() {
           .map(({ action, category, status, timestamp }) => ({ action, category, status, timestamp })))
         .catch(() => [])
       const requestPayload = buildPipelineAgentRequest({
+        autonomyPolicy,
         datahubEvidence,
         edges,
         incidentContext: incidentSummaries,
@@ -551,6 +564,8 @@ export default function App() {
         return
       }
       nextProposal.evidence = evidenceEntries
+      const materialChangeCount = nextProposal.addedNodes.length + nextProposal.updatedNodes.length + nextProposal.addedEdges.length + nextProposal.removedEdgeIds.length
+      if (policyForcesProposalReview(autonomyPolicy, materialChangeCount)) nextProposal.requiresHumanReview = true
       const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
       const touchesReviewCheckpoint = nextProposal.addedNodes.some((node) => node.data.kind === 'review')
         || nextProposal.updatedNodes.some((update) => nodes.find((node) => node.id === update.nodeId)?.data.kind === 'review')
@@ -1037,6 +1052,7 @@ export default function App() {
       activeAiSource={activeAiSource}
       activeWorkspaceId={workspacePersistence.activeWorkspaceId}
       aiStatus={aiStatus}
+      autonomyPolicy={autonomyPolicy}
       chatGPTStatus={chatGPTStatus}
       connectionMode={connectionMode}
       dataHubSettings={dataHubSettings}
@@ -1058,6 +1074,7 @@ export default function App() {
         }
       }}
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
+      onAutonomyPolicyChange={setAutonomyPolicy}
       onCheckForAppUpdate={appUpdates.check}
       onClearIncidentReports={clearIncidentReports}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}

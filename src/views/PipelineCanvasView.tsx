@@ -10,7 +10,7 @@ const nodeTypes: NodeTypes = { pipeline: PipelineCard }
 const edgeTypes: EdgeTypes = { elastic: ElasticEdge }
 const miniMapColors: Record<CardKind, string> = {
   control: '#818cf8',
-  source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', patch: '#fbcfe8', monitor: '#a5f3fc', parallel: '#c4b5fd', diagram: '#fde68a',
+  source: '#bfdbfe', profile: '#a7f3d0', analysis: '#c7d2fe', impact: '#fed7aa', risk: '#fecaca', patch: '#fbcfe8', monitor: '#a5f3fc', parallel: '#c4b5fd', diagram: '#fde68a',
   split: '#ddd6fe', decision: '#e9d5ff', transform: '#fef3c7', review: '#fecdd3', validation: '#bbf7d0', output: '#bae6fd',
 }
 

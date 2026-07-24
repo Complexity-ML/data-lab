@@ -33,6 +33,23 @@ describe('incremental agent version context', () => {
     expect(request.guardrails).toContain('Never request or select an MCP tool; the host owns the fixed tool allowlist')
   })
 
+  it('supplies the persisted autonomy policy as executable planning guidance', () => {
+    const request = buildPipelineAgentRequest({
+      nodes: customerActivationNodes,
+      edges: customerActivationEdges,
+      issues: [],
+      versions: [],
+      datahubEvidence: [],
+      objective: 'Monitor this governed pipeline',
+      autonomyPolicy: { humanReview: 'frequent', riskAnalysis: 'exhaustive', uncertainty: 'no-change' },
+    })
+
+    expect(request.autonomyPolicy).toEqual({ humanReview: 'frequent', riskAnalysis: 'exhaustive', uncertainty: 'no-change' })
+    expect(request.guardrails).toContain('Route every material graph diff through native Human Review before commit.')
+    expect(request.guardrails).toContain('Build branch-level Impact Analysis and Risk Assessment for every affected dataset, feature, pipeline, model and deployment supported by fresh evidence.')
+    expect(request.agentDecisionPolicy).toContain('return no graph mutation')
+  })
+
   it('builds a read-only Human Review assistant request around the pending diff', () => {
     const request = buildReviewAssistantRequest({
       nodes: customerActivationNodes,
