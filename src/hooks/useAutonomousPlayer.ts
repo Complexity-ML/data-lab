@@ -115,7 +115,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
 
   const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current, delayMs = 650) => {
     if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
-    setActivity(delayMs > 1_000 ? 'Autonomous retry scheduled · waiting for fresh external evidence…' : 'Agent iteration committed · rereading the graph before the next coherent iteration…')
+    setActivity(delayMs > 1_000 ? 'Autonomous retry scheduled · waiting for fresh external evidence…' : 'Next autonomous iteration scheduled · rereading the graph and checkpoint…')
     autonomousStepTimer.current = window.setTimeout(() => {
       autonomousStepTimer.current = undefined
       if (playerSessionId.current !== sessionId) return
