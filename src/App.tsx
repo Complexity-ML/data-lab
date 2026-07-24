@@ -7,6 +7,7 @@ import { KeyboardShortcutsModal } from './components/shared/KeyboardShortcutsMod
 import type { SettingsSection } from './components/shared/SettingsModal'
 import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
 import type { AtomicPipelineRun } from './domain/atomic-execution'
+import { isAgentActionActivity } from './domain/activity'
 import { recordDiagnostic } from './domain/diagnostics'
 import { layoutPipeline } from './domain/layout'
 import { initialEdges, initialNodes, type AgentProposal, type PipelineNode } from './domain/pipeline'
@@ -208,7 +209,7 @@ export default function App() {
   const riskOverview = useMemo(() => collectRiskImpactOverview(nodes, edges), [edges, nodes])
   const activityBusy = player.agentRunning || player.playerStarting || reviewAssistant.busy || ai.chatGPTConnecting || appUpdates.busy || player.stepPending
   const agentActionHistory = useMemo(
-    () => actionHistory.filter((entry) => /\b(agent|autonomous|player|proposal|review|controller|iteration)\b/i.test(entry.message)),
+    () => actionHistory.filter((entry) => isAgentActionActivity(entry.message)),
     [actionHistory],
   )
   const leftPanelOpen = libraryOpen || Boolean(leftOperationsPanel)

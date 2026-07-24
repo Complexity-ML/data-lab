@@ -149,10 +149,15 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     setActivity(delayMs > 1_000 ? 'Autonomous retry scheduled · waiting for fresh external evidence…' : 'Next autonomous iteration scheduled · rereading the graph and checkpoint…')
     autonomousStepTimer.current = window.setTimeout(() => {
       autonomousStepTimer.current = undefined
-      if (playerSessionId.current !== sessionId) {
+      if (
+        autonomousSchedulingBlocked.current
+        || playerSessionId.current !== sessionId
+        || autonomousStepId.current !== stepId
+      ) {
         if (autonomousStepId.current === stepId) setAutonomousStepScheduled(false)
         return
       }
+      setActivity('Autonomous iteration starting · reading the current graph and checkpoint…')
       setAutonomousStepRequest({ objective, sessionId, stepId })
     }, delayMs)
   }
@@ -882,7 +887,17 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   ])
 
   useEffect(() => {
-    if (!autonomousStepRequest || playerState !== 'running' || proposal || agentRunning || playerStarting) return
+    if (!autonomousStepRequest) return
+    if (
+      autonomousStepRequest.sessionId !== playerSessionId.current
+      || autonomousStepRequest.stepId !== autonomousStepId.current
+    ) {
+      const staleStepId = autonomousStepRequest.stepId
+      setAutonomousStepRequest(undefined)
+      if (autonomousStepId.current === staleStepId) setAutonomousStepScheduled(false)
+      return
+    }
+    if (playerState !== 'running' || proposal || agentRunning || playerStarting) return
     const request = autonomousStepRequest
     setAutonomousStepRequest(undefined)
     void auditWithAgent(request.objective, undefined, request.sessionId).finally(() => {
