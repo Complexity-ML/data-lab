@@ -52,6 +52,7 @@ export interface DataHubMcpAudit {
   route?: 'gms-graphql' | 'mcp'
   serverVersion?: string
   reads: DataHubMcpRead[]
+  asset?: DataHubAssetSummary
 }
 
 type ActiveTransport = StdioClientTransport | StreamableHTTPClientTransport
@@ -1157,25 +1158,19 @@ export async function auditDataHubWithMcp(urn: string, force = false): Promise<D
       transport: 'stdio',
       route: 'gms-graphql',
       reads: inspection.evidence,
+      asset: inspection.asset,
     }
   }
-  const client = await connectClient()
-  const available = await discoverReadableToolNames(client)
-  const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
-  const calls: { name: DataHubMcpRead['name']; arguments: Record<string, unknown> }[] = [
-    { name: 'get_entities', arguments: { urns: [urn] } },
-    { name: 'list_schema_fields', arguments: { urn } },
-    { name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, false) },
-  ]
-
-  const reads = await Promise.all(calls.map(async (call) => (await readCachedTool({ client, available, urn, name: call.name, arguments: call.arguments, force })).evidence))
+  const inspection = await inspectDataHubAsset(urn, force, 'deep')
+  const client = activeClient
 
   return {
     urn,
     transport: activeMode ?? 'stdio',
     route: 'mcp',
-    serverVersion: client.getServerVersion()?.version,
-    reads,
+    serverVersion: client?.getServerVersion()?.version,
+    reads: inspection.evidence,
+    asset: inspection.asset,
   }
 }
 

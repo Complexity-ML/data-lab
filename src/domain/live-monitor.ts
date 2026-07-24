@@ -13,6 +13,9 @@ export interface MonitorObservation {
   severity: IncidentSeverity
   failedReads: number
   totalReads: number
+  category: 'none' | 'connector' | 'data' | 'governance' | 'impact'
+  riskScore: number
+  reasons: string[]
 }
 
 export interface MonitorRuntimeState {
@@ -25,6 +28,20 @@ export interface MonitorRuntimeState {
 export interface MonitorDecision {
   next: MonitorRuntimeState
   transition?: Extract<IncidentTransition, 'opened' | 'worsened' | 'recovered'>
+  triggerAgent: boolean
+  escalateToHumanReview: boolean
+}
+
+export interface PostCorrectionVerification {
+  incidentKey: string
+  versionId: string
+  baselineFingerprint: string
+  registeredAt: string
+}
+
+export interface PostCorrectionDecision {
+  passed: boolean
+  next: MonitorRuntimeState
   triggerAgent: boolean
   escalateToHumanReview: boolean
 }
@@ -42,7 +59,7 @@ export function liveMonitorBindingKey(monitor: Pick<BoundLiveMonitor, 'monitorId
   return `${monitor.monitorId}::${monitor.urn}`
 }
 
-const severityRank: Record<IncidentSeverity, number> = { info: 0, warning: 1, critical: 2 }
+export const monitorSeverityRank: Record<IncidentSeverity, number> = { info: 0, warning: 1, critical: 2 }
 
 function stableHash(value: string) {
   let hash = 0x811c9dc5
@@ -66,16 +83,71 @@ export function parseLiveMonitorPolicy(rule?: string): LiveMonitorPolicy {
 }
 
 export function observeDataHubAudit(audit: DataHubMcpAudit): MonitorObservation {
-  const canonical = audit.reads
+  const asset = audit.asset
+  const assetCanonical = asset
+    ? [
+        asset.urn,
+        asset.qualityStatus,
+        [...asset.owners].sort().join(','),
+        [...asset.tags].sort().join(','),
+        asset.fields.map((field) => `${field.name}:${field.type}:${[...(field.tags ?? [])].sort().join(',')}`).sort().join(';'),
+        asset.upstream.map((item) => `${item.urn}:${item.sensitive}`).sort().join(','),
+        asset.downstream.map((item) => `${item.urn}:${item.sensitive}`).sort().join(','),
+      ].join('|')
+    : ''
+  const canonical = `${audit.reads
     .map((read) => `${read.name}:${read.status}:${read.stale ? 'stale' : 'fresh'}:${read.summary}`)
     .sort()
-    .join('|')
+    .join('|')}|${assetCanonical}`
   const failedReads = audit.reads.filter((read) => read.status !== 'ok' || read.stale).length
+  const reasons: string[] = []
+  let riskScore = failedReads === audit.reads.length ? 6 : failedReads > 0 ? 3 : 0
+  let category: MonitorObservation['category'] = failedReads > 0 ? 'connector' : 'none'
+  if (failedReads > 0) reasons.push(`${failedReads}/${audit.reads.length} connector evidence reads are unavailable or stale.`)
+  if (asset && failedReads < audit.reads.length) {
+    const sensitiveFields = asset.fields.filter((field) => field.tags?.some((tag) => /pii|sensitive|personal|gdpr|secret|credential/i.test(tag))).length
+    const sensitiveTags = asset.tags.filter((tag) => /pii|sensitive|personal|gdpr|secret|credential/i.test(tag)).length
+    const sensitiveDownstream = asset.downstream.filter((item) => item.sensitive).length
+    const lineageRadius = asset.upstream.length + asset.downstream.length
+    if (asset.qualityStatus === 'failing') {
+      riskScore += 5
+      category = 'data'
+      reasons.push(`${asset.name}: quality checks are failing.`)
+    }
+    if (!asset.owners.length) {
+      riskScore += 2
+      if (category === 'none') category = 'governance'
+      reasons.push(`${asset.name}: no accountable owner is recorded.`)
+    }
+    if (sensitiveFields || sensitiveTags) {
+      riskScore += 3
+      if (category === 'none' || category === 'governance') category = 'data'
+      reasons.push(`${asset.name}: ${sensitiveFields || sensitiveTags} sensitive field/tag signal(s).`)
+    }
+    if (sensitiveDownstream) {
+      riskScore += 4
+      category = 'impact'
+      reasons.push(`${asset.name}: ${sensitiveDownstream} sensitive downstream asset(s).`)
+    }
+    if (lineageRadius >= 20) {
+      riskScore += 4
+      category = 'impact'
+      reasons.push(`${asset.name}: lineage blast radius covers ${lineageRadius} assets.`)
+    } else if (lineageRadius >= 5) {
+      riskScore += 2
+      if (category === 'none') category = 'impact'
+      reasons.push(`${asset.name}: lineage reaches ${lineageRadius} assets.`)
+    }
+  }
+  const severity: IncidentSeverity = riskScore >= 6 ? 'critical' : riskScore >= 3 ? 'warning' : 'info'
   return {
     fingerprint: stableHash(canonical),
-    severity: failedReads === 0 ? 'info' : failedReads === audit.reads.length ? 'critical' : 'warning',
+    severity,
     failedReads,
     totalReads: audit.reads.length,
+    category,
+    riskScore,
+    reasons,
   }
 }
 
@@ -96,12 +168,35 @@ export function evaluateMonitorObservation(previous: MonitorRuntimeState | undef
 
   const transition = baseline.open ? 'worsened' : 'opened'
   const iterations = baseline.iterations + 1
-  const changedOrWorse = !baseline.open || baseline.fingerprint !== observation.fingerprint || severityRank[observation.severity] > severityRank[baseline.severity]
+  const changedOrWorse = !baseline.open || baseline.fingerprint !== observation.fingerprint || monitorSeverityRank[observation.severity] > monitorSeverityRank[baseline.severity]
   return {
     next: { fingerprint: observation.fingerprint, severity: observation.severity, open: true, iterations },
     transition,
     triggerAgent: iterations <= policy.maxIterations && changedOrWorse,
     escalateToHumanReview: iterations === policy.maxIterations + 1 && changedOrWorse,
+  }
+}
+
+export function verifyPostCorrectionObservation(
+  previous: MonitorRuntimeState | undefined,
+  observation: MonitorObservation,
+  policy: LiveMonitorPolicy,
+): PostCorrectionDecision {
+  const baseline = previous ?? { severity: observation.severity, open: observation.severity !== 'info', iterations: 0 }
+  if (observation.severity === 'info') {
+    return {
+      passed: true,
+      next: { fingerprint: observation.fingerprint, severity: 'info', open: false, iterations: 0 },
+      triggerAgent: false,
+      escalateToHumanReview: false,
+    }
+  }
+  const iterations = baseline.iterations + 1
+  return {
+    passed: false,
+    next: { fingerprint: observation.fingerprint, severity: observation.severity, open: true, iterations },
+    triggerAgent: iterations <= policy.maxIterations,
+    escalateToHumanReview: iterations === policy.maxIterations + 1,
   }
 }
 

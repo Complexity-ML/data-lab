@@ -47,6 +47,7 @@ export interface DataHubMcpAudit {
   transport: 'http' | 'stdio'
   route?: 'gms-graphql' | 'mcp'
   serverVersion?: string
+  asset?: DataHubAssetSummary
   reads: {
     name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
     capability?: 'entity.read' | 'schema.read' | 'lineage.read'

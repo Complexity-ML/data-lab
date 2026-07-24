@@ -20,14 +20,16 @@ import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
 import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from '../domain/agent-objective'
 import { applyProposal, type AgentProposal, type CatalogExplorationProgress, type PipelineNode } from '../domain/pipeline'
 import { ensureHostReviewCheckpoint } from '../domain/review-checkpoint'
-import { evaluateHostRisk, riskAssetsFromGraph } from '../domain/risk-gate'
+import { evaluateHostRisk, riskAssetsFromGraph, type HostRiskDecision } from '../domain/risk-gate'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from '../domain/source-routing'
 import { errorMessage, notifyError, notifyToast } from '../domain/toasts'
 import { findEquivalentVersion, graphsEquivalent, type PipelineVersion } from '../domain/versioning'
 import { atomicTransactionBlockers, validatePipeline, type ValidationIssue } from '../validation'
+import { repairSensitiveOutputPaths } from '../validation/proposal-repair'
 import { parseWorkerPolicy } from '../domain/worker-policy'
 import { disconnectedAiStatus, disconnectedChatGPTStatus } from './useAiConnections'
 import { useCatalogExplorer } from './useCatalogExplorer'
+import { findBoundLiveMonitors, liveMonitorBindingKey, type PostCorrectionVerification } from '../domain/live-monitor'
 import { useLiveIncidentMonitor, type LiveIncidentTrigger } from './useLiveIncidentMonitor'
 
 type ContextMenu = { nodeId: string; label: string; x: number; y: number }
@@ -39,7 +41,7 @@ interface AutonomousPlayerOptions {
   activeAtomicRun: MutableRef<AtomicPipelineRun | undefined>
   agentRunId: MutableRef<number>
   autonomyPolicy: AutonomyPolicy
-  commitAutonomousProposal(proposal: AgentProposal): string | undefined
+  commitAutonomousProposal(proposal: AgentProposal, options?: { preservePendingReview?: boolean }): string | undefined
   discardInvalidProposal(blockerIds: string[]): void
   connectionMode: 'demo' | 'connected'
   edges: Edge[]
@@ -91,6 +93,23 @@ interface AutonomousPlayerOptions {
   approveProposal(): boolean
 }
 
+function evidenceFromMonitor(trigger: LiveIncidentTrigger): DataHubEvidence[] {
+  return trigger.audit.reads.map((read) => ({
+    tool: read.capability ?? read.name,
+    urn: trigger.monitor.urn,
+    capturedAt: read.capturedAt,
+    expiresAt: read.expiresAt,
+    status: read.status,
+    summary: read.summary,
+    cached: read.cached,
+    stale: read.stale,
+  }))
+}
+
+function monitorHostRisk(trigger: LiveIncidentTrigger, policy: AutonomyPolicy): HostRiskDecision {
+  return evaluateHostRisk(trigger.audit.asset ? [trigger.audit.asset] : [], evidenceFromMonitor(trigger), policy)
+}
+
 export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const {
     active, activeAiSource, activeAtomicRun, agentRunId, autonomyPolicy, commitAutonomousProposal, discardInvalidProposal,
@@ -116,6 +135,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const autonomousStepId = useRef(0)
   const autonomousSchedulingBlocked = useRef(true)
   const atomicRepairState = useRef<AtomicRepairState | undefined>(undefined)
+  const correctionVerifications = useRef(new Map<string, PostCorrectionVerification>())
+  const reviewRepairPending = useRef(false)
+  const [reviewBlockedBranchId, setReviewBlockedBranchId] = useState<string>()
+  const [deferredReviewTriggers, setDeferredReviewTriggers] = useState<LiveIncidentTrigger[]>([])
   const catalog = useCatalogExplorer({ incidentSummaries, inspectAsset: inspectDataHubAsset, logIncident, setActivity, setNodes })
 
   const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current, delayMs = 650) => {
@@ -135,6 +158,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   }
 
   const auditWithAgent = async (agentRequest = defaultBlankObjective, monitored?: LiveIncidentTrigger, expectedPlayerSessionId?: number) => {
+    const independentBranchDuringReview = Boolean(
+      monitored
+      && proposal
+      && reviewBlockedBranchId !== monitored.monitor.monitorId,
+    )
     const routingPreview: SourceSelection = monitored
       ? {
           mode: 'single',
@@ -150,7 +178,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     }
     agentRequest = objective.objective
     setContextMenu(undefined)
-    setProposal(undefined)
+    if (!independentBranchDuringReview) setProposal(undefined)
     if (!window.dataLab) {
       setActivity('AI provider unavailable in web preview · launch the Electron application')
       return
@@ -641,6 +669,16 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source' && (node.data.assetRef ?? node.data.datahubUrn) === sourceUrn)
         addDataProfileToProposal(nextProposal, nodes, profileCandidate, sourceNode)
       }
+      const safetyRepair = repairSensitiveOutputPaths(nextProposal, nodes, edges)
+      if (safetyRepair.repairedOutputs.length) recordDiagnostic({
+        category: 'revision',
+        action: 'proposal.host-safety-repair',
+        status: 'warning',
+        detail: {
+          repairedOutputs: safetyRepair.repairedOutputs,
+          reason: 'sensitive-output-protection',
+        },
+      })
       const initialMaterialChangeCount = nextProposal.addedNodes.length
         + nextProposal.updatedNodes.length
         + nextProposal.addedEdges.length
@@ -690,17 +728,25 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         || nextProposal.updatedNodes.some((update) => nodes.find((node) => node.id === update.nodeId)?.data.kind === 'review')
       if (touchesReviewCheckpoint) nextProposal.requiresHumanReview = true
       if ((monitored || autonomousSessionActive) && !nextProposal.requiresHumanReview && !touchesReviewCheckpoint) {
-        const autonomousVersionId = commitAutonomousProposal(nextProposal)
+        const autonomousVersionId = commitAutonomousProposal(nextProposal, {
+          preservePendingReview: independentBranchDuringReview,
+        })
         if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))
         if (autonomousVersionId) {
           atomicRepairState.current = undefined
           if (monitored) {
+            correctionVerifications.current.set(liveMonitorBindingKey(monitored.monitor), {
+              incidentKey: monitored.incidentKey,
+              versionId: autonomousVersionId,
+              baselineFingerprint: monitored.observation.fingerprint,
+              registeredAt: new Date().toISOString(),
+            })
             await logIncident({
               incidentKey: monitored.incidentKey,
               transition: 'agent-action',
               severity: 'info',
               title: nextProposal.title,
-              detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version; Live Monitor will verify the next fingerprint.`,
+              detail: `${nextProposal.summary} The correction passed atomic validation and was committed as a restorable version. An explicit fresh-evidence verification is now required before the incident can resolve.`,
               sourceSystem: 'DataHub',
               sourceRef: monitored.monitor.urn,
               fingerprint: monitored.audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
@@ -738,9 +784,17 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         }
         return
       }
+      if (independentBranchDuringReview) {
+        setDeferredReviewTriggers((current) => current.some((trigger) => trigger.incidentKey === monitored!.incidentKey)
+          ? current
+          : [...current, monitored!])
+        setActivity(`Independent branch ${monitored!.monitor.sourceLabel} requires Human Review · current review preserved · branch queued`)
+        return
+      }
       atomicRepairState.current = undefined
       resumePlayerAfterReview.current = playerState === 'running' && expectedPlayerSessionId !== undefined
       setProposal(nextProposal)
+      setReviewBlockedBranchId(monitored?.monitor.monitorId)
       setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
       setActivity(`${response.model} proposed ${materialChangeCount} reviewed change(s) · graph unchanged`)
@@ -795,6 +849,37 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     setPendingWorkspacePrompt(undefined)
     void auditWithAgent(preservedPrompt)
   }, [nodes.length, pendingWorkspacePrompt, versions.length, workspace.activeWorkspaceId])
+
+  useEffect(() => {
+    if (!proposal) setReviewBlockedBranchId(undefined)
+  }, [proposal])
+
+  useEffect(() => {
+    if (
+      playerState !== 'running'
+      || proposal
+      || agentRunning
+      || playerStarting
+      || autonomousStepRequest
+      || autonomousStepScheduled
+      || reviewRepairPending.current
+      || deferredReviewTriggers.length === 0
+    ) return
+    const [trigger, ...remaining] = deferredReviewTriggers
+    setDeferredReviewTriggers(remaining)
+    void auditWithAgent(
+      `Resume the queued independent incident branch for ${trigger.monitor.sourceLabel}. Reuse its preserved evidence, change only that branch, and keep every unrelated branch running.`,
+      trigger,
+    )
+  }, [
+    agentRunning,
+    autonomousStepRequest,
+    autonomousStepScheduled,
+    deferredReviewTriggers,
+    playerStarting,
+    playerState,
+    proposal,
+  ])
 
   useEffect(() => {
     if (!autonomousStepRequest || playerState !== 'running' || proposal || agentRunning || playerStarting) return
@@ -884,6 +969,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     agentRunId.current += 1
     autonomousStepId.current += 1
     atomicRepairState.current = undefined
+    correctionVerifications.current.clear()
+    setDeferredReviewTriggers([])
+    setReviewBlockedBranchId(undefined)
     setPlayerStarting(false)
     setAutonomousStepScheduled(false)
     setAutonomousStepRequest(undefined)
@@ -920,18 +1008,24 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       detail: 'Human Review rejected the proposed correction. The affected branch remains unchanged and enters one bounded repair iteration.',
       versionId: pendingVersionId,
     })
+    reviewRepairPending.current = true
     window.setTimeout(() => {
       if (playerState === 'running' && !agentRunning) {
         void auditWithAgent(`Repair the rejected incident proposal "${rejected.title}". Preserve the reviewer rejection in version memory, change only the affected branch, and do not repeat the rejected diff.`)
+          .finally(() => { reviewRepairPending.current = false })
+      } else {
+        reviewRepairPending.current = false
       }
     }, 250)
   }
 
   useLiveIncidentMonitor({
     active: Boolean(window.dataLab) && connectionMode === 'connected' && playerState === 'running',
-    agentBlocked: agentRunning || playerStarting || Boolean(autonomousStepRequest) || Boolean(proposal),
+    agentBusy: agentRunning || playerStarting || Boolean(autonomousStepRequest),
+    reviewBlockedBranchId,
     nodes,
     edges,
+    verificationRequests: correctionVerifications,
     audit: async (urn) => {
       if (!window.dataLab) throw new Error('Electron is not running')
       return window.dataLab.auditDataHubWithMcp(urn, true)
@@ -939,9 +1033,30 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     onIncident: logIncident,
     onTrigger: async (trigger) => {
       if (playerStartupBlocked.current) return
+      const risk = monitorHostRisk(trigger, autonomyPolicy)
+      if (proposal && reviewBlockedBranchId !== trigger.monitor.monitorId && risk.requiresHumanReview) {
+        setDeferredReviewTriggers((current) => current.some((candidate) => candidate.incidentKey === trigger.incidentKey)
+          ? current
+          : [...current, trigger])
+        await logIncident({
+          incidentKey: trigger.incidentKey,
+          transition: 'human-review',
+          severity: trigger.observation.severity,
+          title: `${trigger.monitor.monitorLabel} · independent branch queued`,
+          detail: `${risk.severity.toUpperCase()} evidence-backed host risk requires review. The active Human Review remains isolated; this branch was queued without stopping monitoring.`,
+          sourceSystem: 'DataHub',
+          sourceRef: trigger.monitor.urn,
+          fingerprint: trigger.observation.fingerprint,
+          cardId: trigger.monitor.monitorId,
+          branchId: trigger.monitor.monitorId,
+        })
+        return
+      }
       await auditWithAgent(
         trigger.reason === 'retry-exhausted'
           ? `Live Monitor exhausted ${trigger.monitor.policy.maxIterations} autonomous repair attempts for ${trigger.monitor.sourceLabel}. Preserve the incident and source provenance, add or update a branch-local Human Review checkpoint, and do not apply another autonomous correction until a person decides.`
+          : trigger.reason === 'verification-failed'
+            ? `The explicit post-correction verification failed for ${trigger.monitor.sourceLabel}. Fresh evidence still reports the incident. Reuse the verified blocker, update only this branch, and propose the next bounded repair without repeating the previous version.`
           : `Live Monitor detected a connector metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, preserve its source provenance, update only the affected branch, and propose one coherent versioned correction.`,
         trigger,
       )
@@ -982,12 +1097,31 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       }
       if (!approveProposal()) return false
       atomicRepairState.current = undefined
+      if (currentProposal.incidentKey && revisionId) {
+        const incident = incidentSummaries.find((candidate) => candidate.incidentKey === currentProposal.incidentKey)
+        const monitor = findBoundLiveMonitors(preview.nodes, preview.edges).find((candidate) => (
+          candidate.monitorId === incident?.branchId
+          || candidate.urn === incident?.sourceRef
+        ))
+        if (monitor) {
+          correctionVerifications.current.set(liveMonitorBindingKey(monitor), {
+            incidentKey: currentProposal.incidentKey,
+            versionId: revisionId,
+            baselineFingerprint: incident?.fingerprint ?? 'human-reviewed-correction',
+            registeredAt: new Date().toISOString(),
+          })
+        }
+      }
       const shouldResumePlayer = playerState === 'running' || resumePlayerAfterReview.current
       const continuePlayer = (objective: string) => {
         if (!shouldResumePlayer) return
         resumePlayerAfterReview.current = false
         autonomousSchedulingBlocked.current = false
         setPlayerState('running')
+        if (deferredReviewTriggers.length) {
+          setActivity('Human Review approved · queued independent incident branch will resume next')
+          return
+        }
         queueAutonomousStep(objective, playerSessionId.current)
       }
       if (projectTitle === 'Untitled pipeline') setProjectTitle(currentProposal.title.slice(0, 72))

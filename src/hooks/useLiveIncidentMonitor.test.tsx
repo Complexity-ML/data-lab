@@ -120,4 +120,80 @@ describe('live incident monitor lifecycle', () => {
       vi.useRealTimers()
     }
   })
+
+  it('keeps the reviewed branch blocked while an independent monitor branch continues', async () => {
+    vi.useFakeTimers()
+    try {
+      const sourceA = { ...newCard('source', 0), id: 'source-a', data: { ...newCard('source', 0).data, datahubUrn: `${audit.urn}:a` } }
+      const monitorA = { ...newCard('monitor', 1), id: 'monitor-a' }
+      const sourceB = { ...newCard('source', 2), id: 'source-b', data: { ...newCard('source', 2).data, datahubUrn: `${audit.urn}:b` } }
+      const monitorB = { ...newCard('monitor', 3), id: 'monitor-b' }
+      const onTrigger = vi.fn(async () => undefined)
+
+      renderHook(() => useLiveIncidentMonitor({
+        active: true,
+        agentBusy: false,
+        reviewBlockedBranchId: 'monitor-a',
+        nodes: [sourceA, monitorA, sourceB, monitorB],
+        edges: [
+          { id: 'source-monitor-a', source: sourceA.id, target: monitorA.id },
+          { id: 'source-monitor-b', source: sourceB.id, target: monitorB.id },
+        ],
+        audit: vi.fn(async (urn) => ({ ...audit, urn })),
+        onIncident: vi.fn(async () => undefined),
+        onTrigger,
+      }))
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(onTrigger).toHaveBeenCalledTimes(1)
+      expect(onTrigger).toHaveBeenCalledWith(expect.objectContaining({
+        monitor: expect.objectContaining({ monitorId: 'monitor-b' }),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('requires a fresh audit before resolving an applied correction', async () => {
+    vi.useFakeTimers()
+    try {
+      const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, datahubUrn: audit.urn } }
+      const monitor = { ...newCard('monitor', 1), id: 'monitor' }
+      const verificationRequests = {
+        current: new Map([['monitor::urn:li:dataset:(urn:li:dataPlatform:snowflake,customers,PROD)', {
+          incidentKey: 'incident',
+          versionId: 'version-1',
+          baselineFingerprint: 'before',
+          registeredAt: '2026-07-23T20:00:00.000Z',
+        }]]),
+      }
+      const onIncident = vi.fn(async () => undefined)
+      const onTrigger = vi.fn(async () => undefined)
+
+      renderHook(() => useLiveIncidentMonitor({
+        active: true,
+        agentBusy: false,
+        nodes: [source, monitor],
+        edges: [{ id: 'source-monitor', source: source.id, target: monitor.id }],
+        audit: vi.fn(async () => ({
+          ...audit,
+          reads: audit.reads.map((read) => ({ ...read, status: 'ok' as const, stale: false, summary: 'Fresh evidence is healthy' })),
+        })),
+        onIncident,
+        onTrigger,
+        verificationRequests,
+      }))
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(onIncident).toHaveBeenCalledWith(expect.objectContaining({
+        incidentKey: 'incident',
+        transition: 'recovered',
+        versionId: 'version-1',
+      }))
+      expect(onTrigger).not.toHaveBeenCalled()
+      expect(verificationRequests.current.size).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

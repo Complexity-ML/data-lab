@@ -45,12 +45,51 @@ describe('continuous incident lifecycle', () => {
     expect(evaluateMonitorObservation(opened.next, healthy, policy)).toMatchObject({ transition: 'recovered', triggerAgent: false, next: { open: false, iterations: 0 } })
   })
 
+  it('uses quality, ownership, sensitive fields and lineage when classifying risk', () => {
+    const observation = observeDataHubAudit({
+      urn: 'urn:li:dataset:orders',
+      transport: 'stdio',
+      reads: [
+        { name: 'get_entities', status: 'ok', summary: 'entity', capturedAt: 'a', expiresAt: 'b', cached: false, stale: false },
+        { name: 'list_schema_fields', status: 'ok', summary: 'schema', capturedAt: 'a', expiresAt: 'b', cached: false, stale: false },
+      ],
+      asset: {
+        urn: 'urn:li:dataset:orders',
+        name: 'Orders',
+        platform: 'snowflake',
+        environment: 'PROD',
+        description: '',
+        owners: [],
+        tags: [],
+        fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+        qualityStatus: 'failing',
+        upstream: [],
+        downstream: [{ urn: 'urn:model:fraud', name: 'Fraud model', sensitive: true }],
+        freshness: { capturedAt: 'a', expiresAt: 'b', stale: false },
+      },
+    })
+
+    expect(observation).toMatchObject({ severity: 'critical', category: 'impact', failedReads: 0 })
+    expect(observation.reasons.join(' ')).toMatch(/quality checks are failing/)
+    expect(observation.reasons.join(' ')).toMatch(/sensitive field/)
+    expect(observation.reasons.join(' ')).toMatch(/sensitive downstream/)
+  })
+
   it('escalates once when a changed incident exceeds its retry budget', () => {
     const policy = parseLiveMonitorPolicy('cooldown=10s | max_iterations=2')
-    const first = evaluateMonitorObservation(undefined, { fingerprint: 'a', severity: 'warning', failedReads: 1, totalReads: 3 }, policy)
-    const second = evaluateMonitorObservation(first.next, { fingerprint: 'b', severity: 'warning', failedReads: 1, totalReads: 3 }, policy)
-    const exhausted = evaluateMonitorObservation(second.next, { fingerprint: 'c', severity: 'critical', failedReads: 3, totalReads: 3 }, policy)
-    const duplicate = evaluateMonitorObservation(exhausted.next, { fingerprint: 'c', severity: 'critical', failedReads: 3, totalReads: 3 }, policy)
+    const observation = (fingerprint: string, severity: 'warning' | 'critical', failedReads: number) => ({
+      fingerprint,
+      severity,
+      failedReads,
+      totalReads: 3,
+      category: 'connector' as const,
+      riskScore: severity === 'critical' ? 6 : 3,
+      reasons: [`${failedReads}/3 connector reads unavailable.`],
+    })
+    const first = evaluateMonitorObservation(undefined, observation('a', 'warning', 1), policy)
+    const second = evaluateMonitorObservation(first.next, observation('b', 'warning', 1), policy)
+    const exhausted = evaluateMonitorObservation(second.next, observation('c', 'critical', 3), policy)
+    const duplicate = evaluateMonitorObservation(exhausted.next, observation('c', 'critical', 3), policy)
 
     expect(exhausted).toMatchObject({ triggerAgent: false, escalateToHumanReview: true, next: { iterations: 3 } })
     expect(duplicate).toMatchObject({ triggerAgent: false, escalateToHumanReview: false })
