@@ -353,11 +353,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             datasets: checkpoint?.datasets ?? [],
           }, () => agentRunId.current === runId)
         }
-        let candidates: DataHubAssetSummary[] = []
+        let candidates: DataHubAssetSummary[] = catalogExplorer ? catalog.assetsFor(catalogExplorer.id) : []
         let discoveryError: unknown
         const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
         try {
-          if (explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets(discoveryQuery)
+          if (!candidates.length && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets(discoveryQuery)
         }
         catch (error) { discoveryError = error }
         if (!candidates.length && discoveryQuery !== '*' && explorerPolicy?.scope !== 'dataset') {

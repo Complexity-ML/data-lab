@@ -82,6 +82,39 @@ describe('Catalog Explorer', () => {
     expect(result.progress.datasets.map((dataset) => dataset.urn)).toEqual(assets.map((candidate) => candidate.urn))
   })
 
+  it('does not restart a completed audit just because its earliest evidence expired', async () => {
+    const assets = Array.from({ length: 4 }, (_, index) => asset(index))
+    const expired = assets.map((value) => ({
+      ...checkpointForInspection(inspection(value)),
+      expiresAt: '2026-07-24T08:00:01.000Z',
+    }))
+    const inspect = vi.fn(async (urn: string) => inspection(assets.find((candidate) => candidate.urn === urn)!))
+
+    const result = await inspectCatalogInParallel(assets, inspect, {
+      cacheMode: 'prefer',
+      previous: expired,
+      previousProgress: {
+        query: '*',
+        total: 4,
+        discovered: 4,
+        inspected: 4,
+        failed: 0,
+        incidents: 0,
+        governanceGaps: 0,
+        concurrency: 4,
+        remaining: 0,
+        mode: 'catalog',
+        cacheMode: 'prefer',
+        state: 'complete',
+        checkpointAt: capturedAt,
+        datasets: expired,
+      },
+    })
+
+    expect(inspect).not.toHaveBeenCalled()
+    expect(result.progress).toMatchObject({ inspected: 4, remaining: 0, state: 'complete' })
+  })
+
   it('isolates a failed dataset instead of aborting the remaining audit', async () => {
     const assets = Array.from({ length: 5 }, (_, index) => asset(index))
     const result = await inspectCatalogInParallel(assets, async (urn) => {
@@ -534,6 +567,18 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, incidents: 1 })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 12, state: 'complete' },
+      { ...base, inspected: 12, state: 'complete' },
+    )).toBe(false)
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 8 },
+      { ...base, inspected: 12, failed: 4, state: 'inspecting' },
+    )).toBe(true)
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 12, failed: 4 },
+      { ...base, inspected: 12, failed: 3, state: 'inspecting' },
+    )).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'paused', pauseReason: 'connector_unavailable', failed: 4 })).toBe(false)
   })
