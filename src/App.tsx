@@ -11,7 +11,7 @@ import { isAgentActionActivity } from './domain/activity'
 import { recordDiagnostic } from './domain/diagnostics'
 import { layoutPipeline } from './domain/layout'
 import { initialEdges, initialNodes, type AgentProposal, type PipelineNode } from './domain/pipeline'
-import { collectRiskImpactOverview } from './domain/risk-impact'
+import { collectRiskImpactOverview, type RiskImpactItem } from './domain/risk-impact'
 import { useLanguage } from './i18n'
 import { useAiConnections } from './hooks/useAiConnections'
 import { useAppTheme } from './hooks/useAppTheme'
@@ -214,6 +214,24 @@ export default function App() {
   )
   const leftPanelOpen = libraryOpen || Boolean(leftOperationsPanel)
   const rightPanelOpen = inspectorOpen || reportsOpen || risksOpen
+  const proposeRiskCorrection = (item: RiskImpactItem) => {
+    setSelectedId(item.nodeId)
+    const sourceScope = item.sourceRef
+      ? ` Work only on dataset ${item.sourceRef}. Preserve the completed Catalog Explorer checkpoint and deep-read only this dataset; never restart full catalog discovery.`
+      : ''
+    const objective = item.sourceRef && item.kind === 'risk'
+      ? 'Investigate this catalog-backed data quality risk. Create one focused Source and compact Data Profile, trace affected assets with Impact Analysis, materialize an evidence-backed Risk Assessment, and propose only a reversible graph correction with atomic validation and fresh post-condition verification. Do not treat connector failures as dataset health.'
+      : item.sourceRef && item.domain === 'privacy'
+        ? 'Investigate this catalog-backed sensitive-data risk coverage gap. Deep-read its classifications and lineage, then create a focused privacy Impact Analysis and Risk Assessment only when exposure is evidenced. Add a bounded protection and verification path when required; sensitivity alone is not proof of an incident.'
+        : item.sourceRef
+          ? 'Investigate this catalog-backed governance risk coverage gap. Confirm ownership and classifications for this dataset, trace its downstream impact, and create an evidence-backed Governance Risk Assessment. Keep missing metadata distinct from a data-quality incident and request Human Review when catalog ownership cannot be established safely.'
+        : item.kind === 'risk'
+      ? 'Correct this specific evidence-backed Risk Assessment only. Preserve the original risk, severity, evidence and affected scope. Add a versioned graph-only Compatibility Patch or other compatible mitigation boundary, atomic Validation, Human Review when required, and an Output/post-condition path. Record the mitigation diff and residual_risk=verify_post_condition on the existing Risk card. Do not restart catalog discovery, mutate source data, rebuild unrelated branches or claim the risk is resolved before fresh verification.'
+      : item.kind === 'coverage-gap'
+        ? 'Complete this specific uncovered Impact Analysis with an evidence-backed Risk Assessment and one bounded compatible mitigation path. Preserve the existing impact and unrelated branches. Do not mutate source data or claim resolution before fresh verification.'
+        : 'Assess this specific Impact Analysis. Add an evidence-backed Risk Assessment only when supported, followed by a bounded compatible mitigation and verification path. Preserve the existing impact and all unrelated branches.'
+    void reworkSelectedWithAgent(item.nodeId, `${objective}${sourceScope}`)
+  }
 
   useEffect(() => {
     setActionHistory((current) => current[0]?.message === activity
@@ -417,7 +435,7 @@ export default function App() {
       />
 
       {risksOpen
-        ? <aside aria-label="Impact and risks" className="inspector-panel operations-panel" id="data-lab-risks"><RiskImpactView onClose={() => setRisksOpen(false)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setRisksOpen(false); setInspectorOpen(true) }} overview={riskOverview} /></aside>
+        ? <aside aria-label="Impact and risks" className="inspector-panel operations-panel" id="data-lab-risks"><RiskImpactView correctionBusy={player.agentRunning} onClose={() => setRisksOpen(false)} onProposeCorrection={proposeRiskCorrection} onSelectCard={(nodeId) => { setSelectedId(nodeId); setRisksOpen(false); setInspectorOpen(true) }} overview={riskOverview} /></aside>
         : reportsOpen
           ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
         : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>

@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { governanceGapIssues, hasDataIncident, hasGovernanceGap, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { catalogExplorerCheckpointScope, parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -277,6 +277,23 @@ export function useCatalogExplorer(options: {
         if (!dataset || hasDataIncident(dataset) || !incidentSummaries.some((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')) return []
         return [{ dataset, asset: inspection.asset, incidentKey }]
       })
+      const governanceIncidents = explored.progress.datasets.filter(hasGovernanceGap).flatMap((dataset) => {
+        const incidentKey = `catalog-explorer:governance:${dataset.urn}`
+        const existing = incidentSummaries.find((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')
+        if (existing?.fingerprint === dataset.fingerprint) return []
+        return [{
+          dataset,
+          incidentKey,
+          transition: existing ? 'worsened' as const : 'opened' as const,
+        }]
+      })
+      const recoveredGovernanceIncidents = explored.inspections.flatMap((inspection) => {
+        if (isInspectionUnavailable(inspection)) return []
+        const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)
+        const incidentKey = `catalog-explorer:governance:${inspection.asset.urn}`
+        if (!dataset || hasGovernanceGap(dataset) || !incidentSummaries.some((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')) return []
+        return [{ dataset, asset: inspection.asset, incidentKey }]
+      })
       await Promise.all([
         ...[...failedConnectorGroups.entries()].map(([connector, datasets]) => {
           const firstErrors = datasets
@@ -319,11 +336,35 @@ export function useCatalogExplorer(options: {
           cardId: input.explorer.id,
           branchId: dataset.urn,
         })),
+        ...recoveredGovernanceIncidents.map(({ dataset, asset, incidentKey }) => logIncident({
+          incidentKey,
+          transition: 'recovered' as const,
+          severity: 'info' as const,
+          title: `Governance gap recovered · ${dataset.name}`,
+          detail: 'A fresh bounded catalog inspection confirms that the previously missing ownership or classification metadata is now present.',
+          sourceSystem: asset.sourceSystem ?? 'Catalog',
+          sourceRef: dataset.urn,
+          fingerprint: dataset.fingerprint,
+          cardId: input.explorer.id,
+          branchId: dataset.urn,
+        })),
+        ...governanceIncidents.map(({ dataset, incidentKey, transition }) => logIncident({
+          incidentKey,
+          transition,
+          severity: 'warning' as const,
+          title: `Governance gap · ${dataset.name}`,
+          detail: governanceGapIssues(dataset).join(', ') || 'Catalog governance metadata is incomplete.',
+          sourceSystem: byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
+          sourceRef: dataset.urn,
+          fingerprint: dataset.fingerprint,
+          cardId: input.explorer.id,
+          branchId: dataset.urn,
+        })),
         ...explored.progress.datasets.filter(hasDataIncident).map((dataset) => logIncident({
         incidentKey: `catalog-explorer:${dataset.urn}`,
         transition: 'opened',
         severity: 'warning',
-        title: `Governance attention · ${dataset.name}`,
+        title: `Data quality incident · ${dataset.name}`,
         detail: dataset.issues.join(', ') || 'Catalog Explorer detected a metadata signal requiring attention.',
         sourceSystem: byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
         sourceRef: dataset.urn,

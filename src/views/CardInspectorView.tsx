@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, Focus, PanelRightClose, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
+import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
 import { CatalogExplorerSettings } from '../components/shared/CatalogExplorerSettings'
 import { WorkerNodeSettings } from '../components/shared/WorkerNodeSettings'
@@ -36,7 +37,8 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
   const risk = selected?.data.kind === 'risk' ? parseRiskAssessmentRule(selected.data.rule) : undefined
   return <>
     <PanelHeader action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
-    {selected ? <div className="inspector-form">
+    <PanelScrollArea className="inspector-panel-content" label="Inspector content">
+      {selected ? <div className="inspector-form">
       <section className="card-agent-workspace"><div><Sparkles size={15} /><span><strong>Agent workspace</strong><small>Analyze and rework this card from connected evidence.</small></span></div><button onClick={onAgentRework} type="button">Ask agent to rework</button></section>
       {selected.data.kind === 'diagram' && <section className="diagram-focus"><div><Focus size={15} /><span><strong>Incident workstream</strong><small>Frame the parallel incident branches merged by this diagram.</small></span></div><button onClick={() => onFocusDiagram(selected.id)} type="button">Focus subgraph</button></section>}
       {role && <section className="role-contract"><div><small>AGENT ROLE</small><strong>{role.role}</strong><p>{role.mission}</p></div><dl><div><dt>Input</dt><dd>{role.input}</dd></div><div><dt>Output</dt><dd>{role.output}</dd></div><div><dt>Tools</dt><dd>{role.allowedTools.length ? role.allowedTools.join(' · ') : 'No external tools'}</dd></div></dl></section>}
@@ -60,12 +62,13 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
           : <p className={className} key={`${asset.urn}-${asset.name}`}><code>{asset.name}</code><small>{asset.sensitive ? 'Sensitive external path' : 'External catalog asset'}</small></p>
       })}{lineage.length > 12 && <button className="lineage-expand" onClick={() => setLineageExpanded((current) => !current)} type="button">{lineageExpanded ? 'Show first 12' : `Show ${Math.min(lineage.length, 30) - 12} more`}</button>}{lineage.length > 30 && <small className="lineage-bound">Expansion is bounded to 30 assets. Refine the lineage query for a narrower impact radius.</small>}</section>}
       {selected.data.schema.length > 0 && <section className="schema-list"><h3>Schema · {selected.data.schema.length} fields</h3>{selected.data.schema.map((field) => <div key={field.name}><code>{field.name}</code><span>{field.type}</span>{field.tags?.map((tag) => <em key={tag}>{tag}</em>)}</div>)}</section>}
-    </div> : <p className="empty-copy">Select a card to inspect its metadata.</p>}
+      </div> : <p className="empty-copy">Select a card to inspect its metadata.</p>}
 
-    <section className="validation-list">
-      <div className="validation-heading"><h3>Atomic validation</h3><span className={errorCount ? 'count-error' : 'count-good'}>{errorCount ? `${errorCount} blocking` : 'Ready'}</span></div>
-      {issues.map((issue) => <button key={issue.id} onClick={() => issue.nodeId && onSelectNode(issue.nodeId)} type="button"><span className={`issue-icon ${issue.severity}`}>{issue.severity === 'error' ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}</span><div><strong>{issue.title}</strong><small>{issue.detail}</small><code className="validation-atom-id">{issue.atomId}</code></div></button>)}
-      {issues.length === 0 && <div className="all-clear"><CheckCircle2 size={17} /><div><strong>All atomic checks passed</strong><small>Direction, topology and governance contracts are valid.</small></div></div>}
-    </section>
+      <section className="validation-list">
+        <div className="validation-heading"><h3>Atomic validation</h3><span className={errorCount ? 'count-error' : 'count-good'}>{errorCount ? `${errorCount} blocking` : 'Ready'}</span></div>
+        {issues.map((issue) => <button key={issue.id} onClick={() => issue.nodeId && onSelectNode(issue.nodeId)} type="button"><span className={`issue-icon ${issue.severity}`}>{issue.severity === 'error' ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}</span><div><strong>{issue.title}</strong><small>{issue.detail}</small><code className="validation-atom-id">{issue.atomId}</code></div></button>)}
+        {issues.length === 0 && <div className="all-clear"><CheckCircle2 size={17} /><div><strong>All atomic checks passed</strong><small>Direction, topology and governance contracts are valid.</small></div></div>}
+      </section>
+    </PanelScrollArea>
   </>
 }

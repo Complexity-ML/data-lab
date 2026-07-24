@@ -1,5 +1,6 @@
 import { Binoculars, Bot, Braces, BrainCircuit, ChartColumn, ChartNetwork, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, UserCheck, WandSparkles } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
+import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import { cardLabels, type CardKind } from '../domain/pipeline'
 
 const palette: { kind: CardKind; description: string; icon: typeof Database }[] = [
@@ -27,26 +28,28 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
 export function CardLibraryView({ onAddCard, onClose }: { onAddCard(kind: CardKind): void; onClose(): void }) {
   return <aside className="library-panel">
     <PanelHeader action={<button aria-label="Close card library" className="panel-toggle" onClick={onClose} title="Close card library" type="button"><PanelLeftClose size={16} /></button>} eyebrow="BUILD" title="Card library" />
-    <p className="panel-intro">Compose a directional data pipeline. Every card remains inspectable and reviewable.</p>
-    <div className="palette-list">{palette.map(({ kind, description, icon: Icon }) => <button
-      className={`palette-card palette-${kind}`}
-      draggable
-      key={kind}
-      onClick={() => onAddCard(kind)}
-      onDragEnd={(event) => event.currentTarget.classList.remove('is-dragging')}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = 'copy'
-        event.dataTransfer.setData('application/data-lab-card', kind)
-        event.dataTransfer.setData('text/plain', cardLabels[kind])
-        event.currentTarget.classList.add('is-dragging')
-      }}
-      title={`Click to add or drag ${cardLabels[kind]} onto the canvas`}
-      type="button"
-    ><span><Icon size={16} /></span><div><strong>{cardLabels[kind]}</strong><small>{description}</small></div><Plus size={14} /></button>)}</div>
-    <section className="datahub-context">
-      <div><Database size={15} /><strong>DataHub context</strong></div>
-      <p>Schema, lineage, ownership and PII tags are loaded before the agent proposes a change.</p>
-      <ul><li>customers_360</li><li>2 downstream outputs</li><li>1 PII field</li></ul>
-    </section>
+    <PanelScrollArea className="library-panel-content" label="Card library content">
+      <p className="panel-intro">Compose a directional data pipeline. Every card remains inspectable and reviewable.</p>
+      <div className="palette-list">{palette.map(({ kind, description, icon: Icon }) => <button
+        className={`palette-card palette-${kind}`}
+        draggable
+        key={kind}
+        onClick={() => onAddCard(kind)}
+        onDragEnd={(event) => event.currentTarget.classList.remove('is-dragging')}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'copy'
+          event.dataTransfer.setData('application/data-lab-card', kind)
+          event.dataTransfer.setData('text/plain', cardLabels[kind])
+          event.currentTarget.classList.add('is-dragging')
+        }}
+        title={`Click to add or drag ${cardLabels[kind]} onto the canvas`}
+        type="button"
+      ><span><Icon size={16} /></span><div><strong>{cardLabels[kind]}</strong><small>{description}</small></div><Plus size={14} /></button>)}</div>
+      <section className="datahub-context">
+        <div><Database size={15} /><strong>DataHub context</strong></div>
+        <p>Schema, lineage, ownership and PII tags are loaded before the agent proposes a change.</p>
+        <ul><li>customers_360</li><li>2 downstream outputs</li><li>1 PII field</li></ul>
+      </section>
+    </PanelScrollArea>
   </aside>
 }

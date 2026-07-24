@@ -8,6 +8,28 @@ import { CardInspectorView } from './CardInspectorView'
 afterEach(cleanup)
 
 describe('DataHub lineage impact', () => {
+  it('keeps inspector content in the same shared scroll region as the card library', () => {
+    const selected = newCard('risk', 0)
+    render(<CardInspectorView
+      dataHubConnected={false}
+      errorCount={0}
+      issues={[]}
+      onAgentRework={vi.fn()}
+      onBindDataHubSource={vi.fn()}
+      onClose={vi.fn()}
+      onFocusDiagram={vi.fn()}
+      onInspectDataHubAsset={vi.fn()}
+      onOpenDataHubSettings={vi.fn()}
+      onSearchDataHub={vi.fn()}
+      onSelectNode={vi.fn()}
+      onUpdate={vi.fn()}
+      selected={selected}
+      workbenchAssets={{}}
+    />)
+
+    expect(screen.getByRole('region', { name: 'Inspector content' }).classList.contains('panel-scroll-area')).toBe(true)
+  })
+
   it('distinguishes workbench cards from external assets and bounds expansion', () => {
     const selected = newCard('source', 0)
     selected.data.datahubUrn = 'urn:li:dataset:source'

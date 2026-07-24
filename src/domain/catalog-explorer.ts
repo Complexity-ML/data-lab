@@ -8,6 +8,7 @@ export interface CatalogInspection {
 
 const dataIncidentIssues = new Set(['quality failing'])
 const governanceIssues = new Set(['owner missing', 'tags missing'])
+const sensitivePattern = /pii|sensitive|personal|gdpr|secret|credential/i
 export const defaultCatalogRetryLimit = 3
 export const defaultCatalogRetryCooldownMs = 30_000
 
@@ -17,6 +18,10 @@ export function hasDataIncident(checkpoint: CatalogDatasetCheckpoint) {
 
 export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
   return checkpoint.issues.some((issue) => governanceIssues.has(issue))
+}
+
+export function governanceGapIssues(checkpoint: CatalogDatasetCheckpoint) {
+  return checkpoint.issues.filter((issue) => governanceIssues.has(issue))
 }
 
 export function shouldOpenCatalogConnectivityIncident(progress: CatalogExplorationProgress) {
@@ -143,6 +148,25 @@ export function rankCatalogCandidateUrns(progress: CatalogExplorationProgress) {
     .map((checkpoint) => checkpoint.urn)
 }
 
+export function rankCatalogRiskCandidateUrns(
+  progress: CatalogExplorationProgress,
+  excludedUrns: string[] = [],
+) {
+  const excluded = new Set(excludedUrns)
+  const score = (checkpoint: CatalogDatasetCheckpoint) =>
+    (checkpoint.qualityStatus === 'failing' || hasDataIncident(checkpoint) ? 100_000 : 0)
+    + (checkpoint.sensitiveSignalCount ?? 0) * 1_000
+    + checkpoint.downstreamCount * 10
+    + checkpoint.upstreamCount
+
+  return progress.datasets
+    .filter((checkpoint) => checkpoint.status !== 'unavailable'
+      && !excluded.has(checkpoint.urn)
+      && (hasDataIncident(checkpoint) || (checkpoint.sensitiveSignalCount ?? 0) > 0))
+    .sort((left, right) => score(right) - score(left) || left.urn.localeCompare(right.urn))
+    .map((checkpoint) => checkpoint.urn)
+}
+
 export function selectCatalogCandidateUrn(
   progress: CatalogExplorationProgress,
   preferredUrns: string[] = [],
@@ -183,6 +207,8 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     ...(asset.qualityStatus === 'failing' ? ['quality failing'] : []),
   ]
   const status: CatalogDatasetCheckpoint['status'] = unavailable ? 'unavailable' : issues.length ? 'warning' : 'healthy'
+  const sensitiveSignalCount = asset.fields.filter((field) => field.tags?.some((tag) => sensitivePattern.test(tag))).length
+    + asset.tags.filter((tag) => sensitivePattern.test(tag)).length
   const capturedAt = evidence.map((read) => read.capturedAt).sort().at(-1) ?? asset.freshness.capturedAt
   const expiresAt = evidence.filter((read) => read.status === 'ok' && !read.stale).map((read) => read.expiresAt).sort()[0] ?? capturedAt
   return {
@@ -190,6 +216,8 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     name: asset.name,
     status,
     fieldCount: asset.fields.length,
+    sensitiveSignalCount,
+    qualityStatus: asset.qualityStatus,
     ownerCount: asset.owners.length,
     upstreamCount: asset.upstream.length,
     downstreamCount: asset.downstream.length,

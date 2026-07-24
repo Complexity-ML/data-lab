@@ -79,6 +79,10 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       name: typeof item.name === 'string' ? redactExportText(item.name).slice(0, 240) : item.urn.slice(0, 240),
       status: itemStatus,
       fieldCount: Math.max(0, Math.min(100_000, Number.isInteger(item.fieldCount) ? Number(item.fieldCount) : 0)),
+      sensitiveSignalCount: Math.max(0, Math.min(100_000, Number.isInteger(item.sensitiveSignalCount) ? Number(item.sensitiveSignalCount) : 0)),
+      qualityStatus: ['healthy', 'failing', 'unavailable'].includes(String(item.qualityStatus))
+        ? item.qualityStatus as 'healthy' | 'failing' | 'unavailable'
+        : undefined,
       ownerCount: Math.max(0, Math.min(100_000, Number.isInteger(item.ownerCount) ? Number(item.ownerCount) : 0)),
       upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.upstreamCount) ? Number(item.upstreamCount) : 0)),
       downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.downstreamCount) ? Number(item.downstreamCount) : 0)),

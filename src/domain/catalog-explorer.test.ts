@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -170,6 +170,54 @@ describe('Catalog Explorer', () => {
       failed: 0,
       state: 'complete',
     })
+    expect(governanceGapIssues(result.progress.datasets.find((dataset) => dataset.urn === governanceAsset.urn)!)).toEqual([
+      'owner missing',
+      'tags missing',
+    ])
+  })
+
+  it('persists bounded quality and sensitive risk signals in the catalog checkpoint', () => {
+    const checkpoint = checkpointForInspection(inspection({
+      ...asset(3),
+      tags: ['governed', 'PII'],
+      fields: [
+        { name: 'id', type: 'string' },
+        { name: 'email', type: 'string', tags: ['Sensitive'] },
+      ],
+      qualityStatus: 'failing',
+    }))
+
+    expect(checkpoint).toMatchObject({
+      qualityStatus: 'failing',
+      sensitiveSignalCount: 2,
+      issues: expect.arrayContaining(['quality failing']),
+    })
+  })
+
+  it('prioritizes true data and sensitive risk candidates without promoting governance gaps', () => {
+    const governance = checkpointForInspection(inspection({ ...asset(1), tags: [] }))
+    const sensitive = checkpointForInspection(inspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+      downstream: [{ urn: 'urn:li:dataset:consumer', name: 'consumer', sensitive: false }],
+    }))
+    const failing = checkpointForInspection(inspection({ ...asset(3), qualityStatus: 'failing' }))
+    const progress = {
+      query: '*',
+      total: 3,
+      discovered: 3,
+      inspected: 3,
+      failed: 0,
+      incidents: 1,
+      governanceGaps: 1,
+      concurrency: 4,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [governance, sensitive, failing],
+    }
+
+    expect(rankCatalogRiskCandidateUrns(progress)).toEqual([failing.urn, sensitive.urn])
+    expect(rankCatalogRiskCandidateUrns(progress, [failing.urn])).toEqual([sensitive.urn])
   })
 
   it('keeps catalog coverage moving when a complete dataset batch is unavailable', async () => {

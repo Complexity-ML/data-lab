@@ -59,6 +59,8 @@ function catalogCheckpointContext(nodes: PipelineNode[], versions: PipelineVersi
         name: dataset.name,
         status: dataset.status,
         fieldCount: dataset.fieldCount,
+        sensitiveSignalCount: dataset.sensitiveSignalCount ?? 0,
+        qualityStatus: dataset.qualityStatus ?? 'unavailable',
         ownerCount: dataset.ownerCount,
         upstreamCount: dataset.upstreamCount,
         downstreamCount: dataset.downstreamCount,
@@ -128,11 +130,11 @@ export function buildPipelineAgentRequest(input: AgentContextInput & {
   }
 }
 
-export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string; datahubEvidence?: DataHubEvidence[]; responseLanguage?: 'English' | 'French' }) {
+export function buildCardReworkRequest(input: AgentContextInput & { focusNodeId: string; datahubEvidence?: DataHubEvidence[]; objective?: string; responseLanguage?: 'English' | 'French' }) {
   return {
     mode: 'card-rework',
     focusNodeId: input.focusNodeId,
-    objective: 'Improve the selected card and reconnect the schema only when evidence supports it. Add Human Review if uncertain.',
+    objective: input.objective ?? 'Improve the selected card and reconnect the schema only when evidence supports it. Add Human Review if uncertain.',
     responseLanguage: input.responseLanguage ?? 'English',
     graph: compactGraph(input.nodes, input.edges),
     validationFindings: input.issues,

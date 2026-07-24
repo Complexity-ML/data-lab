@@ -78,6 +78,8 @@ export interface CatalogDatasetCheckpoint {
   name: string
   status: 'healthy' | 'warning' | 'unavailable'
   fieldCount: number
+  sensitiveSignalCount?: number
+  qualityStatus?: 'healthy' | 'failing' | 'unavailable'
   ownerCount: number
   upstreamCount: number
   downstreamCount: number

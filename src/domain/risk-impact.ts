@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react'
-import type { PipelineNode } from './pipeline'
+import type { CatalogDatasetCheckpoint, PipelineNode } from './pipeline'
 import { parseRiskAssessmentRule, riskDomainFromText, type RiskDomain, type RiskSeverity } from './risk-assessment'
 
 export type RiskImpactItemKind = 'risk' | 'impact' | 'coverage-gap'
@@ -16,6 +16,7 @@ export interface RiskImpactItem {
   evidence?: string
   affectedAssets?: number
   affectedModels?: number
+  sourceRef?: string
 }
 
 export interface RiskImpactOverview {
@@ -44,8 +45,74 @@ function hasDownstreamRisk(nodeId: string, nodes: PipelineNode[], edges: Edge[])
   return false
 }
 
+function riskCardCoversDataset(dataset: CatalogDatasetCheckpoint, nodes: PipelineNode[]) {
+  const needles = [dataset.urn, dataset.name].map((value) => value.trim().toLowerCase()).filter(Boolean)
+  return nodes.some((node) => {
+    if (node.data.kind !== 'risk') return false
+    const text = `${node.data.label} ${node.data.description} ${node.data.rule ?? ''}`.toLowerCase()
+    return needles.some((needle) => text.includes(needle))
+  })
+}
+
+function catalogRiskItems(node: PipelineNode, nodes: PipelineNode[]): RiskImpactItem[] {
+  const datasets = node.data.exploration?.datasets ?? []
+  return datasets.flatMap<RiskImpactItem>((dataset) => {
+    if (dataset.status === 'unavailable' || riskCardCoversDataset(dataset, nodes)) return []
+    const affectedAssets = Math.max(1, 1 + dataset.upstreamCount + dataset.downstreamCount)
+    const items: RiskImpactItem[] = []
+    if (dataset.qualityStatus === 'failing' || dataset.issues.includes('quality failing')) {
+      items.push({
+        id: `catalog-quality-${dataset.urn}`,
+        nodeId: node.id,
+        kind: 'risk',
+        domain: 'data',
+        severity: 'high',
+        title: `Data quality risk · ${dataset.name}`,
+        detail: 'The versioned catalog checkpoint reports a failing quality signal. This is dataset evidence, not a connector failure.',
+        action: 'Inspect this dataset deeply, trace its impact, then propose a bounded correction and fresh post-condition verification.',
+        evidence: 'catalog_checkpoint:fresh',
+        affectedAssets,
+        sourceRef: dataset.urn,
+      })
+    }
+    if ((dataset.sensitiveSignalCount ?? 0) > 0) {
+      items.push({
+        id: `catalog-sensitive-${dataset.urn}`,
+        nodeId: node.id,
+        kind: 'coverage-gap',
+        domain: 'privacy',
+        severity: 'high',
+        title: `Sensitive-data risk coverage · ${dataset.name}`,
+        detail: `${dataset.sensitiveSignalCount} sensitive field or classification signal(s) require a scoped exposure and downstream-impact assessment.`,
+        action: 'Inspect only this dataset and add an evidence-backed privacy Risk Assessment when its lineage proves exposure.',
+        evidence: 'catalog_checkpoint:fresh',
+        affectedAssets,
+        sourceRef: dataset.urn,
+      })
+    }
+    const governanceGaps = dataset.issues.filter((issue) => issue === 'owner missing' || issue === 'tags missing')
+    if (governanceGaps.length) {
+      items.push({
+        id: `catalog-governance-${dataset.urn}`,
+        nodeId: node.id,
+        kind: 'coverage-gap',
+        domain: 'governance',
+        severity: 'medium',
+        title: `Governance risk coverage · ${dataset.name}`,
+        detail: `The catalog checkpoint cannot complete governance risk classification: ${governanceGaps.join(', ')}.`,
+        action: 'Confirm ownership and classifications, then reassess downstream impact without treating the gap as a data-quality failure.',
+        evidence: 'catalog_checkpoint:incomplete_governance',
+        affectedAssets,
+        sourceRef: dataset.urn,
+      })
+    }
+    return items
+  })
+}
+
 export function collectRiskImpactOverview(nodes: PipelineNode[], edges: Edge[]): RiskImpactOverview {
   const items: RiskImpactItem[] = nodes.flatMap((node) => {
+    if (node.data.kind === 'explorer') return catalogRiskItems(node, nodes)
     if (node.data.kind === 'risk') {
       const risk = parseRiskAssessmentRule(node.data.rule)
       return [{

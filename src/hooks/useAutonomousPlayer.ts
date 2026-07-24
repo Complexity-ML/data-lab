@@ -10,7 +10,7 @@ import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
-import { selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
+import { rankCatalogRiskCandidateUrns, selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -373,6 +373,28 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           evidenceEntries.push(...explored.evidence)
           datahubEvidence.push(...explored.summaries)
           continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
+        }
+        if (!monitored && catalogExplorer?.data.exploration?.state === 'complete' && connectionMode === 'connected') {
+          const representedUrns = nodes.flatMap((node) => {
+            if (node.data.kind !== 'source') return []
+            const urn = node.data.assetRef ?? node.data.datahubUrn
+            return urn ? [urn] : []
+          })
+          const riskCandidateUrn = rankCatalogRiskCandidateUrns(catalogExplorer.data.exploration, representedUrns)[0]
+          if (riskCandidateUrn) {
+            setActivity('Catalog risk candidate found · running one focused GraphQL evidence check…')
+            const inspection = await inspectDataHubAsset(riskCandidateUrn, false, undefined, 'deep')
+            if (agentRunId.current !== runId) return
+            blankCandidate = inspection.asset
+            catalogProgress = catalogExplorer.data.exploration
+            profileCandidates.set(inspection.asset.urn, inspection.asset)
+            evidenceEntries.push(...inspection.evidence)
+            datahubEvidence.unshift(
+              `Autonomous catalog risk candidate selected from the terminal checkpoint: ${inspection.asset.name} (${inspection.asset.urn}).`,
+              'Use one registered Query Check for this dataset, then build only the focused Source -> Data Profile -> Impact Analysis -> Risk Assessment branch supported by fresh evidence. Keep the complete Catalog Explorer closed.',
+              ...inspection.evidence.map((read) => `${read.tool} · ${read.status} · ${read.summary}`),
+            )
+          }
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         let candidates: DataHubAssetSummary[] = catalogExplorer ? catalog.assetsFor(catalogExplorer.id) : []

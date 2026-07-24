@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock3, FileWarning, PanelRightClose, Sparkles } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
+import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { IncidentEvent, IncidentSummary } from '../domain/incidents'
 import type { AgentProposal } from '../domain/pipeline'
 
@@ -18,7 +19,7 @@ export function IncidentReportsView({ events, incidents, onClose, onOpenProposal
   const resolved = incidents.filter((incident) => incident.status === 'resolved')
   return <>
     <PanelHeader action={<button aria-label="Close incident reports" className="panel-toggle" onClick={onClose} title="Close incident reports" type="button"><PanelRightClose size={16} /></button>} eyebrow="REPORTS" title="Incident reports" />
-    <div className="reports-panel-content">
+    <PanelScrollArea className="reports-panel-content" label="Incident reports content">
       <section className="reports-overview">
         <div><strong>{active.length}</strong><small>Unresolved</small></div>
         <div><strong>{waiting.length + (proposal ? 1 : 0)}</strong><small>Review</small></div>
@@ -35,6 +36,6 @@ export function IncidentReportsView({ events, incidents, onClose, onOpenProposal
 
       <div className="reports-heading"><strong>Recent report activity</strong><small>{events.length} event{events.length === 1 ? '' : 's'}</small></div>
       <ol className="report-events">{events.slice(0, 30).map((event) => <li key={event.id}><Clock3 size={12} /><span><strong>{event.title}</strong><small>{event.transition.replace('-', ' ')} · {new Date(event.createdAt).toLocaleTimeString()}</small></span></li>)}</ol>
-    </div>
+    </PanelScrollArea>
   </>
 }

@@ -8,6 +8,7 @@ import type { DataHubEvidence } from '../domain/datahub'
 import { applyProposal, type AgentProposal, type PipelineNode } from '../domain/pipeline'
 import { errorMessage, notifyError } from '../domain/toasts'
 import { findEquivalentVersion, graphsEquivalent, type PipelineVersion } from '../domain/versioning'
+import { repairMonitorWorkBranches, repairSensitiveOutputPaths } from '../validation/proposal-repair'
 import type { ValidationIssue } from '../validation/types'
 import { disconnectedAiStatus, disconnectedChatGPTStatus } from './useAiConnections'
 
@@ -32,8 +33,10 @@ export function useSelectedCardRework(options: {
   setProposalReviewOpen(value: boolean): void
   versions: PipelineVersion[]
 }) {
-  return async () => {
-    const selected = options.selected
+  return async (targetNodeId?: string, objective?: string) => {
+    const selected = targetNodeId
+      ? options.nodes.find((node) => node.id === targetNodeId)
+      : options.selected
     if (!selected) return
     options.setContextMenu(undefined)
     if (!window.dataLab) {
@@ -62,10 +65,21 @@ export function useSelectedCardRework(options: {
         if (options.agentRunId.current !== runId) return
         evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
       }
-      const requestPayload = buildCardReworkRequest({ datahubEvidence: evidenceEntries, edges: options.edges, focusNodeId: selected.id, issues: options.issues, nodes: options.nodes, responseLanguage: options.language === 'fr' ? 'French' : 'English', versions: options.versions })
+      const requestPayload = buildCardReworkRequest({
+        datahubEvidence: evidenceEntries,
+        edges: options.edges,
+        focusNodeId: selected.id,
+        issues: options.issues,
+        nodes: options.nodes,
+        objective,
+        responseLanguage: options.language === 'fr' ? 'French' : 'English',
+        versions: options.versions,
+      })
       const response = options.activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
       if (options.agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, options.nodes, options.edges)
+      repairSensitiveOutputPaths(nextProposal, options.nodes, options.edges)
+      repairMonitorWorkBranches(nextProposal, options.nodes, options.edges)
       nextProposal.runTrace = buildAtomicRunTrace(options.nodes, atomicRun)
       const preview = applyProposal(options.nodes, options.edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, options.versions)
