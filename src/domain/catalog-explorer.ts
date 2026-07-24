@@ -118,7 +118,12 @@ export function shouldCallAgentForCatalog(
   profileRisk = false,
 ) {
   if (current.state === 'failed' || current.pauseReason === 'connector_unavailable' || current.pauseReason === 'retry_exhausted') return false
-  if (current.state === 'complete') return true
+  if (current.state === 'complete') {
+    return previous?.state !== 'complete'
+      || current.inspected > (previous?.inspected ?? 0)
+      || current.incidents > (previous?.incidents ?? 0)
+      || profileRisk
+  }
   if (current.total > 0 && current.inspected >= current.total && (previous?.inspected ?? 0) < current.total) return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
@@ -223,10 +228,6 @@ export async function inspectCatalogInParallel(
   // Unavailable checkpoints remain retryable, but only after every never-read
   // dataset has received its first bounded inspection.
   const uninspected = assets.filter((asset) => !previous.has(asset.urn))
-  const expired = assets.filter((asset) => {
-    const checkpoint = previous.get(asset.urn)
-    return checkpoint && checkpoint.status !== 'unavailable' && Date.parse(checkpoint.expiresAt) <= Date.now()
-  })
   // Dataset read failures are local collection gaps. Give each unavailable
   // dataset its own durable retry budget, after all never-inspected assets have
   // had a turn, instead of opening a connector-wide circuit.
@@ -235,7 +236,10 @@ export async function inspectCatalogInParallel(
     const checkpoint = previous.get(asset.urn)
     return checkpoint?.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
   })
-  const pending = [...uninspected, ...expired, ...retryable]
+  // Evidence expiry must not turn one bounded catalog objective into a hidden
+  // refresh loop. Once every dataset has a checkpoint, the first-pass audit is
+  // complete. Live Monitor or an explicit refresh/reset starts a later audit.
+  const pending = [...uninspected, ...retryable]
   const inspectionBudget = Math.max(1, Math.min(configuredBatchSize, Math.floor(options.maxInspections ?? configuredBatchSize), pending.length || 1))
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
