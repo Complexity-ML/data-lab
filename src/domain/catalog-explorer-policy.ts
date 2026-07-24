@@ -56,6 +56,11 @@ export function catalogExplorerPolicyRule(policy: CatalogExplorerPolicy) {
   return `scope=${scope}${dataset} | batch_size=${Math.max(1, Math.min(32, Math.round(policy.batchSize)))} | audit_concurrency=${Math.max(1, Math.min(8, Math.round(policy.concurrency)))} | cache=${policy.cacheMode === 'refresh' ? 'refresh' : 'prefer'} | checkpoint=versioned | resume=${policy.resume !== false}`
 }
 
+export function catalogExplorerCheckpointScope(rule: string | undefined) {
+  const policy = parseCatalogExplorerPolicy(rule)
+  return policy.scope === 'dataset' ? `dataset:${policy.datasetUrn}` : 'all_datasets'
+}
+
 export function catalogExplorerPolicyError(rule: string | undefined) {
   const values = entries(rule)
   const scope = values.get('scope')

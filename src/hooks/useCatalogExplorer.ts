@@ -1,6 +1,6 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
 import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
-import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
+import { catalogExplorerCheckpointScope, parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
 import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
@@ -17,8 +17,7 @@ export function useCatalogExplorer(options: {
   const { incidentSummaries, inspectAsset, logIncident, setActivity, setNodes } = options
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
   const resetRetriesRequested = useRef(false)
-  const checkpointKey = useCallback((explorer: PipelineNode, query: string) => {
-    const value = `${explorer.id}:${explorer.data.rule ?? ''}:${query}`
+  const hashedCheckpointKey = useCallback((value: string) => {
     let hash = 2166136261
     for (let index = 0; index < value.length; index += 1) {
       hash ^= value.charCodeAt(index)
@@ -26,6 +25,10 @@ export function useCatalogExplorer(options: {
     }
     return `catalog:${(hash >>> 0).toString(16).padStart(8, '0')}`
   }, [])
+  const checkpointKey = useCallback((explorer: PipelineNode) =>
+    hashedCheckpointKey(`${explorer.id}:${catalogExplorerCheckpointScope(explorer.data.rule)}`), [hashedCheckpointKey])
+  const legacyCheckpointKey = useCallback((explorer: PipelineNode, query: string) =>
+    hashedCheckpointKey(`${explorer.id}:${explorer.data.rule ?? ''}:${query}`), [hashedCheckpointKey])
   const persistProgress = useCallback((key: string, progress: CatalogExplorationProgress) => {
     void window.dataLab?.saveCatalogCheckpoint?.(key, progress).catch(() => undefined)
   }, [])
@@ -100,8 +103,18 @@ export function useCatalogExplorer(options: {
     const assets = focusedAsset ? [focusedAsset] : input.assets
     const assetByUrn = new Map(assets.map((asset) => [asset.urn, asset]))
     catalogAssets.current.set(input.explorer.id, assets)
-    const key = checkpointKey(input.explorer, input.query)
-    const persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
+    const key = checkpointKey(input.explorer)
+    let persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
+    if (!persistedProgress) {
+      const legacyQueries = [...new Set([input.explorer.data.exploration?.query, input.query, '*'].filter((query): query is string => Boolean(query)))]
+      for (const query of legacyQueries) {
+        persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(legacyCheckpointKey(input.explorer, query)).catch(() => null)
+        if (persistedProgress) {
+          persistProgress(key, persistedProgress)
+          break
+        }
+      }
+    }
     const mergedProgress = mergeCatalogProgress(input.explorer.data.exploration, persistedProgress ?? undefined)
     const previousProgress = resetRetriesRequested.current && mergedProgress
       ? resetCatalogRetryState(mergedProgress)
@@ -312,7 +325,7 @@ export function useCatalogExplorer(options: {
         }),
       ],
     }
-  }, [checkpointKey, incidentSummaries, inspectAsset, logIncident, persistProgress, updateProgress])
+  }, [checkpointKey, incidentSummaries, inspectAsset, legacyCheckpointKey, logIncident, persistProgress, updateProgress])
 
   const attachProgress = useCallback((proposal: AgentProposal, explorer: PipelineNode, progress: CatalogExplorationProgress) => {
     const existingUpdate = proposal.updatedNodes.find((update) => update.nodeId === explorer.id)
@@ -354,7 +367,7 @@ export function useCatalogExplorer(options: {
       datasets: previous?.datasets ?? [],
     })!
     updateProgress(explorer, progress, isCurrent)
-    persistProgress(checkpointKey(explorer, query), progress)
+    persistProgress(checkpointKey(explorer), progress)
     return progress
   }, [checkpointKey, persistProgress, updateProgress])
 
