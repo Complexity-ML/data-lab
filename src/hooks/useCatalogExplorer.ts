@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
 import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
@@ -107,11 +107,11 @@ export function useCatalogExplorer(options: {
     if (input.isCurrent()) {
       const unavailable = explored.progress.datasets.filter((dataset) => dataset.status === 'unavailable')
       const connectorGroups = new Map<string, typeof unavailable>()
-      const inspectedConnectors = new Map<string, { sourceSystem: string; cardId: string }>()
-      explored.progress.datasets.forEach((dataset) => {
-        const asset = byUrn.get(dataset.urn)
+      const freshlyAvailableConnectors = new Map<string, { sourceSystem: string; cardId: string }>()
+      explored.inspections.filter((inspection) => !isInspectionUnavailable(inspection)).forEach((inspection) => {
+        const asset = inspection.asset
         const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
-        inspectedConnectors.set(key, {
+        freshlyAvailableConnectors.set(key, {
           sourceSystem: asset?.sourceSystem ?? 'Catalog',
           cardId: input.explorer.id,
         })
@@ -121,12 +121,14 @@ export function useCatalogExplorer(options: {
         const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
         connectorGroups.set(key, [...(connectorGroups.get(key) ?? []), dataset])
       })
-      const recoveredConnectors = [...inspectedConnectors.entries()].filter(([connector]) => {
-        if (connectorGroups.has(connector)) return false
+      const catalogConnectionUnavailable = shouldOpenCatalogConnectivityIncident(explored.progress)
+      const recoveredConnectors = [...freshlyAvailableConnectors.entries()].filter(([connector]) => {
+        if (catalogConnectionUnavailable && connectorGroups.has(connector)) return false
         return incidentSummaries.some((incident) => incident.incidentKey === `catalog-explorer:connectivity:${connector}` && incident.status !== 'resolved')
       })
+      const failedConnectorGroups = catalogConnectionUnavailable ? connectorGroups : new Map<string, typeof unavailable>()
       await Promise.all([
-        ...[...connectorGroups.entries()].map(([connector, datasets]) => logIncident({
+        ...[...failedConnectorGroups.entries()].map(([connector, datasets]) => logIncident({
           incidentKey: `catalog-explorer:connectivity:${connector}`,
           transition: 'opened' as const,
           severity: 'critical' as const,

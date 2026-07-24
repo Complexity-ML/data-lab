@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, shouldCallAgentForCatalog, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -220,5 +220,24 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
+  })
+
+  it('opens a connector incident only after the catalog circuit actually fails', () => {
+    const base = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 4,
+      failed: 2,
+      incidents: 0,
+      governanceGaps: 2,
+      concurrency: 4,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(shouldOpenCatalogConnectivityIncident(base)).toBe(false)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'failed' })).toBe(true)
   })
 })
