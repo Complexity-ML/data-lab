@@ -447,7 +447,7 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
   if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
   const pageSize = 10
   const searchPage = async (offset: number) => {
-    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }), 30_000, `search page ${Math.floor(offset / pageSize) + 1}`), 'search response')
+    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }), 45_000, `search page ${Math.floor(offset / pageSize) + 1}`), 'search response')
     if (result.isError) throw new Error(summarizeResult(result))
     const payload = readStructuredToolResult(result)
     return { matches: parseSearchResults(payload), total: parseSearchTotal(payload) }
