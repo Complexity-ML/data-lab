@@ -9,6 +9,13 @@ export interface AgentObjectiveResolution {
   defaulted: boolean
 }
 
+export function dataHubDiscoveryQuery(objective: string): string {
+  const normalized = objective.trim().replace(/\s+/g, ' ')
+  if (normalized === defaultBlankObjective) return '*'
+  if (/\bDATA LAB Control\b/i.test(normalized) && /\b(?:objective|on_review|on_idle)=/i.test(normalized)) return '*'
+  return normalized
+}
+
 export function resolveAgentObjective(rawObjective: string, options: { hasGraph: boolean; matchedSource: boolean }): AgentObjectiveResolution {
   const objective = rawObjective.trim().replace(/\s+/g, ' ')
   if (!objective) return { accepted: true, objective: defaultBlankObjective, defaulted: true }

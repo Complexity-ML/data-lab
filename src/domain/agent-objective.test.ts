@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { resolveAgentObjective } from './agent-objective'
+import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from './agent-objective'
 
 describe('bounded agent objectives', () => {
+  it('uses one catalog-wide discovery for blank and controller missions', () => {
+    expect(dataHubDiscoveryQuery(defaultBlankObjective)).toBe('*')
+    expect(dataHubDiscoveryQuery('Execute DATA LAB Control policy: objective=maintain governed graph | on_review=resume | on_idle=monitor')).toBe('*')
+    expect(dataHubDiscoveryQuery('Inspect Customer_Analytics_Measures')).toBe('Inspect Customer_Analytics_Measures')
+  })
+
   it('turns empty Play into a governed blank-workbench mission', () => {
     expect(resolveAgentObjective('', { hasGraph: false, matchedSource: false })).toMatchObject({
       accepted: true,

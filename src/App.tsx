@@ -36,7 +36,7 @@ import { useLanguage } from './i18n'
 import { summarizeIncidentEvents, type IncidentEvent, type IncidentEventInput } from './domain/incidents'
 import { incidentDiagramNodeIds } from './domain/incident-diagram'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from './domain/source-routing'
-import { defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
+import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
 import { defaultAutonomyPolicy, normalizeAutonomyPolicy, policyForcesProposalReview, type AutonomyPolicy } from './domain/autonomy-policy'
 import { classifyConnectivityFailure } from './domain/connectivity'
 
@@ -403,9 +403,10 @@ export default function App() {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
         let candidates: DataHubAssetSummary[] = []
         let discoveryError: unknown
-        try { candidates = await searchDataHubAssets(agentRequest) }
+        const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
+        try { candidates = await searchDataHubAssets(discoveryQuery) }
         catch (error) { discoveryError = error }
-        if (!candidates.length) {
+        if (!candidates.length && discoveryQuery !== '*') {
           try { candidates = await searchDataHubAssets('*') }
           catch (error) { discoveryError = error }
         }
@@ -507,6 +508,7 @@ export default function App() {
         versions,
       })
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
+      if (agentRunId.current !== runId) return
       const providerConnectivityKey = `connectivity:provider:${activeAiSource}`
       if (incidentSummaries.some((incident) => incident.incidentKey === providerConnectivityKey && incident.status !== 'resolved')) {
         await logIncident({
@@ -520,7 +522,6 @@ export default function App() {
         })
       }
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'success', detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length } })
-      if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       nextProposal.incidentKey = monitored?.incidentKey
       if (blankCandidate) {
@@ -650,6 +651,7 @@ export default function App() {
         void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
       }
     } catch (error) {
+      if (agentRunId.current !== runId) return
       notifyError(error, 'Agent run failed')
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
       const connectivity = classifyConnectivityFailure(error, active.label)
@@ -662,7 +664,6 @@ export default function App() {
         sourceSystem: connectivity.sourceSystem,
         fingerprint: connectivity.fingerprint,
       })
-      if (agentRunId.current !== runId) return
       setActivity(`Agent run failed · ${errorMessage(error, 'Unknown provider error')} · graph unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
   }

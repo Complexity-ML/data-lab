@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -155,7 +155,7 @@ describe('visual pipeline workspace regressions', () => {
     }))
   })
 
-  it('falls back to bounded catalog discovery when an objective search fails', async () => {
+  it('uses one bounded catalog-wide discovery for an empty autonomous workbench', async () => {
     const user = userEvent.setup()
     const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
     const asset = {
@@ -173,9 +173,7 @@ describe('visual pipeline workspace regressions', () => {
       freshness: { capturedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), stale: false },
     }
     api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
-    api.searchDataHubAssets = vi.fn()
-      .mockRejectedValueOnce(new Error('Failed to parse DataHub search query'))
-      .mockResolvedValueOnce([asset])
+    api.searchDataHubAssets = vi.fn(async () => [asset])
     api.inspectDataHubAsset = vi.fn(async () => ({ asset, evidence: [] }))
     api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
     api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
@@ -189,7 +187,8 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
 
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
-    expect(api.searchDataHubAssets).toHaveBeenNthCalledWith(2, '*')
+    expect(api.searchDataHubAssets).toHaveBeenCalledTimes(1)
+    expect(api.searchDataHubAssets).toHaveBeenCalledWith('*')
     expect(api.inspectDataHubAsset).toHaveBeenCalledWith(asset.urn, false)
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
       datahubEvidence: expect.arrayContaining([expect.stringContaining('Starting dataset candidate from DataHub: customers')]),
@@ -220,6 +219,48 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
     expect(api.cancelAiProposal).toHaveBeenCalled()
     expect(api.cancelChatGPTProposal).toHaveBeenCalled()
+    expect(screen.getByText('stopped')).toBeTruthy()
+  })
+
+  it('does not recover a provider incident when a stopped provider turn resolves late', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    api.listIncidentEvents = vi.fn(async () => [{
+      id: 'provider-offline',
+      incidentKey: 'connectivity:provider:chatgpt',
+      transition: 'opened' as const,
+      severity: 'critical' as const,
+      title: 'ChatGPT unavailable',
+      detail: 'The previous provider request timed out.',
+      sourceSystem: 'DATA LAB connectivity',
+      fingerprint: 'connectivity:timeout',
+      createdAt: '2026-07-24T08:00:00.000Z',
+    }])
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    type ChatGPTProposalResponse = Awaited<ReturnType<NonNullable<typeof window.dataLab>['runChatGPTProposal']>>
+    let resolveProposal!: (response: ChatGPTProposalResponse) => void
+    api.runChatGPTProposal = vi.fn(() => new Promise<ChatGPTProposalResponse>((resolve) => { resolveProposal = resolve }))
+
+    render(<App />)
+    await screen.findByLabelText('1 reports requiring attention')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Stop autonomous agent' }))
+    await act(async () => {
+      resolveProposal({
+        model: 'gpt-5.6-sol',
+        proposal: { title: 'Late response', summary: 'Discarded.', rationale: 'The run was stopped.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+      })
+      await Promise.resolve()
+    })
+
+    expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      incidentKey: 'connectivity:provider:chatgpt',
+      transition: 'recovered',
+    }))
     expect(screen.getByText('stopped')).toBeTruthy()
   })
 
