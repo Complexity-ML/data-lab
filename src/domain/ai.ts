@@ -62,7 +62,7 @@ export interface AiProposalResponse {
   toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
-const kinds = new Set<CardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
@@ -106,10 +106,12 @@ function nodePatch(action: AiAction, current?: PipelineNodeData): Partial<Pipeli
   if (effectiveKind === 'parallel') patch.parallelMode = 'branch-fanout'
   if (effectiveKind === 'diagram') patch.diagramMode = 'incident-workstream'
   if (effectiveKind === 'control') patch.controlMode = 'autonomous-player'
+  if (effectiveKind === 'explorer') patch.explorerMode = 'catalog-fanout'
   if (text(action.label)) patch.label = text(action.label, '', 120)
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
   if (effectiveKind === 'monitor') patch.rule = completeMonitorRule(action.rule, current?.kind === 'monitor' ? current.rule : undefined)
+  else if (effectiveKind === 'explorer') patch.rule = text(action.rule, current?.kind === 'explorer' ? current.rule : 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true', 2_000)
   else if (text(action.rule)) patch.rule = text(action.rule, '', 2_000)
   return patch
 }
@@ -145,7 +147,11 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         label: text(action.label, `Agent ${action.kind}`, 120),
         description: text(action.description, 'Agent-proposed card awaiting human review.', 500),
         owner: text(action.owner, 'LABO Agent', 120),
-        rule: action.kind === 'monitor' ? completeMonitorRule(action.rule) : text(action.rule, undefined, 2_000) || undefined,
+        rule: action.kind === 'monitor'
+          ? completeMonitorRule(action.rule)
+          : action.kind === 'explorer'
+            ? text(action.rule, 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true', 2_000)
+            : text(action.rule, undefined, 2_000) || undefined,
         status: 'draft',
         schema: [],
         agentAdded: true,
@@ -154,6 +160,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         parallelMode: action.kind === 'parallel' ? 'branch-fanout' : undefined,
         diagramMode: action.kind === 'diagram' ? 'incident-workstream' : undefined,
         controlMode: action.kind === 'control' ? 'autonomous-player' : undefined,
+        explorerMode: action.kind === 'explorer' ? 'catalog-fanout' : undefined,
       },
     })
   }

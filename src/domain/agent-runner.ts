@@ -17,6 +17,13 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
     output: 'BoundedAgentObjective',
     allowedTools: [],
   },
+  explorer: {
+    role: 'Catalog exploration coordinator',
+    mission: 'Discover every governed dataset, audit metadata in parallel bounded batches, persist coverage checkpoints, and emit evidence-backed incident candidates.',
+    input: 'ConnectorCatalog + PreviousCatalogCheckpoint',
+    output: 'CatalogCoverage + DatasetEvidenceFingerprints + IncidentCandidates',
+    allowedTools: ['search', 'get_entities', 'list_schema_fields', 'get_lineage'],
+  },
   source: {
     role: 'Catalog loader',
     mission: 'Resolve the governed dataset and expose a trusted schema envelope.',

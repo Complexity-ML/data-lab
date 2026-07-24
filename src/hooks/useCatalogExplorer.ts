@@ -1,0 +1,162 @@
+import { useCallback, type Dispatch, type SetStateAction } from 'react'
+import { inspectCatalogInParallel } from '../domain/catalog-explorer'
+import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
+import type { IncidentEventInput } from '../domain/incidents'
+import type { AgentProposal, CatalogExplorationProgress, PipelineNode } from '../domain/pipeline'
+
+interface CatalogInspectionResponse {
+  asset: DataHubAssetSummary
+  evidence: {
+    name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
+    status: 'ok' | 'unavailable' | 'error'
+    summary: string
+    capturedAt: string
+    expiresAt: string
+    cached: boolean
+    stale: boolean
+  }[]
+}
+
+export function useCatalogExplorer(options: {
+  inspectAsset(urn: string): Promise<CatalogInspectionResponse>
+  logIncident(event: IncidentEventInput): Promise<void>
+  setActivity(value: string): void
+  setNodes: Dispatch<SetStateAction<PipelineNode[]>>
+}) {
+  const { inspectAsset, logIncident, setActivity, setNodes } = options
+  const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
+    if (!isCurrent()) return
+    setNodes((current) => current.map((node) => node.id === explorer.id ? {
+      ...node,
+      data: {
+        ...node.data,
+        exploration: progress,
+        description: `Complete DataHub catalog audit · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
+        status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
+        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : 'running',
+      },
+    } : node))
+    setActivity(`Catalog Explorer · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s)`)
+  }, [setActivity, setNodes])
+
+  const explore = useCallback(async (input: {
+    assets: DataHubAssetSummary[]
+    explorer: PipelineNode
+    isCurrent(): boolean
+    query: string
+  }) => {
+    updateProgress(input.explorer, {
+      query: input.query,
+      total: input.assets.length,
+      discovered: input.assets.length,
+      inspected: 0,
+      failed: 0,
+      incidents: 0,
+      concurrency: 4,
+      state: 'inspecting',
+      checkpointAt: new Date().toISOString(),
+      datasets: [],
+    }, input.isCurrent)
+
+    const explored = await inspectCatalogInParallel(input.assets, async (urn) => {
+      const inspection = await inspectAsset(urn)
+      return {
+        asset: inspection.asset,
+        evidence: inspection.evidence.map((read) => ({
+          tool: read.name,
+          urn,
+          capturedAt: read.capturedAt,
+          expiresAt: read.expiresAt,
+          status: read.status,
+          summary: read.summary,
+          cached: read.cached,
+          stale: read.stale,
+        })),
+      }
+    }, {
+      concurrency: 4,
+      previous: input.explorer.data.exploration?.datasets,
+      query: input.query,
+      isCancelled: () => !input.isCurrent(),
+      onCheckpoint: (progress) => updateProgress(input.explorer, progress, input.isCurrent),
+    })
+
+    const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
+    const byUrn = new Map(input.assets.map((asset) => [asset.urn, asset]))
+    const ranked = explored.progress.datasets.filter((dataset) => dataset.status !== 'unavailable').sort((left, right) => {
+      const rank = (value: typeof left) => (value.status === 'healthy' ? 1_000 : value.status === 'warning' ? 100 : 0) + value.ownerCount * 10 + value.fieldCount
+      return rank(right) - rank(left)
+    })
+    let candidate = ranked.length ? byUrn.get(ranked[0]!.urn) : undefined
+    if (candidate && !explored.inspections.some((inspection) => inspection.asset.urn === candidate!.urn)) {
+      try {
+        const hydrated = await inspectAsset(candidate.urn)
+        candidate = hydrated.asset
+        evidence.push(...hydrated.evidence.map((read) => ({
+          tool: read.name,
+          urn: candidate!.urn,
+          capturedAt: read.capturedAt,
+          expiresAt: read.expiresAt,
+          status: read.status,
+          summary: read.summary,
+          cached: read.cached,
+          stale: read.stale,
+        })))
+      } catch {
+        candidate = undefined
+      }
+    }
+    if (input.isCurrent()) {
+      await Promise.all(explored.progress.datasets.filter((dataset) => dataset.status !== 'healthy').map((dataset) => logIncident({
+        incidentKey: `catalog-explorer:${dataset.urn}`,
+        transition: 'opened',
+        severity: dataset.status === 'unavailable' ? 'critical' : 'warning',
+        title: dataset.status === 'unavailable' ? `Metadata unavailable · ${dataset.name}` : `Governance attention · ${dataset.name}`,
+        detail: dataset.issues.join(', ') || 'Catalog Explorer detected a metadata signal requiring attention.',
+        sourceSystem: dataset.status === 'unavailable' ? 'DATA LAB connectivity' : 'DataHub',
+        sourceRef: dataset.urn,
+        fingerprint: dataset.fingerprint,
+        cardId: input.explorer.id,
+        branchId: dataset.urn,
+      })))
+    }
+    return {
+      candidate,
+      evidence,
+      progress: explored.progress,
+      summaries: [
+        `Catalog Explorer completed ${explored.progress.inspected}/${explored.progress.total} DataHub dataset audits with concurrency ${explored.progress.concurrency}; ${explored.progress.incidents} require attention and ${explored.progress.failed} were unavailable.`,
+        ...explored.progress.datasets.map((dataset) => `${dataset.name} (${dataset.urn}) · ${dataset.status} · fields=${dataset.fieldCount} · owners=${dataset.ownerCount} · upstream=${dataset.upstreamCount} · downstream=${dataset.downstreamCount} · issues=${dataset.issues.join(', ') || 'none'} · fingerprint=${dataset.fingerprint}`),
+      ],
+    }
+  }, [inspectAsset, logIncident, updateProgress])
+
+  const attachProgress = useCallback((proposal: AgentProposal, explorer: PipelineNode, progress: CatalogExplorationProgress) => {
+    const existingUpdate = proposal.updatedNodes.find((update) => update.nodeId === explorer.id)
+    const patch = {
+      exploration: progress,
+      description: `Complete DataHub catalog audit · ${progress.inspected}/${progress.total} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
+      status: progress.failed > 0 ? 'warning' as const : 'healthy' as const,
+      runState: progress.state === 'complete' ? 'completed' as const : 'stopped' as const,
+    }
+    if (existingUpdate) existingUpdate.patch = { ...existingUpdate.patch, ...patch }
+    else proposal.updatedNodes.push({ nodeId: explorer.id, patch, reason: 'Persist the complete, resumable DataHub catalog exploration checkpoint.' })
+  }, [])
+
+  const markDiscoveryFailed = useCallback((explorer: PipelineNode, query: string, isCurrent: () => boolean) => {
+    updateProgress(explorer, {
+      query,
+      total: 0,
+      discovered: 0,
+      inspected: 0,
+      failed: 1,
+      incidents: 1,
+      concurrency: 4,
+      state: 'failed',
+      checkpointAt: new Date().toISOString(),
+      datasets: [],
+    }, isCurrent)
+  }, [updateProgress])
+
+  return { attachProgress, explore, markDiscoveryFailed, updateProgress }
+}

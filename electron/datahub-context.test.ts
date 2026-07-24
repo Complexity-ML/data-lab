@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
+import { parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
 
 const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.customers,PROD)'
 
@@ -27,6 +27,15 @@ describe('DataHub MCP context normalization', () => {
   it('keeps only unique dataset search results', () => {
     const payload = { searchResults: [{ entity: { urn, properties: { name: 'customers' } } }, { entity: { urn, properties: { name: 'duplicate' } } }, { entity: { urn: 'urn:li:dashboard:test' } }] }
     expect(parseSearchResults(payload)).toEqual([{ urn, name: 'customers' }])
+  })
+
+  it('reads the bounded catalog total used for complete pagination', () => {
+    expect(parseSearchTotal({ start: 0, count: 10, total: 67 })).toBe(67)
+    expect(parseSearchTotal({ total: 50_000 })).toBe(2_000)
+    expect(parseSearchTotal({ searchResults: [
+      { entity: { urn, properties: { name: 'customers' } } },
+      { entity: { urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,orders,PROD)', properties: { name: 'orders' } } },
+    ] })).toBe(2)
   })
 
   it('normalizes schema, classifications, ownership, quality and bounded lineage', () => {

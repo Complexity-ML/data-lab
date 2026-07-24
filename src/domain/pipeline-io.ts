@@ -1,11 +1,11 @@
 import type { Edge } from '@xyflow/react'
-import type { PipelineNode, PipelineNodeData, CardKind, DataProfileSnapshot, SchemaField } from './pipeline'
+import type { PipelineNode, PipelineNodeData, CardKind, CatalogExplorationProgress, DataProfileSnapshot, SchemaField } from './pipeline'
 import type { PipelineVersion } from './versioning'
 import type { DataHubEvidence } from './datahub'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
-const kinds = new Set<CardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function redactExportText(value: string) {
   return value
@@ -53,6 +53,48 @@ function cleanProfile(value: unknown): DataProfileSnapshot | undefined {
   }
 }
 
+function cleanExploration(value: unknown): CatalogExplorationProgress | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  const state = ['idle', 'discovering', 'inspecting', 'complete', 'paused', 'failed'].includes(String(source.state))
+    ? source.state as CatalogExplorationProgress['state']
+    : 'idle'
+  const bounded = (field: string, maximum = 100_000) => Math.max(0, Math.min(maximum, Number.isInteger(source[field]) ? Number(source[field]) : 0))
+  const datasets = Array.isArray(source.datasets) ? source.datasets.slice(0, 2_000).flatMap((value) => {
+    if (!value || typeof value !== 'object') return []
+    const item = value as Record<string, unknown>
+    if (typeof item.urn !== 'string' || !item.urn.startsWith('urn:li:dataset:')) return []
+    const itemStatus = ['healthy', 'warning', 'unavailable'].includes(String(item.status))
+      ? item.status as 'healthy' | 'warning' | 'unavailable'
+      : 'unavailable'
+    return [{
+      urn: item.urn.slice(0, 2_000),
+      name: typeof item.name === 'string' ? redactExportText(item.name).slice(0, 240) : item.urn.slice(0, 240),
+      status: itemStatus,
+      fieldCount: Math.max(0, Math.min(100_000, Number.isInteger(item.fieldCount) ? Number(item.fieldCount) : 0)),
+      ownerCount: Math.max(0, Math.min(100_000, Number.isInteger(item.ownerCount) ? Number(item.ownerCount) : 0)),
+      upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.upstreamCount) ? Number(item.upstreamCount) : 0)),
+      downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.downstreamCount) ? Number(item.downstreamCount) : 0)),
+      issues: Array.isArray(item.issues) ? item.issues.filter((issue): issue is string => typeof issue === 'string').map((issue) => redactExportText(issue).slice(0, 160)).slice(0, 12) : [],
+      fingerprint: typeof item.fingerprint === 'string' ? item.fingerprint.slice(0, 120) : '',
+      capturedAt: typeof item.capturedAt === 'string' ? item.capturedAt : new Date(0).toISOString(),
+      expiresAt: typeof item.expiresAt === 'string' ? item.expiresAt : new Date(0).toISOString(),
+    }]
+  }) : []
+  return {
+    query: typeof source.query === 'string' ? redactExportText(source.query).slice(0, 500) : '*',
+    total: bounded('total'),
+    discovered: bounded('discovered'),
+    inspected: bounded('inspected'),
+    failed: bounded('failed'),
+    incidents: bounded('incidents'),
+    concurrency: Math.max(1, Math.min(16, bounded('concurrency', 16) || 4)),
+    state,
+    checkpointAt: typeof source.checkpointAt === 'string' ? source.checkpointAt : new Date(0).toISOString(),
+    datasets,
+  }
+}
+
 function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
   const kind = kinds.has(data.kind as CardKind) ? data.kind as CardKind : 'analysis'
   const quality = ['healthy', 'failing', 'unavailable'].includes(String(data.datahubQuality)) ? data.datahubQuality as PipelineNodeData['datahubQuality'] : undefined
@@ -71,11 +113,13 @@ function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
     datahubTags: Array.isArray(data.datahubTags) ? data.datahubTags.filter((tag): tag is string => typeof tag === 'string').slice(0, 100) : undefined,
     datahubQuality: quality,
     profile: cleanProfile(data.profile),
+    exploration: cleanExploration(data.exploration),
     patchScope: kind === 'patch' ? 'graph-only' : undefined,
     monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
     parallelMode: kind === 'parallel' ? 'branch-fanout' : undefined,
     diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
     controlMode: kind === 'control' ? 'autonomous-player' : undefined,
+    explorerMode: kind === 'explorer' ? 'catalog-fanout' : undefined,
     pinned: data.pinned === true,
   }
 }

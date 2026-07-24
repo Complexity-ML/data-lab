@@ -90,4 +90,17 @@ describe('pipeline XY layout', () => {
     expect(controlPosition.y).toBeLessThan(lineageTop)
     expect(lineageTop - controlPosition.y).toBeGreaterThanOrEqual(240)
   })
+
+  it('places Controller and Catalog Explorer together above lineage', () => {
+    const control = { ...newCard('control', 0), id: 'control' }
+    const explorer = { ...newCard('explorer', 1), id: 'explorer' }
+    const source = { ...newCard('source', 2), id: 'source' }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const arranged = layoutPipeline([control, explorer, source, output], [{ id: 'path', source: source.id, target: output.id }])
+    const system = arranged.filter((node) => node.id === control.id || node.id === explorer.id)
+    const lineageTop = Math.min(...arranged.filter((node) => node.id === source.id || node.id === output.id).map((node) => node.position.y))
+
+    expect(system.every((node) => node.position.y < lineageTop)).toBe(true)
+    expect(new Set(system.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(2)
+  })
 })

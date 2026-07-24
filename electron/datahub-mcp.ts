@@ -5,7 +5,7 @@ import { app, safeStorage } from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { posix, win32 } from 'node:path'
-import { parseAssetContext, parseSearchResults, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
+import { parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 import { secureStorageCapability } from './secure-storage.js'
 export type { DataHubAssetSummary } from './datahub-context.js'
@@ -426,22 +426,43 @@ export function buildDataHubSearchQuery(query: string): string {
   return `/q ${terms.join('+')}`
 }
 
+export async function mapWithConcurrency<T, R>(values: T[], concurrency: number, worker: (value: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(Math.max(1, Math.floor(concurrency)), values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await worker(values[index]!, index)
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
+
 export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
   const structuredQuery = buildDataHubSearchQuery(query)
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
-  const searchResult = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 45_000, 'search'), 'search response')
-  if (searchResult.isError) throw new Error(summarizeResult(searchResult))
-  const matches = parseSearchResults(readStructuredToolResult(searchResult))
-  if (!matches.length) return []
-  let details: Awaited<ReturnType<typeof client.callTool>> | undefined
-  if (available.has('get_entities')) {
-    try { details = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: matches.map((match) => match.urn) } }), 20_000, 'get_entities'), 'get_entities response') }
-    catch { details = undefined }
+  const pageSize = 10
+  const searchPage = async (offset: number) => {
+    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }), 45_000, `search page ${Math.floor(offset / pageSize) + 1}`), 'search response')
+    if (result.isError) throw new Error(summarizeResult(result))
+    const payload = readStructuredToolResult(result)
+    return { matches: parseSearchResults(payload), total: parseSearchTotal(payload) }
   }
-  const entityPayload = details && !details.isError ? readStructuredToolResult(details) : undefined
-  return matches.map((match) => parseAssetContext({ urn: match.urn, name: match.name, entityPayload }))
+  const first = await searchPage(0)
+  if (!first.matches.length) return []
+  const total = Math.min(first.total, 500)
+  const offsets = Array.from({ length: Math.max(0, Math.ceil(total / pageSize) - 1) }, (_, index) => (index + 1) * pageSize)
+  const pages = await mapWithConcurrency(offsets, 6, (offset) => searchPage(offset))
+  const seen = new Set<string>()
+  return [first, ...pages].flatMap((page) => page.matches).flatMap((match) => {
+    if (seen.has(match.urn)) return []
+    seen.add(match.urn)
+    return [parseAssetContext({ urn: match.urn, name: match.name })]
+  }).slice(0, total)
 }
 
 export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {

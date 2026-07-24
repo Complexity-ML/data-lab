@@ -1,11 +1,12 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 
 const icons = {
   control: Bot,
+  explorer: Binoculars,
   source: Database,
   profile: ChartColumn,
   analysis: BrainCircuit,
@@ -29,15 +30,16 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const isSplit = data.kind === 'split'
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
-  const isControl = data.kind === 'control'
+  const isSystem = data.kind === 'control' || data.kind === 'explorer'
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
+  const exploration = data.kind === 'explorer' ? data.exploration : undefined
 
   useEffect(() => {
     updateNodeInternals(id)
   }, [data.kind, id, updateNodeInternals])
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
-    {!isSource && !isControl && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
+    {!isSource && !isSystem && <Handle className="pipeline-handle" position={Position.Left} type="target" />}
     <header>
       <span className="card-icon"><Icon size={16} /></span>
       <span className="card-kind">{data.kind}</span>
@@ -47,6 +49,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'parallel' && <span className="parallel-mode-badge">Fan out</span>}
       {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
+      {data.kind === 'explorer' && <span className="explorer-mode-badge">Catalog</span>}
       {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
@@ -69,12 +72,18 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{risk.evidence ?? '—'}</strong> evidence</span>
       <span><strong>{risk.scope || '—'}</strong> scope</span>
     </div>}
+    {exploration && <div className="explorer-summary" aria-label="Catalog exploration progress">
+      <span><strong>{exploration.discovered}/{exploration.total || '?'}</strong> discovered</span>
+      <span><strong>{exploration.inspected}/{exploration.total || '?'}</strong> inspected</span>
+      <span><strong>{exploration.incidents}</strong> incidents</span>
+      <span><strong>{exploration.failed}</strong> unavailable</span>
+    </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>
       <span>{data.owner}</span>
       {data.datahubUrn && <span className="datahub-badge">DataHub</span>}
     </footer>
-    {!isOutput && !isSplit && !isControl && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
+    {!isOutput && !isSplit && !isSystem && <Handle className="pipeline-handle" position={Position.Right} type="source" />}
     {isOutput && <>
       <Handle className="pipeline-handle output-feedback" id="feedback" position={Position.Right} type="source" />
       <span className="feedback-label">feedback</span>

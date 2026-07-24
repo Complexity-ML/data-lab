@@ -70,6 +70,11 @@ export function parseSearchResults(payload: unknown): { urn: string; name: strin
   }).slice(0, 20)
 }
 
+export function parseSearchTotal(payload: unknown): number {
+  const total = record(payload).total
+  return Number.isInteger(total) && Number(total) >= 0 ? Math.min(Number(total), 2_000) : parseSearchResults(payload).length
+}
+
 function normalizedType(value: unknown): 'string' | 'number' | 'boolean' | 'timestamp' {
   const type = typeof value === 'string' ? value.toLowerCase() : ''
   if (/int|number|decimal|float|double/.test(type)) return 'number'
