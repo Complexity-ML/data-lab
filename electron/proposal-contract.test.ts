@@ -46,9 +46,16 @@ describe('strict provider proposal contract', () => {
   })
 
   it('accepts only a complete bounded Catalog Explorer policy', () => {
-    const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | audit_concurrency=4 | checkpoint=versioned | resume=true' }
+    const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true' }
     expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [explorer] }, payload).actions[0].kind).toBe('explorer')
-    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...explorer, rule: 'scope=all_datasets | audit_concurrency=99' }] }, payload)).toThrow('audit_concurrency')
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...explorer, rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=99 | cache=prefer | checkpoint=versioned | resume=true' }] }, payload)).toThrow('audit_concurrency')
+  })
+
+  it('rejects lineage edges to the host-owned Catalog Explorer sidecar', () => {
+    const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true' }
+    const source = { ...validProposal.actions[0], node_id: 'orders-source', kind: 'source', label: 'Orders' }
+    const edge = { ...validProposal.actions[3], source: 'catalog-explorer', target: 'orders-source' }
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [explorer, source, edge] }, payload)).toThrow('host-owned Catalog Explorer')
   })
 
   it('rejects a Human Review checkpoint when the provider forgets the review flag', () => {

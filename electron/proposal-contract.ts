@@ -65,9 +65,14 @@ export function riskAssessmentRuleError(rule: string | null): string | undefined
 
 export function catalogExplorerRuleError(rule: string | null): string | undefined {
   const normalized = rule?.toLowerCase() ?? ''
-  if (!/scope\s*=\s*all_datasets\b/.test(normalized)) return 'Catalog Explorer requires scope=all_datasets'
+  const scope = normalized.match(/(?:^|\|)\s*scope\s*=\s*([^|]+)/)?.[1]?.trim()
+  if (!['dataset', 'all_datasets'].includes(scope ?? '')) return 'Catalog Explorer scope must be dataset or all_datasets'
+  if (scope === 'dataset' && !/(?:^|\|)\s*dataset_urn\s*=\s*\S+/.test(normalized)) return 'Focused Catalog Explorer requires dataset_urn'
+  const batchSize = Number(normalized.match(/(?:^|\|)\s*batch_size\s*=\s*(\d+)/)?.[1])
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 32) return 'Catalog Explorer batch_size must be between 1 and 32'
   const concurrency = Number(normalized.match(/(?:^|\|)\s*audit_concurrency\s*=\s*(\d+)/)?.[1])
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return 'Catalog Explorer audit_concurrency must be between 1 and 8'
+  if (!/(?:^|\|)\s*cache\s*=\s*(prefer|refresh)\b/.test(normalized)) return 'Catalog Explorer cache must be prefer or refresh'
   if (!/(?:^|\|)\s*checkpoint\s*=\s*versioned\b/.test(normalized)) return 'Catalog Explorer requires checkpoint=versioned'
   if (!/(?:^|\|)\s*resume\s*=\s*true\b/.test(normalized)) return 'Catalog Explorer requires resume=true'
   return undefined
@@ -174,6 +179,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
 
   const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
+  const allExplorerNodeIds = new Set([
+    ...explorerNodeIds,
+    ...actions.flatMap((action) => action.type === 'add_card' && action.kind === 'explorer' && action.node_id ? [action.node_id] : []),
+  ])
   const aliases = new Set<string>()
   const removedEdges = new Set<string>()
   let addedEdgeCount = 0
@@ -219,6 +228,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
     if (!action.source || !action.target || action.source === action.target) throw new Error(`Proposal action ${index + 1} has invalid edge endpoints`)
     requireNull(action, ['node_id', 'kind', 'label', 'description', 'owner', 'rule'], index)
     if ((!nodeIds.has(action.source) && !aliases.has(action.source)) || (!nodeIds.has(action.target) && !aliases.has(action.target))) throw new Error(`Proposal action ${index + 1} contains a dangling edge`)
+    if (allExplorerNodeIds.has(action.source) || allExplorerNodeIds.has(action.target)) throw new Error(`Proposal action ${index + 1} cannot connect the host-owned Catalog Explorer sidecar to dataset lineage`)
     if (action.source_handle && !['approved', 'quarantine', 'feedback'].includes(action.source_handle)) throw new Error(`Proposal action ${index + 1} has an invalid source handle`)
     addedEdgeCount += 1
   }

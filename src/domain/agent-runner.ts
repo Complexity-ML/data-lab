@@ -19,7 +19,7 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
   },
   explorer: {
     role: 'Catalog exploration coordinator',
-    mission: 'Discover every governed dataset, audit metadata in parallel bounded batches, persist coverage checkpoints, and emit evidence-backed incident candidates.',
+    mission: 'Use one adjustable host-owned sidecar to inspect a focused dataset directly or audit a catalog in bounded batches, persist coverage checkpoints, and emit evidence without entering dataset lineage.',
     input: 'ConnectorCatalog + PreviousCatalogCheckpoint',
     output: 'CatalogCoverage + DatasetEvidenceFingerprints + IncidentCandidates',
     allowedTools: ['search', 'get_entities', 'list_schema_fields', 'get_lineage'],

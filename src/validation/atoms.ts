@@ -1,4 +1,5 @@
 import type { CardKind, PipelineNode } from '../domain/pipeline'
+import { catalogExplorerPolicyError } from '../domain/catalog-explorer-policy'
 import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
@@ -151,16 +152,13 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       title: 'Catalog Explorer is connected to data lineage',
       detail: 'Catalog Explorer is a host-owned sidecar. It audits all sources and emits evidence, but never carries dataset rows.',
     }))
-    if (node.data.explorerMode !== 'catalog-fanout'
-      || !/scope=all_datasets/i.test(node.data.rule ?? '')
-      || !/audit_concurrency=\d+/i.test(node.data.rule ?? '')
-      || !/checkpoint=versioned/i.test(node.data.rule ?? '')
-      || !/resume=true/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+    const policyError = catalogExplorerPolicyError(node.data.rule)
+    if (node.data.explorerMode !== 'catalog-fanout' || policyError) findings.push(issue('card-contracts', {
       id: `explorer-policy-${nodeId}`,
       severity: 'error',
       nodeId,
       title: 'Catalog exploration policy is incomplete',
-      detail: 'Declare all-dataset scope, bounded audit concurrency, versioned checkpoints and resume behavior.',
+      detail: policyError ?? 'Keep Catalog Explorer in its host-owned adjustable sidecar mode.',
     }))
     return findings
   },

@@ -118,6 +118,14 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     recordDiagnostic({ category: 'revision', action: 'proposal.reject', status: 'info', detail: { versionId: pendingVersionId } })
   }
 
+  const discardInvalidProposal = (blockerIds: string[]) => {
+    if (pendingVersionId) setVersions((current) => rejectPendingVersion(current, pendingVersionId))
+    setPendingVersionId(undefined)
+    setProposal(undefined)
+    setActivity(`Human intent approved · invalid transaction discarded · agent repairing ${blockerIds.length} atomic blocker${blockerIds.length === 1 ? '' : 's'}`)
+    recordDiagnostic({ category: 'revision', action: 'proposal.atomic-repair', status: 'warning', detail: { versionId: pendingVersionId, blockerIds } })
+  }
+
   const approvePendingVersion = (versionId: string) => {
     const version = versions.find((candidate) => candidate.id === versionId && candidate.status === 'pending-review')
     if (!version) { setActivity('Review is no longer pending · no graph change applied'); return false }
@@ -184,5 +192,5 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     setActivity(presetId === 'empty' ? 'Empty workspace ready' : `${preset.title} example loaded · ${preset.nodes.length} cards · not saved`)
   }
 
-  return { approvePendingVersion, approveProposal, commitAutonomousProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
+  return { approvePendingVersion, approveProposal, commitAutonomousProposal, discardInvalidProposal, loadPreset, pendingVersionId, recordPendingReview, rejectPendingVersionById, rejectProposal, restoreVersion, saveManualVersion, setVersions, versions }
 }
