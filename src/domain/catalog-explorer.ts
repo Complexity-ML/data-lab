@@ -17,6 +17,18 @@ export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
   return checkpoint.issues.some((issue) => governanceIssues.has(issue))
 }
 
+export function shouldCallAgentForCatalog(
+  previous: CatalogExplorationProgress | undefined,
+  current: CatalogExplorationProgress,
+  profileRisk = false,
+) {
+  if (current.state === 'failed') return false
+  if (current.state === 'complete') return true
+  return profileRisk
+    || current.incidents > (previous?.incidents ?? 0)
+    || current.failed > (previous?.failed ?? 0)
+}
+
 function fingerprint(value: string) {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {

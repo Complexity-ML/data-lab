@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, shouldCallAgentForCatalog, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -159,5 +159,28 @@ describe('Catalog Explorer', () => {
 
     expect(secondInspect).toHaveBeenCalledTimes(4)
     expect(second.progress).toMatchObject({ inspected: 8, total: 10, state: 'inspecting' })
+  })
+
+  it('calls the model only for useful catalog checkpoints', () => {
+    const base = {
+      query: '*',
+      total: 12,
+      discovered: 12,
+      inspected: 4,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 4,
+      concurrency: 4,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(shouldCallAgentForCatalog(undefined, base)).toBe(false)
+    expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, governanceGaps: 8 })).toBe(false)
+    expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, incidents: 1 })).toBe(true)
+    expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
+    expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
+    expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
   })
 })

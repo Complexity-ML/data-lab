@@ -9,6 +9,7 @@ import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
+import { shouldCallAgentForCatalog } from '../domain/catalog-explorer'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
 import { addDataProfileToProposal, canReuseDataProfile, dataProfileEvidence } from '../domain/data-profile'
@@ -187,6 +188,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     let evidenceEntries: DataHubEvidence[] = []
     let blankCandidate: DataHubAssetSummary | undefined
     let catalogProgress: CatalogExplorationProgress | undefined
+    let continueCatalogWithoutModel = false
     const profileCandidates = new Map<string, DataHubAssetSummary>()
     try {
       if (routedSources.length > 0) {
@@ -302,6 +304,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         }
         if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
           setActivity('Catalog Explorer reading the next 4 datasets while the agent extends the diagram…')
+          const previousProgress = catalogExplorer.data.exploration
           let candidates = catalog.assetsFor(catalogExplorer.id)
           if (!candidates.length) candidates = await searchDataHubAssets('*')
           const explored = await catalog.explore({
@@ -313,6 +316,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           catalogProgress = explored.progress
           evidenceEntries.push(...explored.evidence)
           datahubEvidence.push(...explored.summaries)
+          continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
@@ -425,6 +429,18 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         return
       } else {
         datahubEvidence = ['No bounded DataHub source matched the prompt. Treat evidence as incomplete and do not modify an unrelated source branch.']
+      }
+
+      if (catalogProgress?.state === 'failed' && expectedPlayerSessionId !== undefined) {
+        queueAutonomousStep('Retry the versioned Catalog Explorer checkpoint after the connector becomes available. Do not call the model until fresh catalog evidence is collected.', expectedPlayerSessionId, 30_000)
+        setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total} · connector retry in 30 seconds · model not called`)
+        return
+      }
+      const newProfileRisk = [...profileCandidates.values()].some((asset) => asset.qualityStatus === 'failing')
+      if (continueCatalogWithoutModel && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress!, newProfileRisk) && expectedPlayerSessionId !== undefined) {
+        queueAutonomousStep('Continue the next local Catalog Explorer batch from its versioned checkpoint. Call the model only when a new data incident is found or the catalog audit completes.', expectedPlayerSessionId, 120)
+        setActivity(`Catalog checkpoint ${catalogProgress!.inspected}/${catalogProgress!.total} · no new data incident · continuing locally without model tokens`)
+        return
       }
 
       const activeModel = activeAiSource === 'chatgpt'
