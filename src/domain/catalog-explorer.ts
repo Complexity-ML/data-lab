@@ -45,14 +45,16 @@ export function resolveAdaptiveCatalogConcurrency(
   if (!previous) return clampConcurrency(initialConcurrency)
   const current = clampConcurrency(previous.concurrency || initialConcurrency)
   const failed = previous.batchFailed ?? 0
-  if (previous.pauseReason === 'connector_unavailable' || failed > 0) return Math.max(1, Math.floor(current / 2))
+  if (previous.pauseReason === 'connector_unavailable' || failed > 0) return 1
+  if (current === 1 && (previous.connectorRecoveryStreak ?? 0) < 2) return 1
+  if (current === 1 && (previous.connectorRecoveryStreak ?? 0) >= 2) return Math.min(clampConcurrency(initialConcurrency), 2)
   if (!previous.batchDurationMs) return current
   const processed = previous.batchProcessed ?? 0
   const cached = previous.batchCached ?? 0
   // A cached batch measures local SQLite/cache speed, not connector capacity.
   // Do not use it to increase pressure on the MCP transport.
   if (processed > 0 && cached >= Math.ceil(processed / 2)) return current
-  if (previous.batchDurationMs <= 8_000) return Math.min(8, current + 2)
+  if (previous.batchDurationMs <= 8_000) return Math.min(clampConcurrency(initialConcurrency), current + 1)
   if (previous.batchDurationMs >= 15_000) return Math.max(1, current - 1)
   return current
 }
@@ -130,13 +132,14 @@ export async function inspectCatalogInParallel(
     concurrency?: number
     mode?: 'dataset' | 'catalog'
     previous?: CatalogDatasetCheckpoint[]
+    previousProgress?: CatalogExplorationProgress
     isCancelled?(): boolean
     maxInspections?: number
     onCheckpoint?(progress: CatalogExplorationProgress, inspections: CatalogInspection[]): void
     query?: string
   } = {},
 ) {
-  const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? 4)))
+  const requestedConcurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? 4)))
   const configuredBatchSize = Math.max(1, Math.min(32, Math.floor(options.batchSize ?? options.maxInspections ?? (assets.length || 1))))
   const inspections: CatalogInspection[] = []
   const previous = new Map((options.previous ?? []).map((checkpoint) => [checkpoint.urn, checkpoint]))
@@ -154,6 +157,8 @@ export async function inspectCatalogInParallel(
   let batchFailed = 0
   let batchProcessed = 0
   let batchCached = 0
+  let connectorRecoveryStreak = options.previousProgress?.connectorRecoveryStreak ?? 0
+  let effectiveConcurrency = requestedConcurrency
 
   const emit = (state: CatalogExplorationProgress['state'], pauseReason?: CatalogExplorationProgress['pauseReason']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
@@ -169,12 +174,13 @@ export async function inspectCatalogInParallel(
       failed,
       incidents,
       governanceGaps,
-      concurrency,
+      concurrency: effectiveConcurrency,
       batchSize: configuredBatchSize,
       batchDurationMs,
       batchFailed,
       batchProcessed,
       batchCached,
+      connectorRecoveryStreak,
       remaining: Math.max(0, assets.length - checkpoints.length),
       mode: options.mode ?? 'catalog',
       cacheMode: options.cacheMode ?? 'prefer',
@@ -188,10 +194,9 @@ export async function inspectCatalogInParallel(
 
   emit('inspecting')
   let connectorUnavailable = false
-  for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += concurrency) {
-    const batch = scheduled.slice(offset, offset + concurrency)
-    const batchStartedAt = Date.now()
-    const batchResults = await Promise.all(batch.map(async (asset) => {
+  const runStartedAt = Date.now()
+  const inspectBatch = async (batch: DataHubAssetSummary[]) => {
+    const results = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
         inspections.push(inspection)
@@ -213,19 +218,39 @@ export async function inspectCatalogInParallel(
         } }
       }
     }))
-    const batchCheckpoints = batchResults.map((result) => result.checkpoint)
-    batchDurationMs = Math.max(0, Date.now() - batchStartedAt)
-    batchFailed = batchCheckpoints.filter((checkpoint) => checkpoint.status === 'unavailable').length
-    batchProcessed = batchResults.length
-    batchCached = batchResults.filter((result) => result.inspection?.evidence.length && result.inspection.evidence.every((read) => read.cached)).length
+    const batchCheckpoints = results.map((result) => result.checkpoint)
+    batchDurationMs = Math.max(0, Date.now() - runStartedAt)
+    batchFailed += batchCheckpoints.filter((checkpoint) => checkpoint.status === 'unavailable').length
+    batchProcessed += results.length
+    batchCached += results.filter((result) => result.inspection?.evidence.length && result.inspection.evidence.every((read) => read.cached)).length
     checkpoints.push(...batchCheckpoints)
     emit('inspecting')
+    return batchCheckpoints
+  }
 
-    if (batchCheckpoints.length > 0 && batchCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
+  // One real dataset inspection acts as the connector health gate. A dead MCP
+  // transport therefore costs one bounded read, not a full parallel batch.
+  if (scheduled.length && !options.isCancelled?.()) {
+    const preflight = await inspectBatch(scheduled.slice(0, 1))
+    if (preflight.every((checkpoint) => checkpoint.status === 'unavailable')) {
       connectorUnavailable = true
-      break
+      effectiveConcurrency = 1
+      connectorRecoveryStreak = 0
     }
   }
+  for (let offset = 1; !connectorUnavailable && offset < scheduled.length && !options.isCancelled?.(); offset += requestedConcurrency) {
+    const batchCheckpoints = await inspectBatch(scheduled.slice(offset, offset + requestedConcurrency))
+    if (batchCheckpoints.length > 0 && batchCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
+      connectorUnavailable = true
+      effectiveConcurrency = 1
+      connectorRecoveryStreak = 0
+    }
+  }
+  if (!connectorUnavailable && batchProcessed > 0 && batchFailed === 0) {
+    connectorRecoveryStreak = options.previousProgress?.pauseReason === 'connector_unavailable'
+      ? 1
+      : Math.min(100, (options.previousProgress?.connectorRecoveryStreak ?? 0) + 1)
+  } else if (batchFailed > 0) connectorRecoveryStreak = 0
   const hasMore = scheduled.length < pending.length
   const cancelled = options.isCancelled?.() === true
   const state: CatalogExplorationProgress['state'] = cancelled
@@ -249,12 +274,13 @@ export async function inspectCatalogInParallel(
     failed: checkpoints.filter((item) => item.status === 'unavailable').length,
     incidents: checkpoints.filter(hasDataIncident).length,
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,
-    concurrency,
+    concurrency: effectiveConcurrency,
     batchSize: configuredBatchSize,
     batchDurationMs,
     batchFailed,
     batchProcessed,
     batchCached,
+    connectorRecoveryStreak,
     remaining: Math.max(0, assets.length - checkpoints.length),
     mode: options.mode ?? 'catalog',
     cacheMode: options.cacheMode ?? 'prefer',

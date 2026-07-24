@@ -102,6 +102,7 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     batchFailed: bounded('batchFailed', 32),
     batchProcessed: bounded('batchProcessed', 32),
     batchCached: bounded('batchCached', 32),
+    connectorRecoveryStreak: bounded('connectorRecoveryStreak', 100),
     remaining: bounded('remaining'),
     mode: source.mode === 'dataset' ? 'dataset' : 'catalog',
     cacheMode: source.cacheMode === 'refresh' ? 'refresh' : 'prefer',

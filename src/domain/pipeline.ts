@@ -57,6 +57,7 @@ export interface CatalogExplorationProgress {
   batchFailed?: number
   batchProcessed?: number
   batchCached?: number
+  connectorRecoveryStreak?: number
   remaining?: number
   mode?: 'dataset' | 'catalog'
   cacheMode?: 'prefer' | 'refresh'

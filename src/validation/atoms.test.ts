@@ -272,6 +272,22 @@ describe('atomic pipeline validation', () => {
     expect(findings.some((finding) => finding.nodeId === worker.id)).toBe(false)
   })
 
+  it('keeps the autonomous exploration Worker Node as a host sidecar before lineage exists', () => {
+    const control = { ...newCard('control', 0), id: 'control' }
+    const worker = {
+      ...newCard('worker', 1),
+      id: 'catalog-worker',
+      data: {
+        ...newCard('worker', 1).data,
+        rule: 'role=exploration | batch_size=8 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic',
+      },
+    }
+    const explorer = { ...newCard('explorer', 2), id: 'explorer' }
+    const findings = validatePipeline([control, worker, explorer], [])
+
+    expect(findings.some((finding) => finding.severity === 'error')).toBe(false)
+  })
+
   it('rejects an unbounded Worker Node policy', () => {
     const source = { ...newCard('source', 0), id: 'source' }
     const worker = { ...newCard('worker', 1), id: 'worker', data: { ...newCard('worker', 1).data, rule: 'role=audit | batch_size=1000 | max_concurrency=99 | retry=forever' } }

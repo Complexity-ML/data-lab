@@ -631,8 +631,9 @@ describe('visual pipeline workspace regressions', () => {
     expect(within(flow).getByText('Intended Dataset')).toBeTruthy()
     expect(within(flow).getByText('Verify and Bind Dataset')).toBeTruthy()
     expect(within(flow).getByText('DataHub Catalog Explorer')).toBeTruthy()
-    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(4)
-    expect(screen.getAllByText('4 cards', { exact: false }).length).toBeGreaterThan(0)
+    expect(within(flow).getByText('Catalog Audit Worker')).toBeTruthy()
+    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(5)
+    expect(screen.getAllByText('5 cards', { exact: false }).length).toBeGreaterThan(0)
     expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
   })
 

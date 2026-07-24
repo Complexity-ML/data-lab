@@ -24,6 +24,7 @@ import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective
 import { errorMessage, notifyError, notifyToast } from '../domain/toasts'
 import { findEquivalentVersion, graphsEquivalent, type PipelineVersion } from '../domain/versioning'
 import { atomicTransactionBlockers, validatePipeline, type ValidationIssue } from '../validation'
+import { parseWorkerPolicy } from '../domain/worker-policy'
 import { disconnectedAiStatus, disconnectedChatGPTStatus } from './useAiConnections'
 import { useCatalogExplorer } from './useCatalogExplorer'
 import { useLiveIncidentMonitor, type LiveIncidentTrigger } from './useLiveIncidentMonitor'
@@ -188,7 +189,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     const hasDataSource = nodes.some((node) => node.data.kind === 'source')
     const unboundSource = nodes.find((node) => node.data.kind === 'source' && !(node.data.assetRef || node.data.datahubUrn))
     const catalogExplorer = nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
+    const catalogWorker = nodes.find((node) => node.data.kind === 'worker'
+      && node.data.workerMode === 'bounded-execution'
+      && parseWorkerPolicy(node.data.rule).role === 'exploration')
     const explorerPolicy = catalogExplorer ? parseCatalogExplorerPolicy(catalogExplorer.data.rule) : undefined
+    const explorerWorkerPolicy = catalogWorker ? parseWorkerPolicy(catalogWorker.data.rule) : undefined
     let datahubEvidence: string[] = []
     let evidenceEntries: DataHubEvidence[] = []
     let blankCandidate: DataHubAssetSummary | undefined
@@ -308,7 +313,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           if (inspection?.asset) profileCandidates.set(sourceUrn, inspection.asset)
         }
         if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
-          const batchLabel = explorerPolicy?.scope === 'dataset' ? 'the focused dataset' : `the next ${explorerPolicy?.batchSize ?? 8} datasets`
+          const batchLabel = explorerPolicy?.scope === 'dataset' ? 'the focused dataset' : `the next ${explorerWorkerPolicy?.batchSize ?? explorerPolicy?.batchSize ?? 8} datasets`
           setActivity(`Catalog Explorer reading ${batchLabel} with adaptive bounded workers (1–8)…`)
           const previousProgress = catalogExplorer.data.exploration
           let candidates = catalog.assetsFor(catalogExplorer.id)
@@ -316,6 +321,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           const explored = await catalog.explore({
             assets: candidates,
             explorer: catalogExplorer,
+            worker: catalogWorker,
             query: catalogExplorer.data.exploration?.query ?? '*',
             isCurrent: () => agentRunId.current === runId,
           })
@@ -359,6 +365,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           const explored = catalogExplorer ? await catalog.explore({
             assets: candidates,
             explorer: catalogExplorer,
+            worker: catalogWorker,
             query: discoveryQuery,
             isCurrent: () => agentRunId.current === runId,
           }) : undefined
