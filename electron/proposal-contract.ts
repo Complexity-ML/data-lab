@@ -37,6 +37,29 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
 
+export function riskAssessmentRuleError(rule: string | null): string | undefined {
+  const normalizedRule = rule?.toLowerCase()
+  if (!normalizedRule || !['scope=', 'risk_type=', 'severity=', 'confidence=', 'evidence=', 'affected_assets=', 'action='].every((field) => normalizedRule.includes(field))) {
+    return 'Risk Assessment requires scope, risk_type, severity, confidence, evidence, affected_assets and action'
+  }
+  const value = (key: string) => normalizedRule.match(new RegExp(`(?:^|\\|)\\s*${key}\\s*=\\s*([^|]+)`, 'i'))?.[1].trim().toLowerCase()
+  const riskType = value('risk_type')
+  const severity = value('severity')
+  const evidence = value('evidence')
+  const confidence = Number(value('confidence'))
+  const affectedAssets = Number(value('affected_assets'))
+  if (!['data', 'collection', 'none'].includes(riskType ?? '')) return 'Risk Assessment risk_type must be data, collection or none'
+  if (!['critical', 'high', 'medium', 'low', 'unknown'].includes(severity ?? '')) return 'Risk Assessment severity is invalid'
+  if (!['fresh', 'stale', 'unavailable'].includes(evidence ?? '')) return 'Risk Assessment evidence is invalid'
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return 'Risk Assessment confidence must be between 0 and 1'
+  if (!Number.isInteger(affectedAssets) || affectedAssets < 0) return 'Risk Assessment affected_assets must be a non-negative integer'
+  if (riskType === 'data' && evidence !== 'fresh') return 'Data risk requires fresh versioned evidence; connector failures must use risk_type=collection'
+  if (riskType === 'data' && (severity === 'unknown' || affectedAssets === 0)) return 'Data risk requires a concrete severity and at least one affected asset'
+  if (riskType === 'collection' && affectedAssets > 0) return 'Collection reliability cannot claim affected data assets'
+  if (riskType === 'none' && (affectedAssets > 0 || !['unknown', 'low'].includes(severity ?? ''))) return 'risk_type=none cannot claim affected assets or elevated severity'
+  return undefined
+}
+
 function record(value: unknown, label: string): JsonRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   return value as JsonRecord
@@ -83,12 +106,14 @@ function compactGraph(payload: unknown) {
   if (graph.nodes.length > maximumNodes || graph.edges.length > maximumEdges) throw new Error('Agent request graph exceeds the DATA LAB safety limits')
   const nodeIds = new Set<string>()
   const reviewNodeIds = new Set<string>()
+  const riskNodeIds = new Set<string>()
   for (const [index, item] of graph.nodes.entries()) {
     const node = record(item, `Graph node ${index + 1}`)
     const id = identifier(node.id, `Graph node ${index + 1} id`)!
     if (nodeIds.has(id)) throw new Error(`Graph contains duplicate node id ${id}`)
     nodeIds.add(id)
     if (node.kind === 'review') reviewNodeIds.add(id)
+    if (node.kind === 'risk') riskNodeIds.add(id)
   }
   const edgeIds = new Set<string>()
   for (const [index, item] of graph.edges.entries()) {
@@ -97,7 +122,7 @@ function compactGraph(payload: unknown) {
     if (edgeIds.has(id)) throw new Error(`Graph contains duplicate edge id ${id}`)
     edgeIds.add(id)
   }
-  return { nodeIds, edgeIds, reviewNodeIds }
+  return { nodeIds, edgeIds, reviewNodeIds, riskNodeIds }
 }
 
 function validateAction(value: unknown, index: number): ValidatedProposalAction {
@@ -132,7 +157,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (!Array.isArray(proposal.evidence) || proposal.evidence.length > 12) throw new Error('evidence must contain at most 12 entries')
   if (!Array.isArray(proposal.actions) || proposal.actions.length > 20) throw new Error('actions must contain at most 20 entries')
 
-  const { nodeIds, edgeIds, reviewNodeIds } = compactGraph(payload)
+  const { nodeIds, edgeIds, reviewNodeIds, riskNodeIds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
   const aliases = new Set<string>()
   const removedEdges = new Set<string>()
@@ -145,6 +170,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
       action.description ??= `Agent-proposed ${cardNames[action.kind]} awaiting graph review.`
       action.owner ??= 'DATA LAB Agent'
       requireNull(action, ['source', 'target', 'source_handle'], index)
+      if (action.kind === 'risk') {
+        const error = riskAssessmentRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       if (nodeIds.has(action.node_id) || aliases.has(action.node_id)) throw new Error(`Proposal contains duplicate node id ${action.node_id}`)
       aliases.add(action.node_id)
       continue
@@ -152,6 +181,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
     if (action.type === 'update_card') {
       if (!action.node_id || !nodeIds.has(action.node_id)) throw new Error(`Proposal action ${index + 1} references an unknown card`)
       requireNull(action, ['source', 'target', 'source_handle'], index)
+      if ((action.kind === 'risk' || riskNodeIds.has(action.node_id)) && (action.kind === 'risk' || action.rule !== null)) {
+        const error = riskAssessmentRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       continue
     }
     if (action.type === 'remove_edge') {
