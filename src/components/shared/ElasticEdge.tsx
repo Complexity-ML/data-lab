@@ -4,6 +4,8 @@ import type { PipelineNode } from '../../domain/pipeline'
 
 const feedbackClearance = 132
 const obstacleClearance = 44
+const cableHitPaddingX = 14
+const cableHitPaddingY = 24
 const endpointLead = 18
 
 export interface ElasticObstacle {
@@ -67,14 +69,32 @@ export function elasticFeedbackPath(sourceX: number, sourceY: number, targetX: n
 }
 
 function intersectsCableCorridor(obstacle: ElasticObstacle, options: ElasticRouteOptions) {
-  const left = Math.min(options.sourceX, options.targetX)
-  const right = Math.max(options.sourceX, options.targetX)
-  const top = Math.min(options.sourceY, options.targetY) - obstacleClearance
-  const bottom = Math.max(options.sourceY, options.targetY) + obstacleClearance
-  return obstacle.x < right
-    && obstacle.x + obstacle.width > left
-    && obstacle.y < bottom
-    && obstacle.y + obstacle.height > top
+  const direction = options.targetX >= options.sourceX ? 1 : -1
+  const lead = endpointLead * direction
+  const tension = Math.max(34, Math.abs(options.targetX - options.sourceX) * 0.42)
+  const points = [
+    { x: options.sourceX, y: options.sourceY },
+    ...Array.from({ length: 31 }, (_, index) => {
+      const t = (index + 1) / 32
+      const inverse = 1 - t
+      return {
+        x: inverse ** 3 * (options.sourceX + lead)
+          + 3 * inverse ** 2 * t * (options.sourceX + tension * direction)
+          + 3 * inverse * t ** 2 * (options.targetX - tension * direction)
+          + t ** 3 * (options.targetX - lead),
+        y: inverse ** 3 * options.sourceY
+          + 3 * inverse ** 2 * t * options.sourceY
+          + 3 * inverse * t ** 2 * options.targetY
+          + t ** 3 * options.targetY,
+      }
+    }),
+    { x: options.targetX, y: options.targetY },
+  ]
+  const left = obstacle.x - cableHitPaddingX
+  const right = obstacle.x + obstacle.width + cableHitPaddingX
+  const top = obstacle.y - cableHitPaddingY
+  const bottom = obstacle.y + obstacle.height + cableHitPaddingY
+  return points.some((point) => point.x >= left && point.x <= right && point.y >= top && point.y <= bottom)
 }
 
 function routedCablePath(options: ElasticRouteOptions, routeY: number) {
@@ -83,7 +103,11 @@ function routedCablePath(options: ElasticRouteOptions, routeY: number) {
   const lead = endpointLead * direction
   const sourceTurnX = sourceX + Math.max(endpointLead + 28, Math.min(72, Math.abs(targetX - sourceX) * 0.22)) * direction
   const targetTurnX = targetX - Math.max(endpointLead + 28, Math.min(72, Math.abs(targetX - sourceX) * 0.22)) * direction
-  const curve = Math.min(28, Math.max(14, Math.abs(routeY - sourceY) * 0.24))
+  const turnGap = Math.abs(targetTurnX - sourceTurnX)
+  // Short links used to make both rounded turns overlap and reverse the
+  // horizontal segment, producing a visible loop. Bound the curve by the
+  // actual room between turns so every detour stays monotonic.
+  const curve = Math.max(4, Math.min(28, turnGap / 3, Math.abs(routeY - sourceY) * 0.24))
   return [
     `M ${sourceX} ${sourceY}`,
     `L ${sourceX + lead} ${sourceY}`,

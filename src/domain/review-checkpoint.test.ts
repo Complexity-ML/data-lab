@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { ensureHostReviewCheckpoint } from './review-checkpoint'
-import { newCard, type AgentProposal } from './pipeline'
+import { applyProposal, newCard, type AgentProposal } from './pipeline'
+import { repairSensitiveOutputPaths } from '../validation/proposal-repair'
+import { validatePipeline } from '../validation'
 
 function proposal(): AgentProposal {
   return {
@@ -29,5 +31,25 @@ describe('host review checkpoint', () => {
     expect(next.addedNodes.filter((node) => node.data.kind === 'output')).toHaveLength(1)
     expect(next.addedEdges).toHaveLength(2)
     expect(next.rationale).toContain('Host risk gate:')
+  })
+
+  it('routes a sensitive high-risk approval through a versioned protection boundary', () => {
+    const sourceBase = newCard('source', 0)
+    const source = {
+      ...sourceBase,
+      id: 'source',
+      data: {
+        ...sourceBase.data,
+        schema: [{ name: 'email', type: 'string' as const, tags: ['PII'] }],
+      },
+    }
+    const next = proposal()
+
+    ensureHostReviewCheckpoint(next, [source], [], { anchorId: source.id, reason: 'High deterministic risk.' })
+    repairSensitiveOutputPaths(next, [source], [])
+    const graph = applyProposal([source], [], next)
+
+    expect(graph.nodes.some((node) => node.data.kind === 'transform' && /mask|tokenize/i.test(node.data.rule ?? ''))).toBe(true)
+    expect(validatePipeline(graph.nodes, graph.edges).some((finding) => finding.id.startsWith('sensitive-unprotected-'))).toBe(false)
   })
 })

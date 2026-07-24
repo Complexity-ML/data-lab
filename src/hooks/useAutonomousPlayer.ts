@@ -674,16 +674,6 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source' && (node.data.assetRef ?? node.data.datahubUrn) === sourceUrn)
         addDataProfileToProposal(nextProposal, nodes, profileCandidate, sourceNode)
       }
-      const safetyRepair = repairSensitiveOutputPaths(nextProposal, nodes, edges)
-      if (safetyRepair.repairedOutputs.length) recordDiagnostic({
-        category: 'revision',
-        action: 'proposal.host-safety-repair',
-        status: 'warning',
-        detail: {
-          repairedOutputs: safetyRepair.repairedOutputs,
-          reason: 'sensitive-output-protection',
-        },
-      })
       const initialMaterialChangeCount = nextProposal.addedNodes.length
         + nextProposal.updatedNodes.length
         + nextProposal.addedEdges.length
@@ -704,6 +694,20 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           reason,
         })
       }
+      // The risk gate can add a new terminal review outcome. Run deterministic
+      // sensitive-path repair after that insertion so the approved route is
+      // Human Review -> versioned protection -> Output, matching the incident
+      // loop instead of creating a new unprotected sink.
+      const safetyRepair = repairSensitiveOutputPaths(nextProposal, nodes, edges)
+      if (safetyRepair.repairedOutputs.length) recordDiagnostic({
+        category: 'revision',
+        action: 'proposal.host-safety-repair',
+        status: 'warning',
+        detail: {
+          repairedOutputs: safetyRepair.repairedOutputs,
+          reason: 'sensitive-output-protection',
+        },
+      })
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
       const preview = applyProposal(nodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)

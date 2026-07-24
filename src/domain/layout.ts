@@ -134,6 +134,12 @@ function nodeDimensions(node: PipelineNode) {
   }
 }
 
+function isSystemCard(node: PipelineNode) {
+  return node.data.kind === 'control'
+    || node.data.kind === 'explorer'
+    || (node.data.kind === 'worker' && parseWorkerPolicy(node.data.rule).role === 'exploration')
+}
+
 function separatedLayer(ids: string[], desired: Map<string, number>, byId: Map<string, PipelineNode>): Map<string, number> {
   const result = new Map<string, number>()
   let previousId: string | undefined
@@ -247,13 +253,15 @@ export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
 export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: Iterable<string>): PipelineNode[] {
   const iterationEdges = edges.filter((edge) => edge.sourceHandle !== 'feedback')
   const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
-  const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
+  // Host-owned starter cards form a reserved control lane. Reflow that lane
+  // whenever an incremental proposal is placed; otherwise newly added lineage
+  // cards can inherit the same XY coordinates and visually cover the starter
+  // cards while user-positioned lineage remains untouched.
+  const arranged = new Set(nodes
+    .filter((node) => !node.data.pinned && (requested.has(node.id) || (nodeIds !== undefined && isSystemCard(node))))
+    .map((node) => node.id))
   if (arranged.size === 0) return nodes
-  const systemCards = nodes.filter((node) => arranged.has(node.id) && (
-    node.data.kind === 'control'
-    || node.data.kind === 'explorer'
-    || (node.data.kind === 'worker' && parseWorkerPolicy(node.data.rule).role === 'exploration')
-  ))
+  const systemCards = nodes.filter((node) => arranged.has(node.id) && isSystemCard(node))
   const lineageArranged = new Set([...arranged].filter((id) => !systemCards.some((card) => card.id === id)))
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => nodeBox(node))
@@ -264,10 +272,14 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
     // Controller and Catalog Explorer are host-owned system policies, not
     // lineage atoms. Keep them in a reserved lane so topology never overlaps.
     let systemCursorX = layoutStartX
-    let systemBottom = layoutStartY
+    const tallestSystemCard = Math.max(cardHeight, ...systemCards.map((card) => nodeDimensions(card).height))
+    const externalTop = external.length > 0 ? Math.min(...external.map((node) => node.position.y)) : undefined
+    const systemLaneY = externalTop === undefined
+      ? layoutStartY
+      : Math.min(layoutStartY, snap(externalTop - tallestSystemCard - componentGap))
+    let systemBottom = systemLaneY
     for (const card of systemCards) {
-      let placed = { x: snap(systemCursorX), y: snap(layoutStartY) }
-      while (collides(nodeBox(card, placed), occupied)) placed = { ...placed, y: placed.y + verticalStep }
+      const placed = { x: snap(systemCursorX), y: systemLaneY }
       positions.set(card.id, placed)
       occupied.push(nodeBox(card, placed))
       systemCursorX = placed.x + nodeDimensions(card).width + horizontalGap

@@ -70,6 +70,21 @@ describe('pipeline XY layout', () => {
     expect(route.path).toContain(` ${route.labelY}`)
   })
 
+  it('does not create a detour for a card outside the actual diagonal curve', () => {
+    const route = routeElasticCable({
+      sourceId: 'profile',
+      sourceX: 764,
+      sourceY: 655,
+      targetId: 'review',
+      targetX: 890,
+      targetY: 249,
+      obstacles: [{ id: 'explorer', x: 839, y: 600, width: 232, height: 288 }],
+    })
+
+    expect(route.routedAroundObstacle).toBe(false)
+    expect(route.path.match(/ C /g)).toHaveLength(1)
+  })
+
   it('routes feedback below the tallest card in the iteration', () => {
     const route = routeElasticCable({
       feedback: true,
@@ -160,6 +175,41 @@ describe('pipeline XY layout', () => {
     expect(placedReview.position.x).toBeGreaterThan(existing.position.x + existing.measured.width)
     expect(placedOutput.position.x).toBeGreaterThan(placedReview.position.x)
     expect(new Set(arranged.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(3)
+  })
+
+  it('reflows host starter cards into a reserved lane during incremental placement', () => {
+    const control = { ...newCard('control', 0), id: 'control', position: { x: 72, y: 600 }, measured: { width: 232, height: 240 } }
+    const workerBase = newCard('worker', 1)
+    const worker = {
+      ...workerBase,
+      id: 'worker',
+      position: { x: 400, y: 600 },
+      measured: { width: 232, height: 280 },
+      data: { ...workerBase.data, rule: 'role=exploration | batch_size=8 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic' },
+    }
+    const explorer = { ...newCard('explorer', 2), id: 'explorer', position: { x: 728, y: 600 }, measured: { width: 232, height: 288 } }
+    const profile = { ...newCard('profile', 3), id: 'profile', position: { x: 400, y: 526 }, measured: { width: 232, height: 264 } }
+    const review = { ...newCard('review', 4), id: 'review', position: { x: 400, y: 526 } }
+    const output = { ...newCard('output', 5), id: 'output', position: { x: 400, y: 526 } }
+    const arranged = layoutPipeline(
+      [control, worker, explorer, profile, review, output],
+      [
+        { id: 'profile-review', source: profile.id, target: review.id },
+        { id: 'review-output', source: review.id, target: output.id },
+      ],
+      [review.id, output.id],
+    )
+    const byId = new Map(arranged.map((node) => [node.id, node]))
+    const systemBottom = Math.max(
+      byId.get('control')!.position.y + 240,
+      byId.get('worker')!.position.y + 280,
+      byId.get('explorer')!.position.y + 288,
+    )
+
+    expect(byId.get('profile')!.position).toEqual(profile.position)
+    expect(systemBottom + 60).toBeLessThanOrEqual(profile.position.y)
+    expect(byId.get('review')!.position.x).toBeGreaterThan(profile.position.x + 232)
+    expect(byId.get('output')!.position.x).toBeGreaterThan(byId.get('review')!.position.x)
   })
 
   it('separates variable-height cards that share a topology layer', () => {
