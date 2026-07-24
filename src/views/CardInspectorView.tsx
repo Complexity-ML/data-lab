@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
 import { CatalogExplorerSettings } from '../components/shared/CatalogExplorerSettings'
+import { WorkerNodeSettings } from '../components/shared/WorkerNodeSettings'
 import type { DataHubAssetSummary } from '../domain/datahub'
 import { cardLabels, type PipelineNode } from '../domain/pipeline'
 import { cardRoleContracts } from '../domain/agent-runner'
@@ -42,11 +43,12 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
       {risk && <section className={`risk-context severity-${risk.severity ?? 'unknown'}`}><h3>Evidence-backed risk context</h3><dl><div><dt>Type</dt><dd>{risk.riskType ?? 'Incomplete'}</dd></div><div><dt>Severity</dt><dd>{risk.severity ?? 'Incomplete'}</dd></div><div><dt>Confidence</dt><dd>{risk.confidence === undefined ? 'Incomplete' : `${Math.round(risk.confidence * 100)}%`}</dd></div><div><dt>Evidence</dt><dd>{risk.evidence ?? 'Incomplete'}</dd></div><div><dt>Affected assets</dt><dd>{risk.affectedAssets ?? 'Incomplete'}</dd></div><div><dt>Scope</dt><dd>{risk.scope || 'Incomplete'}</dd></div></dl><p>{risk.riskType === 'collection' ? 'Connector reliability issue only · no dataset anomaly is asserted.' : risk.action ? `Recommended action: ${risk.action}` : 'Recommended action is missing.'}</p></section>}
       {selected.data.kind === 'source' && <DataHubAssetPicker connected={dataHubConnected} onBind={onBindDataHubSource} onInspect={onInspectDataHubAsset} onOpenSettings={onOpenDataHubSettings} onSearch={onSearchDataHub} />}
       {selected.data.kind === 'explorer' && <CatalogExplorerSettings node={selected} onUpdate={onUpdate} />}
+      {selected.data.kind === 'worker' && <WorkerNodeSettings node={selected} onUpdate={onUpdate} />}
       <label>Card name<input value={selected.data.label} onChange={(event) => onUpdate({ label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={selected.data.description} onChange={(event) => onUpdate({ description: event.target.value })} /></label>
       <label>Owner<input value={selected.data.owner} onChange={(event) => onUpdate({ owner: event.target.value })} /></label>
       <label className="inspector-check"><input checked={Boolean(selected.data.pinned)} onChange={(event) => onUpdate({ pinned: event.target.checked })} type="checkbox" /><span><strong>Pin manual position</strong><small>Auto-layout will route around this card without moving it.</small></span></label>
-      {selected.data.rule !== undefined && selected.data.kind !== 'explorer' && <label>Rule<textarea className="code-input" rows={3} value={selected.data.rule} onChange={(event) => onUpdate({ rule: event.target.value })} /></label>}
+      {selected.data.rule !== undefined && !['explorer', 'worker'].includes(selected.data.kind) && <label>Rule<textarea className="code-input" rows={3} value={selected.data.rule} onChange={(event) => onUpdate({ rule: event.target.value })} /></label>}
       {(selected.data.assetRef || selected.data.datahubUrn) && <section className="bound-datahub-source"><small>BOUND CATALOG ASSET</small><code>{selected.data.assetRef ?? selected.data.datahubUrn}</code><span>{selected.data.sourceSystem ?? 'DataHub'} · {selected.data.datahubPlatform ?? 'unknown platform'} · {selected.data.datahubEnvironment ?? 'unknown environment'}</span></section>}
       {selected.data.kind !== 'source' && selected.data.assetRef !== undefined && <label>Catalog asset reference<textarea className="code-input" rows={3} value={selected.data.assetRef} onChange={(event) => onUpdate({ assetRef: event.target.value })} /></label>}
       {(selected.data.assetRef || selected.data.datahubUrn) && <section className="datahub-governance-signals"><h3>Governance signals</h3><dl><div><dt>Domain</dt><dd>{selected.data.datahubDomain ?? 'Unavailable'}</dd></div><div><dt>Quality</dt><dd>{selected.data.datahubQuality ?? 'Unavailable'}</dd></div><div><dt>Ownership</dt><dd>{selected.data.owner === 'Unassigned' ? 'Missing · blocks publication' : selected.data.owner}</dd></div></dl><div>{selected.data.datahubTags?.length ? selected.data.datahubTags.map((tag) => <span key={tag}>{tag}</span>) : <small>Tags unavailable</small>}</div></section>}

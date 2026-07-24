@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>
 
 export type ProposalActionType = 'add_card' | 'update_card' | 'add_edge' | 'remove_edge'
-export type ProposalCardKind = 'control' | 'explorer' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type ProposalCardKind = 'control' | 'explorer' | 'worker' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 
 export interface ValidatedProposalAction {
   type: ProposalActionType
@@ -30,9 +30,9 @@ export interface ValidatedProposal {
 
 const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'confidence', 'writeback', 'evidence', 'actions'] as const
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
-const kinds = new Set<ProposalCardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<ProposalCardKind>(['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
-const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', explorer: 'Catalog Explorer', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
+const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', explorer: 'Catalog Explorer', worker: 'Worker Node', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
@@ -75,6 +75,20 @@ export function catalogExplorerRuleError(rule: string | null): string | undefine
   if (!/(?:^|\|)\s*cache\s*=\s*(prefer|refresh)\b/.test(normalized)) return 'Catalog Explorer cache must be prefer or refresh'
   if (!/(?:^|\|)\s*checkpoint\s*=\s*versioned\b/.test(normalized)) return 'Catalog Explorer requires checkpoint=versioned'
   if (!/(?:^|\|)\s*resume\s*=\s*true\b/.test(normalized)) return 'Catalog Explorer requires resume=true'
+  return undefined
+}
+
+export function workerPolicyError(rule: string | null | undefined): string | undefined {
+  const normalized = rule?.toLowerCase() ?? ''
+  const role = normalized.match(/(?:^|\|)\s*role\s*=\s*([^|]+)/)?.[1]?.trim()
+  if (!['exploration', 'audit', 'risk', 'incident', 'patch', 'generic'].includes(role ?? '')) return 'Worker Node role is invalid'
+  const batchSize = Number(normalized.match(/(?:^|\|)\s*batch_size\s*=\s*(\d+)/)?.[1])
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 32) return 'Worker Node batch_size must be between 1 and 32'
+  const concurrency = Number(normalized.match(/(?:^|\|)\s*max_concurrency\s*=\s*(\d+)/)?.[1])
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return 'Worker Node max_concurrency must be between 1 and 8'
+  if (!/(?:^|\|)\s*retry\s*=\s*(checkpoint|none)\b/.test(normalized)) return 'Worker Node retry must be checkpoint or none'
+  if (!/(?:^|\|)\s*context\s*=\s*branch_only\b/.test(normalized)) return 'Worker Node requires context=branch_only'
+  if (!/(?:^|\|)\s*merge\s*=\s*atomic\b/.test(normalized)) return 'Worker Node requires merge=atomic'
   return undefined
 }
 
@@ -126,6 +140,7 @@ function compactGraph(payload: unknown) {
   const reviewNodeIds = new Set<string>()
   const riskNodeIds = new Set<string>()
   const explorerNodeIds = new Set<string>()
+  const workerNodeIds = new Set<string>()
   for (const [index, item] of graph.nodes.entries()) {
     const node = record(item, `Graph node ${index + 1}`)
     const id = identifier(node.id, `Graph node ${index + 1} id`)!
@@ -134,6 +149,7 @@ function compactGraph(payload: unknown) {
     if (node.kind === 'review') reviewNodeIds.add(id)
     if (node.kind === 'risk') riskNodeIds.add(id)
     if (node.kind === 'explorer') explorerNodeIds.add(id)
+    if (node.kind === 'worker') workerNodeIds.add(id)
   }
   const edgeIds = new Set<string>()
   for (const [index, item] of graph.edges.entries()) {
@@ -142,7 +158,7 @@ function compactGraph(payload: unknown) {
     if (edgeIds.has(id)) throw new Error(`Graph contains duplicate edge id ${id}`)
     edgeIds.add(id)
   }
-  return { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds }
+  return { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds }
 }
 
 function validateAction(value: unknown, index: number): ValidatedProposalAction {
@@ -177,7 +193,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (!Array.isArray(proposal.evidence) || proposal.evidence.length > 12) throw new Error('evidence must contain at most 12 entries')
   if (!Array.isArray(proposal.actions) || proposal.actions.length > 20) throw new Error('actions must contain at most 20 entries')
 
-  const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds } = compactGraph(payload)
+  const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
   const allExplorerNodeIds = new Set([
     ...explorerNodeIds,
@@ -202,6 +218,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
         const error = catalogExplorerRuleError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
+      if (action.kind === 'worker') {
+        const error = workerPolicyError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       if (nodeIds.has(action.node_id) || aliases.has(action.node_id)) throw new Error(`Proposal contains duplicate node id ${action.node_id}`)
       aliases.add(action.node_id)
       continue
@@ -215,6 +235,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
       }
       if ((action.kind === 'explorer' || explorerNodeIds.has(action.node_id)) && (action.kind === 'explorer' || action.rule !== null)) {
         const error = catalogExplorerRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
+      if ((action.kind === 'worker' || workerNodeIds.has(action.node_id)) && (action.kind === 'worker' || action.rule !== null)) {
+        const error = workerPolicyError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
       continue

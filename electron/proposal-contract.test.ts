@@ -51,6 +51,12 @@ describe('strict provider proposal contract', () => {
     expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...explorer, rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=99 | cache=prefer | checkpoint=versioned | resume=true' }] }, payload)).toThrow('audit_concurrency')
   })
 
+  it('accepts a generic bounded Worker Node and rejects unbounded concurrency', () => {
+    const worker = { ...validProposal.actions[0], node_id: 'worker-audit', kind: 'worker', label: 'Audit worker', rule: 'role=audit | batch_size=8 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic' }
+    expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [worker] }, payload).actions[0].kind).toBe('worker')
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...worker, rule: 'role=audit | batch_size=8 | max_concurrency=99 | retry=checkpoint | context=branch_only | merge=atomic' }] }, payload)).toThrow('max_concurrency')
+  })
+
   it('rejects lineage edges to the host-owned Catalog Explorer sidecar', () => {
     const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true' }
     const source = { ...validProposal.actions[0], node_id: 'orders-source', kind: 'source', label: 'Orders' }

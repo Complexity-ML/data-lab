@@ -2,6 +2,7 @@ import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { catalogExplorerPolicyError } from '../domain/catalog-explorer-policy'
 import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
+import { workerPolicyError } from '../domain/worker-policy'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
 
 function issue(atomId: string, value: Omit<ValidationIssue, 'atomId'>): ValidationIssue {
@@ -161,6 +162,19 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       detail: policyError ?? 'Keep Catalog Explorer in its host-owned adjustable sidecar mode.',
     }))
     return findings
+  },
+  worker: ({ nodes }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const policyError = workerPolicyError(node.data.rule)
+    if (node.data.workerMode !== 'bounded-execution' || policyError) return [issue('card-contracts', {
+      id: `worker-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Worker policy is incomplete',
+      detail: policyError ?? 'Worker Node must use bounded execution with branch-only context and atomic checkpoints.',
+    })]
+    return []
   },
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
   split: ({ edges }, nodeId) => {

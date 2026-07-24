@@ -256,6 +256,36 @@ describe('atomic pipeline validation', () => {
     expect(findings.some((finding) => finding.id.startsWith('parallel-'))).toBe(false)
   })
 
+  it('allows every lineage card to fan into and out of one bounded Worker Node', () => {
+    const sourceA = { ...newCard('source', 0), id: 'source-a' }
+    const sourceB = { ...newCard('source', 1), id: 'source-b' }
+    const worker = { ...newCard('worker', 2), id: 'worker' }
+    const outputA = { ...newCard('output', 3), id: 'output-a' }
+    const outputB = { ...newCard('output', 4), id: 'output-b' }
+    const findings = validatePipeline([sourceA, sourceB, worker, outputA, outputB], [
+      { id: 'source-a-worker', source: sourceA.id, target: worker.id },
+      { id: 'source-b-worker', source: sourceB.id, target: worker.id },
+      { id: 'worker-output-a', source: worker.id, target: outputA.id },
+      { id: 'worker-output-b', source: worker.id, target: outputB.id },
+    ])
+
+    expect(findings.some((finding) => finding.nodeId === worker.id)).toBe(false)
+  })
+
+  it('rejects an unbounded Worker Node policy', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const worker = { ...newCard('worker', 1), id: 'worker', data: { ...newCard('worker', 1).data, rule: 'role=audit | batch_size=1000 | max_concurrency=99 | retry=forever' } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const findings = validatePipeline([source, worker, output], [
+      { id: 'source-worker', source: source.id, target: worker.id },
+      { id: 'worker-output', source: worker.id, target: output.id },
+    ])
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'worker-policy-worker', severity: 'error' }),
+    ]))
+  })
+
   it('treats a Data Profile as sidecar memory rather than an executable orphan', () => {
     const profile = { ...newCard('profile', 9), id: 'profile-memory' }
     const findings = validatePipeline([...initialNodes, profile], initialEdges)
