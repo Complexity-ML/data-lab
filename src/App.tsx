@@ -10,6 +10,7 @@ import type { AtomicPipelineRun } from './domain/atomic-execution'
 import { recordDiagnostic } from './domain/diagnostics'
 import { layoutPipeline } from './domain/layout'
 import { initialEdges, initialNodes, type AgentProposal, type PipelineNode } from './domain/pipeline'
+import { collectRiskImpactOverview } from './domain/risk-impact'
 import { useLanguage } from './i18n'
 import { useAiConnections } from './hooks/useAiConnections'
 import { useAppTheme } from './hooks/useAppTheme'
@@ -34,6 +35,7 @@ import { CardLibraryView } from './views/CardLibraryView'
 import { IncidentReportsView } from './views/IncidentReportsView'
 import { LiveActivityView } from './views/LiveActivityView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
+import { RiskImpactView } from './views/RiskImpactView'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 
@@ -54,6 +56,7 @@ export default function App() {
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [leftOperationsPanel, setLeftOperationsPanel] = useState<'actions' | 'logs'>()
   const [reportsOpen, setReportsOpen] = useState(false)
+  const [risksOpen, setRisksOpen] = useState(false)
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
@@ -202,13 +205,14 @@ export default function App() {
   const unresolvedIncidents = incidents.summaries.filter((incident) => incident.status !== 'resolved')
   const proposalAddsReport = Boolean(proposal?.incidentKey && !unresolvedIncidents.some((incident) => incident.incidentKey === proposal.incidentKey))
   const reportCount = unresolvedIncidents.length + (proposalAddsReport ? 1 : 0)
+  const riskOverview = useMemo(() => collectRiskImpactOverview(nodes, edges), [edges, nodes])
   const activityBusy = player.agentRunning || player.playerStarting || reviewAssistant.busy || ai.chatGPTConnecting || appUpdates.busy || player.stepPending
   const agentActionHistory = useMemo(
     () => actionHistory.filter((entry) => /\b(agent|autonomous|player|proposal|review|controller|iteration)\b/i.test(entry.message)),
     [actionHistory],
   )
   const leftPanelOpen = libraryOpen || Boolean(leftOperationsPanel)
-  const rightPanelOpen = inspectorOpen || reportsOpen
+  const rightPanelOpen = inspectorOpen || reportsOpen || risksOpen
 
   useEffect(() => {
     setActionHistory((current) => current[0]?.message === activity
@@ -389,6 +393,8 @@ export default function App() {
         nodes={nodes}
         reportCount={reportCount}
         reportsOpen={reportsOpen}
+        riskCount={riskOverview.actionable}
+        risksOpen={risksOpen}
         onConnect={pipeline.onConnect}
         onReconnect={pipeline.onReconnect}
         onDeleteCard={pipeline.deleteCard}
@@ -399,17 +405,20 @@ export default function App() {
         onNodeContextMenu={(event, node) => { event.preventDefault(); setSelectedId(node.id); setContextMenu({ nodeId: node.id, label: node.data.label, x: event.clientX, y: event.clientY }) }}
         onNodesChange={onNodesChange}
         onOpenActions={() => { setLibraryOpen(false); setLeftOperationsPanel('actions') }}
-        onOpenInspector={() => { setReportsOpen(false); setInspectorOpen(true) }}
+        onOpenInspector={() => { setReportsOpen(false); setRisksOpen(false); setInspectorOpen(true) }}
         onOpenLibrary={() => { setLeftOperationsPanel(undefined); setLibraryOpen(true) }}
         onOpenLogs={() => { setLibraryOpen(false); setLeftOperationsPanel('logs') }}
-        onOpenReports={() => { setInspectorOpen(false); setReportsOpen(true) }}
+        onOpenReports={() => { setInspectorOpen(false); setRisksOpen(false); setReportsOpen(true) }}
+        onOpenRisks={() => { setInspectorOpen(false); setReportsOpen(false); setRisksOpen(true) }}
         onPaneClick={() => setContextMenu(undefined)}
         onSelectNode={setSelectedId}
         theme={theme}
       />
 
-      {reportsOpen
-        ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
+      {risksOpen
+        ? <aside aria-label="Impact and risks" className="inspector-panel operations-panel" id="data-lab-risks"><RiskImpactView onClose={() => setRisksOpen(false)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setRisksOpen(false); setInspectorOpen(true) }} overview={riskOverview} /></aside>
+        : reportsOpen
+          ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
         : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
           <CardInspectorView dataHubConnected={dataHub.catalogConnectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={pipeline.bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={pipeline.focusIncidentDiagram} onInspectDataHubAsset={dataHub.inspectAsset} onOpenDataHubSettings={() => { setSettingsSection('connections'); setSettingsOpen(true) }} onSearchDataHub={dataHub.searchAssets} onSelectNode={setSelectedId} onUpdate={pipeline.updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => (node.data.assetRef ?? node.data.datahubUrn) ? [[node.data.assetRef ?? node.data.datahubUrn!, { nodeId: node.id, label: node.data.label }]] : []))} />
         </aside>}

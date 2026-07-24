@@ -423,7 +423,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('stopped')).toBeTruthy()
   })
 
-  it('switches between Card Library, Inspector, Actions, Live logs and Reports panels', async () => {
+  it('switches between Card Library, Inspector, Risks, Actions, Live logs and Reports panels', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -439,6 +439,13 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Open inspector' }))
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
 
+    await user.click(screen.getByRole('button', { name: 'Open impact and risks' }))
+    expect(screen.getByRole('button', { name: 'Close impact and risks' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Impact & Risks' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open inspector' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open incident reports' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Open inspector' }))
     const actionsSticker = screen.getByRole('button', { name: 'Open agent actions' })
     expect(actionsSticker.querySelector('em')).toBeNull()
     await user.click(actionsSticker)

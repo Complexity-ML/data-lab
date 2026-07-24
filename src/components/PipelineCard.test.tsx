@@ -32,7 +32,7 @@ describe('Pipeline card ports', () => {
   it('renders the structured risk context without losing normal graph ports', () => {
     const risk = newCard('risk', 0)
     render(<PipelineCard {...cardProps(risk)} />)
-    expect(screen.getByText('none · unknown')).toBeTruthy()
+    expect(screen.getByText('general · unknown')).toBeTruthy()
     expect(screen.getByText('0%')).toBeTruthy()
     expect(screen.getAllByTestId('pipeline-handle').map((handle) => handle.getAttribute('data-type'))).toEqual(['target', 'source'])
   })

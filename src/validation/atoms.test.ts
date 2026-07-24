@@ -223,14 +223,53 @@ describe('atomic pipeline validation', () => {
   it('accepts an atomic ML risk assessment backed by fresh impact evidence', () => {
     const source = { ...newCard('source', 0), id: 'source' }
     const impact = { ...newCard('impact', 1), id: 'impact' }
-    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=churn_model_v3 | risk_type=data | severity=high | confidence=0.91 | evidence=fresh | affected_assets=3 | action=repair_feature_then_retrain' } }
+    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=churn_model_v3 | risk_domain=ml | risk_type=data | severity=high | confidence=0.91 | evidence=fresh | affected_assets=3 | affected_models=1 | action=repair_feature_then_retrain' } }
+    const patch = { ...newCard('patch', 3), id: 'patch' }
+    const output = { ...newCard('output', 4), id: 'output' }
+    const findings = validatePipeline([source, impact, risk, patch, output], [
+      { id: 'source-impact', source: source.id, target: impact.id },
+      { id: 'impact-risk', source: impact.id, target: risk.id },
+      { id: 'risk-patch', source: risk.id, target: patch.id },
+      { id: 'patch-output', source: patch.id, target: output.id },
+    ])
+    expect(findings.some((finding) => finding.id.startsWith('risk-'))).toBe(false)
+  })
+
+  it('asks the agent to cover every Impact Analysis with an evidence-backed Risk Assessment', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const impact = { ...newCard('impact', 1), id: 'impact' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const findings = validatePipeline([source, impact, output], [
+      { id: 'source-impact', source: source.id, target: impact.id },
+      { id: 'impact-output', source: impact.id, target: output.id },
+    ])
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'impact-risk-coverage-impact', severity: 'warning' }),
+    ]))
+  })
+
+  it('warns when elevated risk has no bounded mitigation path', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const impact = { ...newCard('impact', 1), id: 'impact' }
+    const risk = {
+      ...newCard('risk', 2),
+      id: 'risk',
+      data: {
+        ...newCard('risk', 2).data,
+        rule: 'scope=customer_dataset | risk_domain=data | risk_type=data | severity=critical | confidence=0.95 | evidence=fresh | affected_assets=1 | action=quarantine_then_recheck',
+      },
+    }
     const output = { ...newCard('output', 3), id: 'output' }
     const findings = validatePipeline([source, impact, risk, output], [
       { id: 'source-impact', source: source.id, target: impact.id },
       { id: 'impact-risk', source: impact.id, target: risk.id },
       { id: 'risk-output', source: risk.id, target: output.id },
     ])
-    expect(findings.some((finding) => finding.id.startsWith('risk-'))).toBe(false)
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'risk-mitigation-risk', severity: 'warning' }),
+    ]))
   })
 
   it('blocks a dataset risk inferred only from unavailable connector evidence', () => {

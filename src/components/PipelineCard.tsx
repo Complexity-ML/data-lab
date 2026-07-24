@@ -71,7 +71,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {explorerPolicy && <span className="explorer-mode-badge">{explorerPolicy.scope === 'dataset' ? 'Focus' : 'Catalog'}</span>}
       {workerPolicy && <span className="worker-mode-badge">{workerPolicy.role} · {workerPolicy.concurrency}×</span>}
       {queryPolicy && <span className="query-mode-badge">{queryPolicy.mode === 'governed_write' ? 'Governed POST' : 'Read check'}</span>}
-      {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
+      {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.domain} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
       {data.runState === 'waiting' && <span className="run-badge is-waiting"><CirclePause size={10} /> Review</span>}

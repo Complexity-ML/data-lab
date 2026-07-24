@@ -146,7 +146,7 @@ describe('bounded DATA LAB agent tools', () => {
     expect(session.execute('inspect_graph', { node_ids: ['risk-orders'] }).queued_actions).toEqual([
       expect.objectContaining({
         kind: 'risk',
-        rule: 'scope=downstream_ml | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage',
+        rule: 'scope=downstream_assets | risk_domain=general | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage',
       }),
     ])
   })

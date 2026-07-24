@@ -416,7 +416,7 @@ button { color: inherit; }
 .live-log-list li > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .live-log-list strong { color: var(--text); font-size: 8px; line-height: 1.4; overflow-wrap: anywhere; }
 .live-log-list time { color: var(--faint); font: 6.5px ui-monospace, monospace; }
-.actions-panel-content, .reports-panel-content { display: flex; min-height: 0; flex-direction: column; gap: 13px; height: calc(100% - 52px); overflow: auto; padding: 2px 2px 18px; }
+.actions-panel-content, .reports-panel-content, .risk-panel-content { display: flex; min-height: 0; flex-direction: column; gap: 13px; height: calc(100% - 52px); overflow: auto; padding: 2px 2px 18px; }
 .action-current { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .action-current > span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--muted); border-radius: 10px; background: var(--soft); }
 .action-current.is-busy { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); }
@@ -438,6 +438,36 @@ button { color: inherit; }
 .reports-overview > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .reports-overview strong { font-size: 15px; }
 .reports-overview small { color: var(--muted); font-size: 7px; }
+.risk-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.risk-overview > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.risk-overview strong { font-size: 15px; }
+.risk-overview small { color: var(--muted); font-size: 7px; }
+.risk-domain-selector { display: flex; gap: 6px; overflow-x: auto; padding: 1px 1px 5px; scrollbar-width: thin; }
+.risk-domain-selector button { flex: 0 0 auto; padding: 6px 8px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 7px; font-weight: 750; cursor: pointer; }
+.risk-domain-selector button.is-active { color: #b91c1c; border-color: color-mix(in srgb, #ef4444 48%, var(--line)); background: color-mix(in srgb, #fee2e2 48%, var(--panel)); }
+.risk-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.risk-panel-heading strong { font-size: 9px; }
+.risk-panel-heading small { color: var(--faint); font-size: 7px; }
+.risk-panel-list { display: flex; flex-direction: column; gap: 7px; }
+.risk-panel-list > button { display: grid; grid-template-columns: 29px minmax(0, 1fr); gap: 9px; padding: 10px; color: var(--text); border: 1px solid var(--line); border-left: 3px solid #f59e0b; border-radius: 10px; background: var(--panel); text-align: left; cursor: pointer; }
+.risk-panel-list > button.severity-critical { border-left-color: #dc2626; }
+.risk-panel-list > button.severity-high { border-left-color: #ef4444; }
+.risk-panel-list > button.kind-impact { border-left-color: var(--impact-strong); }
+.risk-panel-list > button > span { display: grid; width: 27px; height: 27px; place-items: center; color: #b91c1c; border-radius: 8px; background: color-mix(in srgb, #fee2e2 55%, var(--surface)); }
+.risk-panel-list > button.kind-impact > span { color: var(--impact-strong); background: color-mix(in srgb, var(--impact) 72%, var(--surface)); }
+.risk-panel-list > button > div { min-width: 0; }
+.risk-panel-list small { color: var(--faint); font-size: 6px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.risk-panel-list strong { display: block; margin-top: 4px; font-size: 9px; }
+.risk-panel-list p { margin: 5px 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.risk-panel-list dl { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.risk-panel-list dl div { display: inline-flex; gap: 4px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 6px; }
+.risk-panel-list dt { color: var(--faint); }
+.risk-panel-list dd { margin: 0; font-weight: 800; }
+.risk-panel-list em { display: block; color: var(--text); font-size: 7px; font-style: normal; line-height: 1.4; }
+.risk-panel-clear { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; padding: 11px; color: #15803d; border: 1px dashed #86efac; border-radius: 10px; background: color-mix(in srgb, #dcfce7 52%, var(--panel)); }
+.risk-panel-clear > span { display: flex; flex-direction: column; gap: 3px; }
+.risk-panel-clear strong { font-size: 9px; }
+.risk-panel-clear small { color: var(--muted); font-size: 7px; }
 .report-proposal { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 9px; padding: 11px; color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line)); border-radius: 11px; background: var(--accent-soft); text-align: left; cursor: pointer; }
 .report-proposal > svg { color: var(--accent); }
 .report-proposal > span { min-width: 0; }
@@ -504,13 +534,16 @@ button { color: inherit; }
 .canvas-sticker-stack { position: absolute; z-index: 8; top: 56px; display: grid; grid-auto-flow: row; grid-auto-rows: 34px; gap: 8px; }
 .canvas-sticker-stack.is-left { left: 14px; }
 .canvas-sticker-stack.is-right { right: 14px; }
-.inspector-open, .library-open, .actions-open, .logs-open, .reports-open { position: relative; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; width: 108px; height: 34px; min-height: 34px; padding: 0 10px; color: var(--text); border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 6px 18px rgb(15 23 42 / 10%); font-size: 9px; font-weight: 700; cursor: pointer; }
-.inspector-open:hover, .library-open:hover, .actions-open:hover, .logs-open:hover, .reports-open:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); transform: translateY(-1px); }
+.inspector-open, .library-open, .actions-open, .logs-open, .risks-open, .reports-open { position: relative; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; width: 108px; height: 34px; min-height: 34px; padding: 0 10px; color: var(--text); border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 6px 18px rgb(15 23 42 / 10%); font-size: 9px; font-weight: 700; cursor: pointer; }
+.inspector-open:hover, .library-open:hover, .actions-open:hover, .logs-open:hover, .risks-open:hover, .reports-open:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); transform: translateY(-1px); }
 .actions-open.is-busy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 52%, var(--line)); }
 .actions-open.is-busy svg { animation: activity-spin .9s linear infinite; }
-.reports-open { overflow: visible; }
+.risks-open, .reports-open { overflow: visible; }
+.risks-open.has-risks { color: #b91c1c; border-color: color-mix(in srgb, #ef4444 58%, var(--line)); }
 .reports-open.has-reports { border-color: color-mix(in srgb, #f59e0b 58%, var(--line)); }
-.reports-open em { position: absolute; z-index: 2; top: -11px; right: -9px; display: grid; min-width: 19px; height: 19px; padding: 0 5px; place-items: center; color: #fff; border: 2px solid var(--panel); border-radius: 999px; background: #f97316; box-shadow: 0 3px 9px rgb(249 115 22 / 28%); font: normal 7px/1 ui-monospace, monospace; }
+.risks-open em, .reports-open em { position: absolute; z-index: 2; top: -11px; right: -9px; display: grid; min-width: 19px; height: 19px; padding: 0 5px; place-items: center; color: #fff; border: 2px solid var(--panel); border-radius: 999px; font: normal 7px/1 ui-monospace, monospace; }
+.risks-open em { background: #dc2626; box-shadow: 0 3px 9px rgb(220 38 38 / 28%); }
+.reports-open em { background: #f97316; box-shadow: 0 3px 9px rgb(249 115 22 / 28%); }
 @keyframes activity-spin { to { transform: rotate(360deg); } }
 .canvas-toolbar { position: absolute; z-index: 5; top: 12px; right: 14px; left: 14px; display: flex; justify-content: space-between; pointer-events: none; }
 .canvas-toolbar > div { display: flex; align-items: center; gap: 6px; padding: 6px 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; background: rgb(255 255 255 / 88%); box-shadow: 0 4px 14px rgb(15 23 42 / 5%); font-size: 9px; backdrop-filter: blur(8px); }

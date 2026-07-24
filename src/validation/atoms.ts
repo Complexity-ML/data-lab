@@ -245,6 +245,16 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
     for (const edge of outgoing) if (!['approved', 'quarantine'].includes(edge.sourceHandle ?? '')) findings.push(issue('card-contracts', { id: `split-handle-unknown-${edge.id}`, severity: 'error', nodeId, title: 'Unknown split handle', detail: `${edge.id} must use the approved or quarantine source handle.` }))
     return findings
   },
+  impact: (context, nodeId) => {
+    if (hasDownstreamKind(context, nodeId, ['risk'])) return []
+    return [issue('card-contracts', {
+      id: `impact-risk-coverage-${nodeId}`,
+      severity: 'warning',
+      nodeId,
+      title: 'Impact analysis has no risk classification',
+      detail: 'Add an evidence-backed Risk Assessment downstream so domain, severity, confidence, affected assets and mitigation are explicit. The agent should propose this missing graph coverage.',
+    })]
+  },
   risk: (context, nodeId) => {
     const node = context.nodes.find((candidate) => candidate.id === nodeId)
     if (!node) return []
@@ -291,6 +301,20 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       nodeId,
       title: 'No-risk assessment contains an impact claim',
       detail: 'risk_type=none must keep affected_assets=0 and severity unknown or low.',
+    }))
+    if (risk.domain === 'ml' && risk.riskType === 'data' && risk.affectedModels === undefined) findings.push(issue('card-contracts', {
+      id: `risk-ml-models-${nodeId}`,
+      severity: 'warning',
+      nodeId,
+      title: 'ML risk does not quantify affected models',
+      detail: 'Declare affected_models when fresh lineage identifies model, feature or deployment impact. Keep it unknown when the evidence does not support a count.',
+    }))
+    if (['critical', 'high'].includes(risk.severity ?? '') && !hasDownstreamKind(context, nodeId, ['patch', 'decision', 'review', 'validation'])) findings.push(issue('card-contracts', {
+      id: `risk-mitigation-${nodeId}`,
+      severity: 'warning',
+      nodeId,
+      title: 'Elevated risk has no mitigation path',
+      detail: 'Propose a graph-only Compatibility Patch, Agent Decision, Human Review or Validation checkpoint downstream before publishing an affected Output.',
     }))
     return findings
   },

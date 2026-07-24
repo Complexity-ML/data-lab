@@ -77,18 +77,23 @@ export function riskAssessmentRuleError(rule: string | null): string | undefined
   }
   const value = (key: string) => normalizedRule.match(new RegExp(`(?:^|\\|)\\s*${key}\\s*=\\s*([^|]+)`, 'i'))?.[1].trim().toLowerCase()
   const scope = value('scope')
+  const riskDomain = value('risk_domain')
   const riskType = value('risk_type')
   const severity = value('severity')
   const evidence = value('evidence')
   const confidence = Number(value('confidence'))
   const affectedAssets = Number(value('affected_assets'))
+  const affectedModelsValue = value('affected_models')
+  const affectedModels = affectedModelsValue === undefined ? undefined : Number(affectedModelsValue)
   const action = value('action')
   if (!scope || !action) return 'Risk Assessment scope and action must be non-empty'
+  if (riskDomain && !['general', 'data', 'ml', 'analytics', 'privacy', 'governance', 'security', 'reliability'].includes(riskDomain)) return 'Risk Assessment risk_domain is invalid'
   if (!['data', 'collection', 'none'].includes(riskType ?? '')) return 'Risk Assessment risk_type must be data, collection or none'
   if (!['critical', 'high', 'medium', 'low', 'unknown'].includes(severity ?? '')) return 'Risk Assessment severity is invalid'
   if (!['fresh', 'stale', 'unavailable'].includes(evidence ?? '')) return 'Risk Assessment evidence is invalid'
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return 'Risk Assessment confidence must be between 0 and 1'
   if (!Number.isInteger(affectedAssets) || affectedAssets < 0) return 'Risk Assessment affected_assets must be a non-negative integer'
+  if (affectedModels !== undefined && (!Number.isInteger(affectedModels) || affectedModels < 0)) return 'Risk Assessment affected_models must be a non-negative integer'
   if (riskType === 'data' && evidence !== 'fresh') return 'Data risk requires fresh versioned evidence; connector failures must use risk_type=collection'
   if (riskType === 'data' && (severity === 'unknown' || affectedAssets === 0)) return 'Data risk requires a concrete severity and at least one affected asset'
   if (riskType === 'collection' && affectedAssets > 0) return 'Collection reliability cannot claim affected data assets'
