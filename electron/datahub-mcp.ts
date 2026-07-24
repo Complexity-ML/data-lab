@@ -410,13 +410,27 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
   }
 }
 
+export function buildDataHubSearchQuery(query: string): string {
+  const clean = query.trim().slice(0, 500)
+  if (clean === '*') return '*'
+  const terms = [...new Set(clean
+    .replace(/^\/q\s+/i, '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9_]+/gi, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((term) => term.length >= 2))]
+    .slice(0, 16)
+  if (!terms.length) throw new Error('Enter at least two searchable characters to search DataHub')
+  return `/q ${terms.join('+')}`
+}
+
 export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
-  const clean = query.trim().slice(0, 180)
-  if (clean.length < 2) throw new Error('Enter at least two characters to search DataHub')
+  const structuredQuery = buildDataHubSearchQuery(query)
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
-  const structuredQuery = clean === '*' || clean.startsWith('/q ') ? clean : `/q ${clean.replace(/\s+/g, '+')}`
   const searchResult = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: 12, offset: 0 } }), 20_000, 'search'), 'search response')
   if (searchResult.isError) throw new Error(summarizeResult(searchResult))
   const matches = parseSearchResults(readStructuredToolResult(searchResult))

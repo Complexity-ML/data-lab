@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -65,6 +65,13 @@ describe('DataHub MCP connection settings', () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
     expect(() => assertBoundedMcpPayload(circular)).toThrow('not valid serializable data')
+  })
+
+  it('turns autonomous control text into a bounded DataHub search query without Lucene operators', () => {
+    expect(buildDataHubSearchQuery('Execute DATA LAB Control: objective=maintain governed graph | mode=autonomous + retry')).toBe('/q Execute+DATA+LAB+Control+objective+maintain+governed+graph+mode+autonomous+retry')
+    expect(buildDataHubSearchQuery('/q Customer_Analytics_Measures')).toBe('/q Customer_Analytics_Measures')
+    expect(buildDataHubSearchQuery('*')).toBe('*')
+    expect(() => buildDataHubSearchQuery(':: || ++')).toThrow('searchable characters')
   })
 
   it('normalizes the exact write-back payload before any confirmation or MCP mutation', () => {

@@ -5,6 +5,7 @@ import type { IncidentEventInput } from '../domain/incidents'
 import { errorMessage } from '../domain/toasts'
 import { evaluateMonitorObservation, findBoundLiveMonitors, liveMonitorBindingKey, observeDataHubAudit, type BoundLiveMonitor, type MonitorRuntimeState } from '../domain/live-monitor'
 import type { PipelineNode } from '../domain/pipeline'
+import { classifyConnectivityFailure } from '../domain/connectivity'
 
 export interface LiveIncidentTrigger {
   audit: DataHubMcpAudit
@@ -66,16 +67,20 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
           runtime.current.set(bindingKey, decision.next)
           if (!decision.transition) continue
           const incidentKey = `live-monitor:${monitor.monitorId}:${monitor.urn}`
+          const failedReadSummaries = auditResult.reads.filter((read) => read.status !== 'ok' || read.stale).map((read) => read.summary)
+          const connectivity = observation.failedReads === observation.totalReads
+            ? classifyConnectivityFailure(failedReadSummaries.join(' | '), `DataHub · ${monitor.sourceLabel}`)
+            : undefined
           const detail = decision.transition === 'recovered'
             ? `All ${observation.totalReads} monitored connector reads returned to normal.`
-            : `${observation.failedReads}/${observation.totalReads} monitored connector reads are unavailable or stale. Fingerprint ${observation.fingerprint}.`
+            : connectivity?.detail ?? `${observation.failedReads}/${observation.totalReads} monitored connector reads are unavailable or stale. Fingerprint ${observation.fingerprint}.`
           await callbacks.current.onIncident({
             incidentKey,
             transition: decision.transition,
             severity: observation.severity,
-            title: `${monitor.monitorLabel} · ${monitor.sourceLabel}`,
+            title: connectivity?.title ?? `${monitor.monitorLabel} · ${monitor.sourceLabel}`,
             detail,
-            sourceSystem: 'DataHub',
+            sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
             sourceRef: monitor.urn,
             fingerprint: observation.fingerprint,
             cardId: monitor.monitorId,
@@ -95,19 +100,20 @@ export function useLiveIncidentMonitor({ active, agentBlocked, nodes, edges, aud
         } catch (error) {
           if (!disposed) {
             const incidentKey = `live-monitor:${monitor.monitorId}:${monitor.urn}`
+            const connectivity = classifyConnectivityFailure(error, `DataHub · ${monitor.sourceLabel}`)
             await callbacks.current.onIncident({
               incidentKey,
               transition: runtime.current.get(bindingKey)?.open ? 'worsened' : 'opened',
               severity: 'critical',
-              title: `${monitor.monitorLabel} · monitoring unavailable`,
-              detail: errorMessage(error, 'Connector monitoring failed'),
-              sourceSystem: 'DataHub',
+              title: connectivity?.title ?? `${monitor.monitorLabel} · monitoring unavailable`,
+              detail: connectivity?.detail ?? errorMessage(error, 'Connector monitoring failed'),
+              sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
               sourceRef: monitor.urn,
-              fingerprint: 'monitor-read-error',
+              fingerprint: connectivity?.fingerprint ?? 'monitor-read-error',
               cardId: monitor.monitorId,
               branchId: monitor.monitorId,
             })
-            runtime.current.set(bindingKey, { fingerprint: 'monitor-read-error', severity: 'critical', open: true, iterations: (runtime.current.get(bindingKey)?.iterations ?? 0) + 1 })
+            runtime.current.set(bindingKey, { fingerprint: connectivity?.fingerprint ?? 'monitor-read-error', severity: 'critical', open: true, iterations: (runtime.current.get(bindingKey)?.iterations ?? 0) + 1 })
           }
         } finally {
           reading.current.delete(bindingKey)

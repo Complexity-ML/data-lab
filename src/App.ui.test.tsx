@@ -155,6 +155,48 @@ describe('visual pipeline workspace regressions', () => {
     }))
   })
 
+  it('falls back to bounded catalog discovery when an objective search fails', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    const asset = {
+      urn: 'urn:li:dataset:(urn:li:dataPlatform:dbt,analytics.customers,PROD)',
+      name: 'customers',
+      platform: 'dbt',
+      environment: 'PROD',
+      description: 'Governed customers',
+      owners: ['Data Platform'],
+      tags: [],
+      fields: [],
+      qualityStatus: 'unavailable' as const,
+      upstream: [],
+      downstream: [],
+      freshness: { capturedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), stale: false },
+    }
+    api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
+    api.searchDataHubAssets = vi.fn()
+      .mockRejectedValueOnce(new Error('Failed to parse DataHub search query'))
+      .mockResolvedValueOnce([asset])
+    api.inspectDataHubAsset = vi.fn(async () => ({ asset, evidence: [] }))
+    api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
+    api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
+    api.runChatGPTProposal = vi.fn(async () => ({
+      model: 'gpt-5.6-sol',
+      proposal: { title: 'Use governed source', summary: 'Use the catalog result.', rationale: 'DataHub returned a governed source.', requires_human_review: false, confidence: 1, writeback: 'None.', evidence: [], actions: [] },
+    }))
+
+    render(<App />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
+
+    await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
+    expect(api.searchDataHubAssets).toHaveBeenNthCalledWith(2, '*')
+    expect(api.inspectDataHubAsset).toHaveBeenCalledWith(asset.urn, false)
+    expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
+      datahubEvidence: expect.arrayContaining([expect.stringContaining('Starting dataset candidate from DataHub: customers')]),
+    }))
+    expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({ incidentKey: 'source-discovery:datahub', transition: 'opened' }))
+  })
+
   it('pauses future autonomous iterations and Stop cancels the active provider channels', async () => {
     const user = userEvent.setup()
     const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
