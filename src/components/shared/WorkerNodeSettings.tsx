@@ -22,5 +22,9 @@ export function WorkerNodeSettings({ node, onUpdate }: { node: PipelineNode; onU
       <label>Concurrency<input max={8} min={1} onChange={(event) => update({ concurrency: Number(event.target.value) })} type="number" value={policy.concurrency} /></label>
     </div>
     <label>Failure recovery<select value={policy.retry} onChange={(event) => update({ retry: event.target.value as WorkerPolicy['retry'] })}><option value="checkpoint">Resume checkpoint</option><option value="none">Stop without retry</option></select></label>
+    <div className="worker-setting-grid">
+      <label>Maximum retries<input max={10} min={1} onChange={(event) => update({ maxRetries: Number(event.target.value) })} type="number" value={policy.maxRetries ?? 3} /></label>
+      <label>Cooldown (seconds)<input max={3600} min={5} onChange={(event) => update({ cooldownSeconds: Number(event.target.value) })} type="number" value={policy.cooldownSeconds ?? 30} /></label>
+    </div>
   </section>
 }

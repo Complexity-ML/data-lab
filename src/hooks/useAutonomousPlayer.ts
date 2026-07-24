@@ -398,7 +398,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             })
           }
         } else {
-          if (catalogExplorer && discoveryError) catalog.markDiscoveryFailed(catalogExplorer, discoveryQuery, () => agentRunId.current === runId)
+          if (catalogExplorer && discoveryError) catalogProgress = catalog.markDiscoveryFailed(catalogExplorer, discoveryQuery, () => agentRunId.current === runId)
           const connectivity = discoveryError ? classifyConnectivityFailure(discoveryError, 'DataHub source discovery') : undefined
           const failed = discoveryError !== undefined
           const discoveryFailure = failed ? errorMessage(discoveryError, 'Unknown search error') : ''
@@ -422,9 +422,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             cardId: unboundSource?.id,
             branchId: unboundSource?.id,
           })
-          if (unboundSource && expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId) {
+          if (unboundSource && catalogProgress?.pauseReason !== 'retry_exhausted' && expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId) {
             queueAutonomousStep('Retry governed DataHub source discovery for the existing unbound Data Source. Do not propose another placeholder or duplicate graph.', expectedPlayerSessionId, 30_000)
             setActivity(`Incident reported · ${connectivity?.title ?? (failed ? 'DataHub source discovery failed' : 'no governed DataHub source matched')} · autonomous retry in 30 seconds`)
+          } else if (unboundSource && catalogProgress?.pauseReason === 'retry_exhausted') {
+            setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total || '?'} · retry limit reached · reconnect the catalog to resume`)
           }
           if (unboundSource) return
           datahubEvidence = ['No governed DataHub source matched the objective. The graph has no Data Source yet. Add one explicit unbound Data Source and one Human Review binding checkpoint without inventing schema, ownership or lineage.']
@@ -454,6 +456,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       if ((catalogProgress?.state === 'failed' || catalogProgress?.pauseReason === 'connector_unavailable') && expectedPlayerSessionId !== undefined) {
         queueAutonomousStep('Retry the versioned Catalog Explorer checkpoint after the connector becomes available. Do not call the model until fresh catalog evidence is collected.', expectedPlayerSessionId, 30_000)
         setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total} · connector retry in 30 seconds · model not called`)
+        return
+      }
+      if (catalogProgress?.pauseReason === 'retry_exhausted') {
+        setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total || '?'} · connector retry limit reached · graph checkpoint preserved`)
         return
       }
       const newProfileRisk = [...profileCandidates.values()].some((asset) => asset.qualityStatus === 'failing')

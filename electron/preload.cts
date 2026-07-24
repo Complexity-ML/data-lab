@@ -43,6 +43,8 @@ const workspaceOpenChannel = 'data-lab:workspace-open'
 const workspaceAutosaveChannel = 'data-lab:workspace-autosave'
 const workspaceCommitChannel = 'data-lab:workspace-commit'
 const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
+const catalogCheckpointLoadChannel = 'data-lab:catalog-checkpoint-load'
+const catalogCheckpointSaveChannel = 'data-lab:catalog-checkpoint-save'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
@@ -105,6 +107,8 @@ contextBridge.exposeInMainWorld('dataLab', {
   autosaveWorkspace: (workspace: unknown) => ipcRenderer.invoke(workspaceAutosaveChannel, workspace),
   commitWorkspace: (workspace: unknown) => ipcRenderer.invoke(workspaceCommitChannel, workspace),
   resolveWorkspaceRecovery: (action: 'recover' | 'discard') => ipcRenderer.invoke(workspaceRecoveryChannel, { action }),
+  loadCatalogCheckpoint: (key: string) => ipcRenderer.invoke(catalogCheckpointLoadChannel, { key }),
+  saveCatalogCheckpoint: (key: string, progress: unknown) => ipcRenderer.invoke(catalogCheckpointSaveChannel, { key, progress }),
   getActiveAiSource: () => ipcRenderer.invoke(activeAiSourceChannel),
   setActiveAiSource: (source: 'chatgpt' | 'openai' | 'anthropic' | 'moonshot') => ipcRenderer.invoke(activeAiSourceSaveChannel, { source }),
   recordDiagnostic: (event: unknown) => ipcRenderer.invoke(diagnosticsRecordChannel, event),

@@ -5,7 +5,7 @@ import { getDataHubStatus, loadDatasetContext } from './datahub.js'
 import { auditDataHubWithMcp, closeDataHubMcp, connectDataHubMcp, getDataHubMcpConfigurationStatus, inspectDataHubAsset, invalidateDataHubContext, parseDataHubDecisionRequest, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { cancelAiProposal, getAiStatus, refreshAiModelCatalog, runAiProposal, saveAiSettings, testAiConnection } from './ai-provider.js'
 import { ChatGPTAgentSession } from './chatgpt-session.js'
-import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, clearIncidentEvents, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, deleteWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting } from './workspace-db.js'
+import { archiveWorkspace, autosaveWorkspaceDraft, beginWorkspaceSession, clearIncidentEvents, closeWorkspaceDatabase, commitActiveWorkspace, createWorkspace, deleteWorkspace, duplicateWorkspace, listIncidentEvents, loadAppSetting, loadCatalogCheckpoint, loadWorkspaceManagerState, markWorkspaceSessionClean, openWorkspace, recordIncidentEvent, renameWorkspace, resolveWorkspaceRecovery, saveAppSetting, saveCatalogCheckpoint } from './workspace-db.js'
 import { parseActiveAiSource, requireSelectableAiSource, type ActiveAiSource } from './active-ai-source.js'
 import { reserveHumanReviewNotification } from './human-review-notifications.js'
 import { ensureDiagnosticLog, exportDiagnosticBundle, loadDiagnosticSettings, recordDiagnosticEvent, saveDiagnosticSettings } from './diagnostics.js'
@@ -59,6 +59,8 @@ const workspaceOpenChannel = 'data-lab:workspace-open'
 const workspaceAutosaveChannel = 'data-lab:workspace-autosave'
 const workspaceCommitChannel = 'data-lab:workspace-commit'
 const workspaceRecoveryChannel = 'data-lab:workspace-recovery'
+const catalogCheckpointLoadChannel = 'data-lab:catalog-checkpoint-load'
+const catalogCheckpointSaveChannel = 'data-lab:catalog-checkpoint-save'
 const activeAiSourceChannel = 'data-lab:active-ai-source'
 const activeAiSourceSaveChannel = 'data-lab:active-ai-source-save'
 const diagnosticsRecordChannel = 'data-lab:diagnostics-record'
@@ -303,6 +305,8 @@ app.whenReady().then(() => {
   ipcMain.handle(workspaceOpenChannel, (_event, payload: { workspaceId?: unknown }) => openWorkspace(app.getPath('userData'), payload?.workspaceId))
   ipcMain.handle(workspaceAutosaveChannel, (_event, payload: unknown) => autosaveWorkspaceDraft(app.getPath('userData'), payload))
   ipcMain.handle(workspaceCommitChannel, (_event, payload: unknown) => commitActiveWorkspace(app.getPath('userData'), payload))
+  ipcMain.handle(catalogCheckpointLoadChannel, (_event, payload: { key?: unknown }) => loadCatalogCheckpoint(app.getPath('userData'), payload?.key))
+  ipcMain.handle(catalogCheckpointSaveChannel, (_event, payload: { key?: unknown; progress?: unknown }) => saveCatalogCheckpoint(app.getPath('userData'), payload?.key, payload?.progress))
   ipcMain.handle(workspaceRecoveryChannel, (_event, payload: { action?: unknown }) => {
     const state = resolveWorkspaceRecovery(app.getPath('userData'), payload?.action)
     workspaceSessionWasUnclean = false

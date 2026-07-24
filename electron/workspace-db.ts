@@ -178,6 +178,13 @@ function db(userDataDirectory: string) {
     );
     CREATE INDEX IF NOT EXISTS incident_events_workspace_time_idx ON incident_events (workspace_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS incident_events_key_time_idx ON incident_events (incident_key, created_at DESC);
+    CREATE TABLE IF NOT EXISTS catalog_checkpoints (
+      scope_id TEXT NOT NULL,
+      checkpoint_key TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope_id, checkpoint_key)
+    );
   `)
   const incidentColumns = database.prepare('PRAGMA table_info(incident_events)').all() as unknown as { name: string }[]
   if (!incidentColumns.some((column) => column.name === 'fingerprint')) database.exec('ALTER TABLE incident_events ADD COLUMN fingerprint TEXT')
@@ -324,6 +331,7 @@ export function deleteWorkspace(userDataDirectory: string, workspaceId: unknown)
   target.exec('BEGIN')
   try {
     target.prepare('DELETE FROM incident_events WHERE workspace_id = ?').run(workspaceId)
+    target.prepare('DELETE FROM catalog_checkpoints WHERE scope_id = ?').run(workspaceId)
     target.prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId)
     target.exec('COMMIT')
   } catch (error) {
@@ -351,6 +359,39 @@ export function autosaveWorkspaceDraft(userDataDirectory: string, payload: unkno
   const timestamp = new Date().toISOString()
   target.prepare('UPDATE workspaces SET draft_payload = ?, dirty = 1, draft_updated_at = ? WHERE id = ?').run(serialized, timestamp, workspaceId)
   return { saved: true as const, workspaceId, updatedAt: timestamp }
+}
+
+function catalogCheckpointScope(target: DatabaseSync) {
+  return activeWorkspaceId(target) ?? 'workbench'
+}
+
+function normalizeCatalogCheckpointKey(value: unknown) {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9:._|*=-]{1,500}$/.test(value)) throw new Error('Invalid catalog checkpoint key')
+  return value
+}
+
+export function loadCatalogCheckpoint(userDataDirectory: string, checkpointKey: unknown) {
+  const target = db(userDataDirectory)
+  const key = normalizeCatalogCheckpointKey(checkpointKey)
+  const row = target.prepare('SELECT payload FROM catalog_checkpoints WHERE scope_id = ? AND checkpoint_key = ?')
+    .get(catalogCheckpointScope(target), key) as { payload?: unknown } | undefined
+  return parsePayload(row?.payload)
+}
+
+export function saveCatalogCheckpoint(userDataDirectory: string, checkpointKey: unknown, payload: unknown) {
+  const target = db(userDataDirectory)
+  const key = normalizeCatalogCheckpointKey(checkpointKey)
+  const scopeId = catalogCheckpointScope(target)
+  const serialized = serializePayload(payload)
+  const updatedAt = new Date().toISOString()
+  target.prepare(`
+    INSERT INTO catalog_checkpoints (scope_id, checkpoint_key, payload, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(scope_id, checkpoint_key) DO UPDATE SET
+      payload = excluded.payload,
+      updated_at = excluded.updated_at
+  `).run(scopeId, key, serialized, updatedAt)
+  return { saved: true as const, scopeId, updatedAt }
 }
 
 export function commitActiveWorkspace(userDataDirectory: string, payload: unknown) {

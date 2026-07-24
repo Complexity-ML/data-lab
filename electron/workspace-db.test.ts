@@ -16,6 +16,7 @@ import {
   listWorkspaces,
   listIncidentEvents,
   loadAppSetting,
+  loadCatalogCheckpoint,
   loadSavedWorkspace,
   loadWorkspaceManagerState,
   markWorkspaceSessionClean,
@@ -24,6 +25,7 @@ import {
   renameWorkspace,
   resolveWorkspaceRecovery,
   saveAppSetting,
+  saveCatalogCheckpoint,
   saveWorkspace,
 } from './workspace-db.js'
 
@@ -49,6 +51,31 @@ describe('SQLite workspace persistence', () => {
     expect(state.activeWorkspaceId).toBeNull()
     expect(state.workspaces).toEqual([])
     expect(autosaveWorkspaceDraft(target, { nodes: [{ id: 'example' }] })).toEqual({ saved: false, reason: 'no-active-workspace' })
+  })
+
+  it('persists catalog coverage for the unsaved workbench without saving its graph', () => {
+    const target = directory('catalog-checkpoint')
+    const progress = { inspected: 8, total: 67, datasets: [{ urn: 'urn:li:dataset:test-1' }] }
+
+    expect(saveCatalogCheckpoint(target, 'catalog:deadbeef', progress)).toMatchObject({ saved: true, scopeId: 'workbench' })
+    expect(loadCatalogCheckpoint(target, 'catalog:deadbeef')).toEqual(progress)
+    expect(loadWorkspaceManagerState(target).activeWorkspaceId).toBeNull()
+
+    closeWorkspaceDatabase()
+    expect(loadCatalogCheckpoint(target, 'catalog:deadbeef')).toEqual(progress)
+  })
+
+  it('isolates catalog checkpoints by active workspace', () => {
+    const target = directory('catalog-workspaces')
+    const first = createWorkspace(target, 'First', { nodes: [] })
+    saveCatalogCheckpoint(target, 'catalog:shared', { inspected: 4 })
+    const second = createWorkspace(target, 'Second', { nodes: [] })
+    saveCatalogCheckpoint(target, 'catalog:shared', { inspected: 12 })
+
+    openWorkspace(target, first.activeWorkspaceId!)
+    expect(loadCatalogCheckpoint(target, 'catalog:shared')).toEqual({ inspected: 4 })
+    openWorkspace(target, second.activeWorkspaceId!)
+    expect(loadCatalogCheckpoint(target, 'catalog:shared')).toEqual({ inspected: 12 })
   })
 
   it('migrates the legacy singleton without losing review history', () => {

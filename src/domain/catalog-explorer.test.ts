@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -283,6 +283,104 @@ describe('Catalog Explorer', () => {
     expect(result.progress).toMatchObject({ inspected: 3, failed: 0, state: 'complete' })
   })
 
+  it('never regresses inspected coverage when a checkpoint retry fails again', async () => {
+    const assets = Array.from({ length: 12 }, (_, index) => asset(index))
+    const previousDatasets = assets.slice(0, 8).map((value, index) => ({
+      ...checkpointForInspection(inspection(value)),
+      status: index >= 4 ? 'unavailable' as const : 'healthy' as const,
+      expiresAt: index >= 4 ? capturedAt : freshExpiry,
+    }))
+    const previousProgress = {
+      query: '*',
+      total: 12,
+      discovered: 12,
+      inspected: 8,
+      failed: 4,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 1,
+      connectorRetryCount: 1,
+      connectorRetryLimit: 3,
+      state: 'paused' as const,
+      pauseReason: 'connector_unavailable' as const,
+      checkpointAt: capturedAt,
+      datasets: previousDatasets,
+    }
+
+    const result = await inspectCatalogInParallel(assets, async () => {
+      throw new Error('still unavailable')
+    }, { maxInspections: 4, previous: previousDatasets, previousProgress })
+
+    expect(result.progress).toMatchObject({
+      inspected: 8,
+      failed: 4,
+      connectorRetryCount: 2,
+      state: 'paused',
+      pauseReason: 'connector_unavailable',
+    })
+    expect(new Set(result.progress.datasets.map((checkpoint) => checkpoint.urn)).size).toBe(8)
+  })
+
+  it('stops connector retries after the persisted limit without calling the connector', async () => {
+    const assets = Array.from({ length: 4 }, (_, index) => asset(index))
+    const unavailable = {
+      ...checkpointForInspection(inspection(assets[0]!)),
+      status: 'unavailable' as const,
+      expiresAt: capturedAt,
+    }
+    const inspect = vi.fn(async () => inspection(assets[0]!))
+    const result = await inspectCatalogInParallel(assets, inspect, {
+      previous: [unavailable],
+      previousProgress: {
+        query: '*',
+        total: 4,
+        discovered: 4,
+        inspected: 1,
+        failed: 1,
+        incidents: 0,
+        governanceGaps: 0,
+        concurrency: 1,
+        connectorRetryCount: 3,
+        connectorRetryLimit: 3,
+        state: 'paused',
+        pauseReason: 'connector_unavailable',
+        checkpointAt: capturedAt,
+        datasets: [unavailable],
+      },
+    })
+
+    expect(inspect).not.toHaveBeenCalled()
+    expect(result.progress).toMatchObject({
+      inspected: 1,
+      connectorRetryCount: 3,
+      state: 'paused',
+      pauseReason: 'retry_exhausted',
+    })
+  })
+
+  it('merges SQLite and card checkpoints by dataset without losing coverage', () => {
+    const leftDataset = checkpointForInspection(inspection(asset(0)))
+    const rightDataset = checkpointForInspection(inspection(asset(1)))
+    const base = {
+      query: '*',
+      total: 3,
+      discovered: 3,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+    }
+    const merged = mergeCatalogProgress(
+      { ...base, inspected: 1, datasets: [leftDataset] },
+      { ...base, inspected: 1, checkpointAt: '2026-07-24T08:01:00.000Z', datasets: [rightDataset] },
+    )
+
+    expect(merged).toMatchObject({ total: 3, inspected: 2, remaining: 1 })
+    expect(merged?.datasets.map((checkpoint) => checkpoint.urn)).toEqual([leftDataset.urn, rightDataset.urn])
+  })
+
   it('checkpoints four assets per autonomous iteration and resumes the remainder', async () => {
     const assets = Array.from({ length: 10 }, (_, index) => asset(index))
     const firstInspect = vi.fn(async (urn: string) => inspection(assets.find((candidate) => candidate.urn === urn)!))
@@ -345,6 +443,7 @@ describe('Catalog Explorer', () => {
     expect(shouldOpenCatalogConnectivityIncident(base)).toBe(false)
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'failed' })).toBe(true)
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(true)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'retry_exhausted' })).toBe(true)
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'cancelled' })).toBe(false)
   })
 
