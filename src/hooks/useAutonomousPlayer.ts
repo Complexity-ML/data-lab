@@ -331,13 +331,20 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           if (catalogExplorer && discoveryError) catalog.markDiscoveryFailed(catalogExplorer, discoveryQuery, () => agentRunId.current === runId)
           const connectivity = discoveryError ? classifyConnectivityFailure(discoveryError, 'DataHub source discovery') : undefined
           const failed = discoveryError !== undefined
+          const discoveryFailure = failed ? errorMessage(discoveryError, 'Unknown search error') : ''
+          if (failed) recordDiagnostic({
+            category: 'mcp',
+            action: 'catalog.search',
+            status: 'error',
+            detail: { message: discoveryFailure },
+          })
           await logIncident({
             incidentKey: 'source-discovery:datahub',
             transition: 'opened',
             severity: connectivity ? 'critical' : 'warning',
             title: connectivity?.title ?? (failed ? 'DataHub source discovery failed' : 'No governed DataHub source matched'),
-            detail: connectivity?.detail ?? (failed
-              ? `The DataHub catalog search failed: ${errorMessage(discoveryError, 'Unknown search error')}. This is a collection-reliability incident; dataset health was not evaluated.`
+            detail: connectivity ? `${connectivity.detail} Technical detail: ${discoveryFailure}.` : (failed
+              ? `The DataHub catalog search failed: ${discoveryFailure}. This is a collection-reliability incident; dataset health was not evaluated.`
               : 'The DataHub catalog search completed, but no governed starting dataset matched the autonomous objective. The player will retry without calling the model again.'),
             sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
             sourceRef: 'mcp-search',
