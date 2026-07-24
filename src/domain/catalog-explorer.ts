@@ -47,6 +47,11 @@ export function resolveAdaptiveCatalogConcurrency(
   const failed = previous.batchFailed ?? 0
   if (previous.pauseReason === 'connector_unavailable' || failed > 0) return Math.max(1, Math.floor(current / 2))
   if (!previous.batchDurationMs) return current
+  const processed = previous.batchProcessed ?? 0
+  const cached = previous.batchCached ?? 0
+  // A cached batch measures local SQLite/cache speed, not connector capacity.
+  // Do not use it to increase pressure on the MCP transport.
+  if (processed > 0 && cached >= Math.ceil(processed / 2)) return current
   if (previous.batchDurationMs <= 8_000) return Math.min(8, current + 2)
   if (previous.batchDurationMs >= 15_000) return Math.max(1, current - 1)
   return current
@@ -75,8 +80,15 @@ function fingerprint(value: string) {
 export function checkpointForInspection(inspection: CatalogInspection): CatalogDatasetCheckpoint {
   const { asset, evidence } = inspection
   const unavailable = isInspectionUnavailable(inspection)
+  const collectionFailures = unavailable
+    ? evidence
+      .filter((read) => read.status !== 'ok' || read.stale)
+      .slice(0, 4)
+      .map((read) => `${read.tool}: ${read.summary}`)
+    : []
   const issues = [
     ...(unavailable ? ['metadata unavailable'] : []),
+    ...collectionFailures,
     ...(asset.freshness.stale ? ['stale evidence'] : []),
     ...(asset.owners.length === 0 ? ['owner missing'] : []),
     ...(asset.tags.length === 0 ? ['tags missing'] : []),
@@ -140,6 +152,8 @@ export async function inspectCatalogInParallel(
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
   let batchDurationMs = 0
   let batchFailed = 0
+  let batchProcessed = 0
+  let batchCached = 0
 
   const emit = (state: CatalogExplorationProgress['state'], pauseReason?: CatalogExplorationProgress['pauseReason']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
@@ -159,6 +173,8 @@ export async function inspectCatalogInParallel(
       batchSize: configuredBatchSize,
       batchDurationMs,
       batchFailed,
+      batchProcessed,
+      batchCached,
       remaining: Math.max(0, assets.length - checkpoints.length),
       mode: options.mode ?? 'catalog',
       cacheMode: options.cacheMode ?? 'prefer',
@@ -175,14 +191,14 @@ export async function inspectCatalogInParallel(
   for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += concurrency) {
     const batch = scheduled.slice(offset, offset + concurrency)
     const batchStartedAt = Date.now()
-    const batchCheckpoints = await Promise.all(batch.map(async (asset) => {
+    const batchResults = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
         inspections.push(inspection)
-        return checkpointForInspection(inspection)
+        return { checkpoint: checkpointForInspection(inspection), inspection }
       } catch (error) {
         const capturedAt = new Date().toISOString()
-        return {
+        return { checkpoint: {
           urn: asset.urn,
           name: asset.name,
           status: 'unavailable' as const,
@@ -194,11 +210,14 @@ export async function inspectCatalogInParallel(
           fingerprint: fingerprint(`${asset.urn}:inspection-failed`),
           capturedAt,
           expiresAt: capturedAt,
-        }
+        } }
       }
     }))
+    const batchCheckpoints = batchResults.map((result) => result.checkpoint)
     batchDurationMs = Math.max(0, Date.now() - batchStartedAt)
     batchFailed = batchCheckpoints.filter((checkpoint) => checkpoint.status === 'unavailable').length
+    batchProcessed = batchResults.length
+    batchCached = batchResults.filter((result) => result.inspection?.evidence.length && result.inspection.evidence.every((read) => read.cached)).length
     checkpoints.push(...batchCheckpoints)
     emit('inspecting')
 
@@ -234,6 +253,8 @@ export async function inspectCatalogInParallel(
     batchSize: configuredBatchSize,
     batchDurationMs,
     batchFailed,
+    batchProcessed,
+    batchCached,
     remaining: Math.max(0, assets.length - checkpoints.length),
     mode: options.mode ?? 'catalog',
     cacheMode: options.cacheMode ?? 'prefer',

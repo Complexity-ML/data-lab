@@ -169,18 +169,24 @@ export function useCatalogExplorer(options: {
       })
       const failedConnectorGroups = catalogConnectionUnavailable ? connectorGroups : new Map<string, typeof unavailable>()
       await Promise.all([
-        ...[...failedConnectorGroups.entries()].map(([connector, datasets]) => logIncident({
-          incidentKey: `catalog-explorer:connectivity:${connector}`,
-          transition: 'opened' as const,
-          severity: 'critical' as const,
-          title: `Catalog connection unavailable · ${byUrn.get(datasets[0]!.urn)?.sourceSystem ?? connector}`,
-          detail: `${datasets.length} bounded inspection read(s) failed. The audit stopped before classifying unavailable metadata as dataset health.`,
-          sourceSystem: byUrn.get(datasets[0]!.urn)?.sourceSystem ?? 'DATA LAB connectivity',
-          sourceRef: connector,
-          fingerprint: datasets.map((dataset) => dataset.fingerprint).join(':'),
-          cardId: input.explorer.id,
-          branchId: connector,
-        })),
+        ...[...failedConnectorGroups.entries()].map(([connector, datasets]) => {
+          const firstErrors = datasets
+            .flatMap((dataset) => dataset.issues)
+            .filter((issue) => issue !== 'metadata unavailable')
+            .slice(0, 3)
+          return logIncident({
+            incidentKey: `catalog-explorer:connectivity:${connector}`,
+            transition: 'opened' as const,
+            severity: 'critical' as const,
+            title: `Catalog connection unavailable · ${byUrn.get(datasets[0]!.urn)?.sourceSystem ?? connector}`,
+            detail: `${datasets.length} dataset inspection(s) failed. The audit stopped before classifying unavailable metadata as dataset health.${firstErrors.length ? ` First errors: ${firstErrors.join(' | ')}` : ''}`,
+            sourceSystem: byUrn.get(datasets[0]!.urn)?.sourceSystem ?? 'DATA LAB connectivity',
+            sourceRef: connector,
+            fingerprint: datasets.map((dataset) => dataset.fingerprint).join(':'),
+            cardId: input.explorer.id,
+            branchId: connector,
+          })
+        }),
         ...recoveredConnectors.map(([connector, source]) => logIncident({
           incidentKey: `catalog-explorer:connectivity:${connector}`,
           transition: 'recovered' as const,
