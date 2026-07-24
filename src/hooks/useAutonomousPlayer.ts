@@ -10,6 +10,7 @@ import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
+import type { CatalogInspection } from '../domain/catalog-connectors'
 import { addDataProfileToProposal, canReuseDataProfile, dataProfileEvidence } from '../domain/data-profile'
 import { recordDiagnostic } from '../domain/diagnostics'
 import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
@@ -36,18 +37,7 @@ interface AutonomousPlayerOptions {
   connectionMode: 'demo' | 'connected'
   edges: Edge[]
   fitCommittedGraph(): void
-  inspectDataHubAsset(urn: string, force?: boolean): Promise<{
-    asset: DataHubAssetSummary
-    evidence: {
-      name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
-      status: 'ok' | 'unavailable' | 'error'
-      summary: string
-      capturedAt: string
-      expiresAt: string
-      cached: boolean
-      stale: boolean
-    }[]
-  }>
+  inspectDataHubAsset(urn: string, force?: boolean, connectorId?: string): Promise<CatalogInspection>
   inspectorOpen: boolean
   issues: ValidationIssue[]
   language: string
@@ -191,7 +181,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     const sourceSelection = routingPreview
     const routedSources = sourceSelection.sources
     const hasDataSource = nodes.some((node) => node.data.kind === 'source')
-    const unboundSource = nodes.find((node) => node.data.kind === 'source' && !node.data.datahubUrn)
+    const unboundSource = nodes.find((node) => node.data.kind === 'source' && !(node.data.assetRef || node.data.datahubUrn))
     const catalogExplorer = nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
     let datahubEvidence: string[] = []
     let evidenceEntries: DataHubEvidence[] = []
@@ -201,7 +191,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     try {
       if (routedSources.length > 0) {
         for (const [sourceIndex, source] of routedSources.entries()) {
-          const sourceUrn = source.data.datahubUrn!
+          const sourceUrn = source.data.assetRef ?? source.data.datahubUrn!
           const sourceProfile = nodes.find((node) => node.data.kind === 'profile' && node.data.profile?.sourceUrn === sourceUrn)
           const forcedMonitorAudit = monitored?.monitor.urn === sourceUrn ? monitored.audit : undefined
           if (sourceProfile?.data.profile && canReuseDataProfile(sourceProfile.data.profile, Boolean(forcedMonitorAudit))) {
@@ -209,6 +199,47 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             const remembered = dataProfileEvidence(sourceProfile.data.profile)
             datahubEvidence.push(...remembered.summaries.map((summary) => `${source.data.label} · ${summary}`))
             evidenceEntries.push(...remembered.evidence)
+            continue
+          }
+
+          if (source.data.connectorId && source.data.connectorId !== 'datahub') {
+            const sourceSystem = source.data.sourceSystem ?? source.data.connectorId
+            setActivity(`Agent reading ${source.data.label} through ${sourceSystem} · source ${sourceIndex + 1}/${routedSources.length}…`)
+            try {
+              const inspection = await inspectDataHubAsset(sourceUrn, Boolean(forcedMonitorAudit), source.data.connectorId)
+              if (agentRunId.current !== runId) return
+              profileCandidates.set(sourceUrn, inspection.asset)
+              evidenceEntries.push(...inspection.evidence)
+              datahubEvidence.push(...inspection.evidence.map((read) => `${source.data.label} · ${read.tool} · ${read.status} · ${read.summary}`))
+              const failedReads = inspection.evidence.filter((read) => read.status !== 'ok' || read.stale)
+              await logIncident({
+                incidentKey: `${source.data.connectorId}-evidence:${sourceUrn}`,
+                transition: failedReads.length ? 'opened' : 'recovered',
+                severity: failedReads.length === inspection.evidence.length ? 'critical' : failedReads.length ? 'warning' : 'info',
+                title: `${sourceSystem} evidence · ${source.data.label}`,
+                detail: failedReads.length ? `${failedReads.length}/${inspection.evidence.length} connector reads failed or became stale.` : 'All required connector reads returned to normal.',
+                sourceSystem,
+                sourceRef: sourceUrn,
+                fingerprint: inspection.evidence.map((read) => `${read.tool}:${read.status}:${read.stale}`).join('|'),
+                cardId: source.id,
+                branchId: source.id,
+              })
+            } catch (error) {
+              const detail = errorMessage(error, `${sourceSystem} inspection failed`)
+              const connectivity = classifyConnectivityFailure(error, `${sourceSystem} · ${source.data.label}`)
+              await logIncident({
+                incidentKey: `${source.data.connectorId}-evidence:${sourceUrn}`,
+                transition: 'opened',
+                severity: 'critical',
+                title: connectivity?.title ?? `${sourceSystem} evidence · ${source.data.label}`,
+                detail: connectivity?.detail ?? detail,
+                sourceSystem: connectivity?.sourceSystem ?? sourceSystem,
+                sourceRef: sourceUrn,
+                fingerprint: connectivity?.fingerprint ?? 'connector-transport-error',
+                cardId: source.id,
+                branchId: source.id,
+              })
+            }
             continue
           }
 
@@ -266,7 +297,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             branchId: monitored?.monitor.monitorId ?? source.id,
           })
           recordAudit(audit.transport, successfulReads, audit.reads.length)
-          const inspection = await inspectDataHubAsset(sourceUrn, Boolean(forcedMonitorAudit)).catch(() => undefined)
+          const inspection = await inspectDataHubAsset(sourceUrn, Boolean(forcedMonitorAudit), source.data.connectorId).catch(() => undefined)
           if (inspection?.asset) profileCandidates.set(sourceUrn, inspection.asset)
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
@@ -441,7 +472,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           description: blankCandidate.description || proposedSource.data.description,
           owner: blankCandidate.owners.join(', ') || proposedSource.data.owner,
           schema: blankCandidate.fields,
-          datahubUrn: blankCandidate.urn,
+          connectorId: blankCandidate.connectorId ?? 'datahub',
+          sourceSystem: blankCandidate.sourceSystem ?? 'DataHub',
+          assetRef: blankCandidate.assetRef ?? blankCandidate.urn,
+          datahubUrn: (blankCandidate.connectorId ?? 'datahub') === 'datahub' ? blankCandidate.urn : undefined,
           datahubPlatform: blankCandidate.platform,
           datahubEnvironment: blankCandidate.environment,
           datahubDomain: blankCandidate.domain,
@@ -461,7 +495,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
               description: blankCandidate.description || 'Governed DataHub source selected by the autonomous player.',
               owner: blankCandidate.owners.join(', ') || 'Unassigned',
               schema: blankCandidate.fields,
-              datahubUrn: blankCandidate.urn,
+              connectorId: blankCandidate.connectorId ?? 'datahub',
+              sourceSystem: blankCandidate.sourceSystem ?? 'DataHub',
+              assetRef: blankCandidate.assetRef ?? blankCandidate.urn,
+              datahubUrn: (blankCandidate.connectorId ?? 'datahub') === 'datahub' ? blankCandidate.urn : undefined,
               datahubPlatform: blankCandidate.platform,
               datahubEnvironment: blankCandidate.environment,
               datahubDomain: blankCandidate.domain,
@@ -493,8 +530,8 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         }
       }
       for (const [sourceUrn, profileCandidate] of profileCandidates) {
-        const sourceNode = nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn === sourceUrn)
-          ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn === sourceUrn)
+        const sourceNode = nodes.find((node) => node.data.kind === 'source' && (node.data.assetRef ?? node.data.datahubUrn) === sourceUrn)
+          ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source' && (node.data.assetRef ?? node.data.datahubUrn) === sourceUrn)
         addDataProfileToProposal(nextProposal, nodes, profileCandidate, sourceNode)
       }
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)

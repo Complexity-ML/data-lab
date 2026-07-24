@@ -1,24 +1,12 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { inspectCatalogInParallel } from '../domain/catalog-explorer'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
+import type { CatalogInspection } from '../domain/catalog-connectors'
 import type { IncidentEventInput } from '../domain/incidents'
 import type { AgentProposal, CatalogExplorationProgress, PipelineNode } from '../domain/pipeline'
 
-interface CatalogInspectionResponse {
-  asset: DataHubAssetSummary
-  evidence: {
-    name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
-    status: 'ok' | 'unavailable' | 'error'
-    summary: string
-    capturedAt: string
-    expiresAt: string
-    cached: boolean
-    stale: boolean
-  }[]
-}
-
 export function useCatalogExplorer(options: {
-  inspectAsset(urn: string): Promise<CatalogInspectionResponse>
+  inspectAsset(urn: string): Promise<CatalogInspection>
   logIncident(event: IncidentEventInput): Promise<void>
   setActivity(value: string): void
   setNodes: Dispatch<SetStateAction<PipelineNode[]>>
@@ -31,7 +19,7 @@ export function useCatalogExplorer(options: {
       data: {
         ...node.data,
         exploration: progress,
-        description: `Complete DataHub catalog audit · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
+        description: `Complete connected-catalog audit · ${progress.inspected}/${progress.total || '?'} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
         status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
         runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : 'running',
       },
@@ -63,7 +51,7 @@ export function useCatalogExplorer(options: {
       return {
         asset: inspection.asset,
         evidence: inspection.evidence.map((read) => ({
-          tool: read.name,
+          tool: read.tool,
           urn,
           capturedAt: read.capturedAt,
           expiresAt: read.expiresAt,
@@ -94,7 +82,7 @@ export function useCatalogExplorer(options: {
         const hydrated = await inspectAsset(candidate.urn)
         candidate = hydrated.asset
         evidence.push(...hydrated.evidence.map((read) => ({
-          tool: read.name,
+          tool: read.tool,
           urn: candidate!.urn,
           capturedAt: read.capturedAt,
           expiresAt: read.expiresAt,
@@ -114,7 +102,7 @@ export function useCatalogExplorer(options: {
         severity: dataset.status === 'unavailable' ? 'critical' : 'warning',
         title: dataset.status === 'unavailable' ? `Metadata unavailable · ${dataset.name}` : `Governance attention · ${dataset.name}`,
         detail: dataset.issues.join(', ') || 'Catalog Explorer detected a metadata signal requiring attention.',
-        sourceSystem: dataset.status === 'unavailable' ? 'DATA LAB connectivity' : 'DataHub',
+        sourceSystem: dataset.status === 'unavailable' ? 'DATA LAB connectivity' : byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
         sourceRef: dataset.urn,
         fingerprint: dataset.fingerprint,
         cardId: input.explorer.id,
@@ -126,7 +114,7 @@ export function useCatalogExplorer(options: {
       evidence,
       progress: explored.progress,
       summaries: [
-        `Catalog Explorer completed ${explored.progress.inspected}/${explored.progress.total} DataHub dataset audits with concurrency ${explored.progress.concurrency}; ${explored.progress.incidents} require attention and ${explored.progress.failed} were unavailable.`,
+        `Catalog Explorer completed ${explored.progress.inspected}/${explored.progress.total} connected-catalog dataset audits with concurrency ${explored.progress.concurrency}; ${explored.progress.incidents} require attention and ${explored.progress.failed} were unavailable.`,
         ...explored.progress.datasets.map((dataset) => `${dataset.name} (${dataset.urn}) · ${dataset.status} · fields=${dataset.fieldCount} · owners=${dataset.ownerCount} · upstream=${dataset.upstreamCount} · downstream=${dataset.downstreamCount} · issues=${dataset.issues.join(', ') || 'none'} · fingerprint=${dataset.fingerprint}`),
       ],
     }
@@ -136,12 +124,12 @@ export function useCatalogExplorer(options: {
     const existingUpdate = proposal.updatedNodes.find((update) => update.nodeId === explorer.id)
     const patch = {
       exploration: progress,
-      description: `Complete DataHub catalog audit · ${progress.inspected}/${progress.total} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
+      description: `Complete connected-catalog audit · ${progress.inspected}/${progress.total} datasets inspected · ${progress.incidents} attention signal(s) · ${progress.failed} unavailable.`,
       status: progress.failed > 0 ? 'warning' as const : 'healthy' as const,
       runState: progress.state === 'complete' ? 'completed' as const : 'stopped' as const,
     }
     if (existingUpdate) existingUpdate.patch = { ...existingUpdate.patch, ...patch }
-    else proposal.updatedNodes.push({ nodeId: explorer.id, patch, reason: 'Persist the complete, resumable DataHub catalog exploration checkpoint.' })
+    else proposal.updatedNodes.push({ nodeId: explorer.id, patch, reason: 'Persist the complete, resumable multi-connector catalog exploration checkpoint.' })
   }, [])
 
   const markDiscoveryFailed = useCallback((explorer: PipelineNode, query: string, isCurrent: () => boolean) => {

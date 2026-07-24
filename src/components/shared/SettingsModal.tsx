@@ -12,8 +12,9 @@ import { useLanguage } from '../../i18n'
 import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
 import type { DiagnosticBundle, DiagnosticSettings } from '../../domain/diagnostics'
 import type { AutonomyPolicy } from '../../domain/autonomy-policy'
+import type { CatalogConnectorKind, CatalogConnectorManifest, CatalogConnectorSummary } from '../../domain/catalog-connectors'
 
-export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'autonomy' | 'datahub' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
+export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'autonomy' | 'connections' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
 interface SettingsModalProps {
   activeAiSource: ActiveAiSource
@@ -22,6 +23,7 @@ interface SettingsModalProps {
   aiStatus: AiStatus
   autonomyPolicy: AutonomyPolicy
   chatGPTStatus: ChatGPTSessionStatus
+  catalogConnectors: CatalogConnectorSummary[]
   connectionMode: 'demo' | 'connected'
   dataHubSettings: {
     transport: 'http' | 'stdio'
@@ -52,6 +54,7 @@ interface SettingsModalProps {
   onEmergencyStop: () => void
   onDuplicateWorkspace: (workspaceId: string) => Promise<void>
   onDeleteWorkspace: (workspaceId: string) => Promise<void>
+  onDeleteCatalogConnector: (id: string) => Promise<unknown>
   onDownloadAppUpdate: () => Promise<AppUpdateStatus>
   onExportPipeline: () => void
   onExportDiagnostics: () => Promise<void>
@@ -68,10 +71,12 @@ interface SettingsModalProps {
   onRemindHumanReview: (version: VersionSummary) => void
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>
   onSaveAiSettings: (settings: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }) => Promise<AiStatus>
+  onSaveCatalogConnector: (settings: CatalogConnectorManifest & { token?: string; clearToken?: boolean }) => Promise<unknown>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSetAppUpdateChannel: (channel: AppUpdateChannel) => Promise<AppUpdateStatus>
   onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
   onSyncDataHub: () => Promise<void>
+  onTestCatalogConnector: (id: string) => Promise<{ connected: boolean; message: string }>
   onTestAiConnection: () => Promise<void>
   onValidate: () => void
   onThemeChange: (theme: 'light' | 'dark') => void
@@ -89,7 +94,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, autonomyPolicy, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onAutonomyPolicyChange, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, autonomyPolicy, catalogConnectors, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onAutonomyPolicyChange, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteCatalogConnector, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveCatalogConnector, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onTestCatalogConnector, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -100,6 +105,8 @@ export function SettingsModal(props: SettingsModalProps) {
   const [dataHubFeedback, setDataHubFeedback] = useState('')
   const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
   const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
+  const [catalogKind, setCatalogKind] = useState<CatalogConnectorKind>('mcp')
+  const [catalogFeedback, setCatalogFeedback] = useState('')
   const [updateFeedback, setUpdateFeedback] = useState('')
   const [diagnosticBundle, setDiagnosticBundle] = useState<DiagnosticBundle>()
   const [diagnosticSettings, setDiagnosticSettings] = useState<DiagnosticSettings>({ enabled: true, level: 'all', retentionDays: 7, maximumEvents: 500 })
@@ -109,6 +116,10 @@ export function SettingsModal(props: SettingsModalProps) {
   const modelIdRef = useRef<HTMLInputElement>(null)
   const dataHubUrlRef = useRef<HTMLInputElement>(null)
   const dataHubTokenRef = useRef<HTMLInputElement>(null)
+  const catalogIdRef = useRef<HTMLInputElement>(null)
+  const catalogNameRef = useRef<HTMLInputElement>(null)
+  const catalogUrlRef = useRef<HTMLInputElement>(null)
+  const catalogTokenRef = useRef<HTMLInputElement>(null)
   const chatGPTConnectEpoch = useRef(0)
   const diagnosticLoaderRef = useRef(onLoadDiagnostics)
 
@@ -197,6 +208,48 @@ export function SettingsModal(props: SettingsModalProps) {
       notifyError(error, 'Unable to remove the DataHub token')
       setDataHubFeedback(error instanceof Error ? error.message : 'Unable to remove the DataHub token.')
     } finally { setDataHubBusy(false) }
+  }
+
+  const saveCustomConnector = async () => {
+    setDataHubBusy(true)
+    setCatalogFeedback('')
+    try {
+      const id = catalogIdRef.current?.value.trim() ?? ''
+      await onSaveCatalogConnector({
+        id,
+        name: catalogNameRef.current?.value.trim() ?? '',
+        kind: catalogKind,
+        url: catalogUrlRef.current?.value.trim() ?? '',
+        enabled: true,
+        contract: 'data-lab.catalog.v1',
+        ...(catalogKind === 'mcp' ? { searchTool: 'catalog_search', inspectTool: 'catalog_inspect' } : {}),
+        token: catalogTokenRef.current?.value.trim() || undefined,
+      })
+      if (catalogTokenRef.current) catalogTokenRef.current.value = ''
+      setCatalogFeedback(`Connector ${id} saved. Test it before autonomous use.`)
+    } catch (error) {
+      notifyError(error, 'Unable to save catalog connector')
+      setCatalogFeedback(error instanceof Error ? error.message : 'Unable to save catalog connector.')
+    } finally { setDataHubBusy(false) }
+  }
+
+  const testCustomConnector = async (id: string) => {
+    setDataHubBusy(true)
+    setCatalogFeedback('')
+    try { setCatalogFeedback((await onTestCatalogConnector(id)).message) }
+    catch (error) {
+      notifyError(error, 'Catalog connector test failed')
+      setCatalogFeedback(error instanceof Error ? error.message : 'Catalog connector test failed.')
+    } finally { setDataHubBusy(false) }
+  }
+
+  const deleteCustomConnector = async (id: string) => {
+    setDataHubBusy(true)
+    try {
+      await onDeleteCatalogConnector(id)
+      setCatalogFeedback(`Connector ${id} and its saved credential were removed.`)
+    } catch (error) { notifyError(error, 'Unable to delete catalog connector') }
+    finally { setDataHubBusy(false) }
   }
 
   const draftAiSettings = (): AiSettings => ({
@@ -366,7 +419,7 @@ export function SettingsModal(props: SettingsModalProps) {
         {menu('workspaces', 'Workspaces', 'Save, switch and recover', <FolderKanban size={17} />)}
         {menu('ai', 'AI connection', 'Model and quality', <Bot size={17} />)}
         {menu('autonomy', 'Autonomy', 'Review and risk policy', <Gauge size={17} />)}
-        {menu('datahub', 'DataHub MCP', 'Trusted data context', <Database size={17} />)}
+        {menu('connections', 'Connections', 'Catalog, MCP and API sources', <Database size={17} />)}
         {menu('updates', 'Updates', 'Signed stable and main builds', <Download size={17} />)}
         {menu('diagnostics', 'Diagnostics', 'Local, private and bounded', <Activity size={17} />)}
         {menu('presets', 'Examples', 'Start empty or explore', <LayoutTemplate size={17} />)}
@@ -484,10 +537,10 @@ export function SettingsModal(props: SettingsModalProps) {
           <p className="settings-note">Choose either a ChatGPT account or an API provider. If ChatGPT is connected, DATA LAB uses that account first; disconnect it to use the selected API provider.</p>
         </article>}
 
-        {activeSection === 'datahub' && <article className="settings-page">
-          <div className="settings-page-heading"><small>DATAHUB MCP</small><h3>Agent context server</h3><p>Give the model trusted schema, ownership and lineage context through MCP.</p></div>
+        {activeSection === 'connections' && <article className="settings-page">
+          <div className="settings-page-heading"><small>CONNECTIONS</small><h3>Catalog and evidence sources</h3><p>Connect normalized MCP or HTTP API catalogs without coupling pipeline cards to a vendor.</p></div>
           <section className="settings-section">
-            <div className="settings-section-title"><span>MCP connection</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div>
+            <div className="settings-section-title"><span>Built-in · DataHub MCP</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div>
             <div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton disabled={dataHubBusy || connectionMode !== 'connected'} onClick={() => void onSyncDataHub()} variant="ghost">Sync now</ActionButton></div>
             <div className="ai-option-grid">
               <label className="settings-field"><span>Transport</span><select onChange={(event) => setDataHubTransport(event.target.value as 'http' | 'stdio')} value={dataHubTransport}><option value="stdio">Local stdio (DataHub OSS)</option><option value="http">Streamable HTTP MCP</option></select><small>{dataHubTransport === 'stdio' ? 'Launches mcp-server-datahub locally through uvx; quickstart works without a token.' : 'Connects to an already hosted MCP endpoint.'}</small></label>
@@ -497,6 +550,25 @@ export function SettingsModal(props: SettingsModalProps) {
             <label className="datahub-writeback-toggle"><span><strong>Approved DataHub write-back</strong><small>Disabled by default. When enabled, only the explicitly advertised <code>save_document</code> mutation can run after a human approves its exact preview.</small></span><input checked={dataHubWriteback} onChange={(event) => setDataHubWriteback(event.target.checked)} type="checkbox" /></label>
             <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy || !dataHubSettings.tokenConfigured} onClick={() => void removeDataHubToken()} variant="ghost">Remove saved token</ActionButton><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveAndConnectDataHub()} variant="primary">{dataHubBusy ? 'Connecting…' : 'Save & connect'}</ActionButton></div>
             {dataHubFeedback && <p aria-live="polite" className="settings-feedback">{dataHubFeedback}</p>}
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-title"><span>Custom catalog.v1 connections</span><small>{catalogConnectors.filter((connector) => !connector.builtIn).length} configured</small></div>
+            <p className="settings-feedback">A connector stays outside the graph. It must expose normalized <code>catalog_search</code>/<code>catalog_inspect</code> MCP tools or the HTTP endpoints <code>/catalog/search</code> and <code>/catalog/assets</code>.</p>
+            <div className="model-grid provider-grid">
+              {catalogConnectors.filter((connector) => !connector.builtIn).map((connector) => <div className="catalog-connector-card" key={connector.id}>
+                <span><strong>{connector.name}</strong><small>{connector.kind} · {connector.id}</small><code>{connector.enabled ? 'enabled' : 'disabled'} · {connector.tokenConfigured ? 'secure token' : 'no token'}</code></span>
+                <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy} onClick={() => void testCustomConnector(connector.id)} variant="ghost">Test</ActionButton><ActionButton disabled={dataHubBusy} icon={<Trash2 size={13} />} onClick={() => void deleteCustomConnector(connector.id)} variant="ghost">Remove</ActionButton></div>
+              </div>)}
+            </div>
+            <div className="ai-option-grid">
+              <label className="settings-field"><span>Connector ID</span><input placeholder="snowflake-catalog" ref={catalogIdRef} type="text" /><small>Stable lowercase ID used as neutral card provenance.</small></label>
+              <label className="settings-field"><span>Display name</span><input placeholder="Snowflake Catalog" ref={catalogNameRef} type="text" /></label>
+              <label className="settings-field"><span>Protocol</span><select onChange={(event) => setCatalogKind(event.target.value as CatalogConnectorKind)} value={catalogKind}><option value="mcp">MCP · Streamable HTTP</option><option value="http-api">HTTP API · catalog.v1</option></select></label>
+              <label className="settings-field"><span>Endpoint</span><input placeholder={catalogKind === 'mcp' ? 'https://catalog.example.com/mcp' : 'https://catalog.example.com'} ref={catalogUrlRef} type="url" /><small>HTTPS required; HTTP is accepted only on loopback.</small></label>
+            </div>
+            <label className="settings-field"><span>Bearer token <em>optional</em></span><input autoComplete="off" placeholder="Stored in the operating system credential service" ref={catalogTokenRef} type="password" /><small>Never included in a card, manifest export or renderer response.</small></label>
+            <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveCustomConnector()} variant="primary">Add connection</ActionButton></div>
+            {catalogFeedback && <p aria-live="polite" className="settings-feedback">{catalogFeedback}</p>}
           </section>
         </article>}
 

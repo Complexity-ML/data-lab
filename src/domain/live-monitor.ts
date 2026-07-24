@@ -118,13 +118,13 @@ export function findBoundLiveMonitors(nodes: PipelineNode[], edges: Edge[]): Bou
       if (visited.has(current)) continue
       visited.add(current)
       const node = byId.get(current)
-      if (node?.data.kind === 'source' && node.data.datahubUrn) {
+      if (node?.data.kind === 'source' && (!node.data.connectorId || node.data.connectorId === 'datahub') && (node.data.assetRef || node.data.datahubUrn)) {
         return [{
           monitorId: monitor.id,
           monitorLabel: monitor.data.label,
           sourceId: node.id,
           sourceLabel: node.data.label,
-          urn: node.data.datahubUrn,
+          urn: node.data.assetRef ?? node.data.datahubUrn!,
           policy: parseLiveMonitorPolicy(monitor.data.rule),
         }]
       }

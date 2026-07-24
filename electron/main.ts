@@ -13,6 +13,7 @@ import { AppUpdateController } from './app-updater.js'
 import { parseUpdateChannel } from './update-policy.js'
 import { desktopWindowFrame } from './window-platform.js'
 import { openSetupUpdater, readSetupChannel, saveSetupChannel } from './setup-updater.js'
+import { deleteCatalogConnector, inspectCatalogAsset, listCatalogConnectors, saveCatalogConnector, searchCatalogAssets, testCatalogConnector } from './catalog-connectors.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -25,6 +26,12 @@ const mcpSearchChannel = 'data-lab:datahub-mcp-search'
 const mcpInspectChannel = 'data-lab:datahub-mcp-inspect'
 const mcpInvalidateChannel = 'data-lab:datahub-mcp-invalidate'
 const mcpWritebackChannel = 'data-lab:datahub-mcp-writeback'
+const catalogConnectorsListChannel = 'data-lab:catalog-connectors-list'
+const catalogConnectorSaveChannel = 'data-lab:catalog-connector-save'
+const catalogConnectorDeleteChannel = 'data-lab:catalog-connector-delete'
+const catalogConnectorTestChannel = 'data-lab:catalog-connector-test'
+const catalogSearchChannel = 'data-lab:catalog-search'
+const catalogInspectChannel = 'data-lab:catalog-inspect'
 const humanReviewNotificationChannel = 'data-lab:human-review-notification'
 const windowStateChannel = 'data-lab:window-state'
 const windowStateChangedChannel = 'data-lab:window-state-changed'
@@ -240,6 +247,12 @@ app.whenReady().then(() => {
     return inspectDataHubAsset(payload.urn, payload.force === true)
   })
   ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
+  ipcMain.handle(catalogConnectorsListChannel, () => listCatalogConnectors())
+  ipcMain.handle(catalogConnectorSaveChannel, (_event, payload: unknown) => saveCatalogConnector(payload))
+  ipcMain.handle(catalogConnectorDeleteChannel, (_event, payload: { id?: unknown }) => deleteCatalogConnector(payload?.id))
+  ipcMain.handle(catalogConnectorTestChannel, (_event, payload: { id?: unknown }) => testCatalogConnector(payload?.id))
+  ipcMain.handle(catalogSearchChannel, (_event, payload: { query?: unknown }) => searchCatalogAssets(payload?.query))
+  ipcMain.handle(catalogInspectChannel, (_event, payload: { connectorId?: unknown; assetRef?: unknown; force?: unknown }) => inspectCatalogAsset(payload?.connectorId, payload?.assetRef, payload?.force === true))
   ipcMain.handle(mcpWritebackChannel, async (event, payload: unknown) => {
     const request = parseDataHubDecisionRequest(payload)
     const parent = BrowserWindow.fromWebContents(event.sender)

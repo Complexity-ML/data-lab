@@ -5,6 +5,7 @@ import type { WorkspaceManagerState, WorkspacePayload, WorkspaceSummary } from '
 import type { DiagnosticBundle, DiagnosticInput, DiagnosticSettings } from './domain/diagnostics'
 import type { AppUpdateChannel, AppUpdateStatus } from './domain/updates'
 import type { IncidentEvent, IncidentEventInput, IncidentRecordResult } from './domain/incidents'
+import type { CatalogAssetSummary, CatalogConnectorManifest, CatalogConnectorSummary, CatalogInspection } from './domain/catalog-connectors'
 
 interface DataHubStatus {
   mode: 'demo' | 'connected'
@@ -70,6 +71,12 @@ declare global {
       inspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
       invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
       writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'save_document'; summary: string }>
+      listCatalogConnectors(): Promise<CatalogConnectorSummary[]>
+      saveCatalogConnector(payload: CatalogConnectorManifest & { token?: string; clearToken?: boolean }): Promise<CatalogConnectorSummary[]>
+      deleteCatalogConnector(id: string): Promise<CatalogConnectorSummary[]>
+      testCatalogConnector(id: string): Promise<{ connected: boolean; message: string }>
+      searchCatalogAssets(query: string): Promise<CatalogAssetSummary[]>
+      inspectCatalogAsset(connectorId: string, assetRef: string, force?: boolean): Promise<CatalogInspection>
       notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string; remind?: boolean }): Promise<{ shown: boolean; deduplicated?: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>
