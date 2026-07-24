@@ -1,0 +1,46 @@
+import { newCard, type PipelineNode } from './pipeline'
+
+export function ensureAutonomousSystemCards(nodes: PipelineNode[]) {
+  let controller = nodes.find((node) => node.data.kind === 'control' && node.data.controlMode === 'autonomous-player')
+  const added: PipelineNode[] = []
+  if (!controller) {
+    const created = newCard('control', nodes.length)
+    controller = {
+      ...created,
+      data: {
+        ...created.data,
+        label: 'DATA LAB Controller',
+        description: 'Global autonomous policy. It controls review checkpoints, automatic resume and idle monitoring without entering dataset lineage.',
+        owner: 'DATA LAB Agent',
+        status: 'healthy',
+      },
+    }
+    added.push(controller)
+  }
+  if (!nodes.some((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')) {
+    const explorer = newCard('explorer', nodes.length + added.length)
+    added.push({
+      ...explorer,
+      data: {
+        ...explorer.data,
+        label: 'DataHub Catalog Explorer',
+        description: 'Discovers every governed dataset, audits metadata in parallel batches, checkpoints coverage and emits only evidence-backed incident branches.',
+        owner: 'DATA LAB Agent',
+        status: 'draft',
+        exploration: {
+          query: '*',
+          total: 0,
+          discovered: 0,
+          inspected: 0,
+          failed: 0,
+          incidents: 0,
+          concurrency: 4,
+          state: 'idle',
+          checkpointAt: new Date().toISOString(),
+          datasets: [],
+        },
+      },
+    })
+  }
+  return { added, controller }
+}

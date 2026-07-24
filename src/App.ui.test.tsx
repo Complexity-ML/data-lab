@@ -174,7 +174,15 @@ describe('visual pipeline workspace regressions', () => {
     }
     api.getDataHubMcpStatus = vi.fn(async () => ({ mode: 'connected' as const, transport: 'stdio' as const, message: 'MCP studio connected', toolCount: 8, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } }))
     api.searchDataHubAssets = vi.fn(async () => [asset])
-    api.inspectDataHubAsset = vi.fn(async () => ({ asset, evidence: [] }))
+    api.inspectDataHubAsset = vi.fn(async () => ({ asset, evidence: [{
+      name: 'get_entities' as const,
+      status: 'ok' as const,
+      summary: 'Governed dataset identity returned.',
+      capturedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      cached: false,
+      stale: false,
+    }] }))
     api.getActiveAiSource = vi.fn(async () => ({ source: 'chatgpt' as const }))
     api.getChatGPTStatus = vi.fn(async () => ({ ...disconnectedChatGPTStatus, available: true, connected: true, selectedModel: 'gpt-5.6-sol', selectedEffort: 'high' }))
     api.runChatGPTProposal = vi.fn(async () => ({
@@ -191,7 +199,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(api.searchDataHubAssets).toHaveBeenCalledWith('*')
     expect(api.inspectDataHubAsset).toHaveBeenCalledWith(asset.urn, false)
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
-      datahubEvidence: expect.arrayContaining([expect.stringContaining('Starting dataset candidate from DataHub: customers')]),
+      datahubEvidence: expect.arrayContaining([expect.stringContaining('Starting dataset candidate selected after complete catalog exploration: customers')]),
     }))
     expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({ incidentKey: 'source-discovery:datahub', transition: 'opened' }))
   })
@@ -613,8 +621,9 @@ describe('visual pipeline workspace regressions', () => {
     const flow = screen.getByTestId('pipeline-flow')
     expect(within(flow).getByText('Intended Dataset')).toBeTruthy()
     expect(within(flow).getByText('Verify and Bind Dataset')).toBeTruthy()
-    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(3)
-    expect(screen.getAllByText('3 cards', { exact: false }).length).toBeGreaterThan(0)
+    expect(within(flow).getByText('DataHub Catalog Explorer')).toBeTruthy()
+    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(4)
+    expect(screen.getAllByText('4 cards', { exact: false }).length).toBeGreaterThan(0)
     expect(api.recordDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ action: 'proposal.approve', status: 'success' }))
   })
 

@@ -130,6 +130,37 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
     }))
     return findings
   },
+  explorer: ({ nodes, edges }, nodeId) => {
+    const node = nodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return []
+    const findings: ValidationIssue[] = []
+    if (nodes.filter((candidate) => candidate.data.kind === 'explorer').length > 1) findings.push(issue('card-contracts', {
+      id: `explorer-duplicate-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Multiple Catalog Explorers',
+      detail: 'Keep one catalog-wide Explorer and create independent incident branches from its versioned checkpoints.',
+    }))
+    if (edges.some((edge) => edge.source === nodeId || edge.target === nodeId)) findings.push(issue('card-contracts', {
+      id: `explorer-edge-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Catalog Explorer is connected to data lineage',
+      detail: 'Catalog Explorer is a host-owned sidecar. It audits all sources and emits evidence, but never carries dataset rows.',
+    }))
+    if (node.data.explorerMode !== 'catalog-fanout'
+      || !/scope=all_datasets/i.test(node.data.rule ?? '')
+      || !/audit_concurrency=\d+/i.test(node.data.rule ?? '')
+      || !/checkpoint=versioned/i.test(node.data.rule ?? '')
+      || !/resume=true/i.test(node.data.rule ?? '')) findings.push(issue('card-contracts', {
+      id: `explorer-policy-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Catalog exploration policy is incomplete',
+      detail: 'Declare all-dataset scope, bounded audit concurrency, versioned checkpoints and resume behavior.',
+    }))
+    return findings
+  },
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
   split: ({ edges }, nodeId) => {
     const outgoing = edges.filter((edge) => edge.source === nodeId)
@@ -321,9 +352,9 @@ export const cardContractsAtom: ValidationAtom = {
     return context.nodes.flatMap((node) => {
       if (node.data.kind === 'profile') return []
       const findings: ValidationIssue[] = []
-      const globalControl = node.data.kind === 'control'
-      if (!globalControl && node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
-      if (!globalControl && node.data.kind !== 'output' && node.data.kind !== 'review' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
+      const globalSystemCard = node.data.kind === 'control' || node.data.kind === 'explorer'
+      if (!globalSystemCard && node.data.kind !== 'source' && node.data.kind !== 'monitor' && !context.edges.some((edge) => edge.target === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-input-${node.id}`, severity: 'error', nodeId: node.id, title: 'Orphan card', detail: `${node.data.label} does not receive data.` }))
+      if (!globalSystemCard && node.data.kind !== 'output' && node.data.kind !== 'review' && !context.edges.some((edge) => edge.source === node.id && edge.sourceHandle !== 'feedback')) findings.push(issue(this.id, { id: `orphan-output-${node.id}`, severity: 'error', nodeId: node.id, title: 'Dead-end card', detail: `${node.data.label} does not lead to another card or terminal output.` }))
       return [...findings, ...(cardContracts[node.data.kind]?.(context, node.id) ?? [])]
     })
   },

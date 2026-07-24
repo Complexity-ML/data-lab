@@ -202,24 +202,23 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
   const requested = new Set(nodeIds ?? nodes.map((node) => node.id))
   const arranged = new Set(nodes.filter((node) => requested.has(node.id) && !node.data.pinned).map((node) => node.id))
   if (arranged.size === 0) return nodes
-  const controls = nodes.filter((node) => arranged.has(node.id) && node.data.kind === 'control')
-  const lineageArranged = new Set([...arranged].filter((id) => !controls.some((control) => control.id === id)))
+  const systemCards = nodes.filter((node) => arranged.has(node.id) && (node.data.kind === 'control' || node.data.kind === 'explorer'))
+  const lineageArranged = new Set([...arranged].filter((id) => !systemCards.some((card) => card.id === id)))
   const external = nodes.filter((node) => !arranged.has(node.id))
   const occupied = external.map((node) => ({ ...node.position }))
   const positions = new Map<string, Position>()
   let fullCursorY = layoutStartY
 
   try {
-    // DATA LAB Controller is a global player policy, not a lineage atom. Keep
-    // it in a reserved floating lane so regular topology layers never reuse
-    // the same visual space.
-    for (const [index, control] of controls.entries()) {
+    // Controller and Catalog Explorer are host-owned system policies, not
+    // lineage atoms. Keep them in a reserved lane so topology never overlaps.
+    for (const [index, card] of systemCards.entries()) {
       let placed = { x: snap(layoutStartX + index * horizontalStep), y: snap(layoutStartY) }
       while (collides(placed, occupied)) placed = { ...placed, y: placed.y + verticalStep }
-      positions.set(control.id, placed)
+      positions.set(card.id, placed)
       occupied.push(placed)
     }
-    if (controls.length > 0) fullCursorY += controlLaneHeight
+    if (systemCards.length > 0) fullCursorY += controlLaneHeight
 
     const components = connectedComponents(nodes, iterationEdges, lineageArranged)
     for (const componentIds of components) {

@@ -45,6 +45,12 @@ describe('strict provider proposal contract', () => {
     expect(result.actions[0]).toMatchObject({ node_id: 'customers-profile', kind: 'profile' })
   })
 
+  it('accepts only a complete bounded Catalog Explorer policy', () => {
+    const explorer = { ...validProposal.actions[0], node_id: 'catalog-explorer', kind: 'explorer', label: 'Catalog Explorer', rule: 'scope=all_datasets | audit_concurrency=4 | checkpoint=versioned | resume=true' }
+    expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [explorer] }, payload).actions[0].kind).toBe('explorer')
+    expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [{ ...explorer, rule: 'scope=all_datasets | audit_concurrency=99' }] }, payload)).toThrow('audit_concurrency')
+  })
+
   it('rejects a Human Review checkpoint when the provider forgets the review flag', () => {
     expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [validProposal.actions[1]] }, payload)).toThrow('require requires_human_review=true')
   })

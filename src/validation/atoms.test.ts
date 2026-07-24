@@ -203,6 +203,17 @@ describe('atomic pipeline validation', () => {
     ]))
   })
 
+  it('keeps one complete Catalog Explorer outside dataset lineage', () => {
+    const explorer = { ...newCard('explorer', 9), id: 'catalog-explorer' }
+    const valid = validatePipeline([...initialNodes, explorer], initialEdges)
+    expect(valid.some((finding) => finding.nodeId === explorer.id && finding.atomId === 'card-contracts')).toBe(false)
+
+    const connected = validatePipeline([...initialNodes, explorer], [...initialEdges, { id: 'explorer-edge', source: explorer.id, target: initialNodes[0]!.id }])
+    expect(connected).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'explorer-edge-catalog-explorer', severity: 'error' }),
+    ]))
+  })
+
   it('detects a declared breaking schema type drift', () => {
     const source = { ...newCard('source', 0), id: 'drift-source', data: { ...newCard('source', 0).data, schema: [{ name: 'customer_id', type: 'number' as const }] } }
     const contract = { ...newCard('validation', 1), id: 'drift-contract', data: { ...newCard('validation', 1).data, rule: 'schema_contract: customer_id:string' } }

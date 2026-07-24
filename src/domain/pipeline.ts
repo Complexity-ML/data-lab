@@ -3,7 +3,7 @@ import type { DataHubEvidence } from './datahub'
 import { scenarioPresets } from './presets'
 import { defaultRiskAssessmentRule } from './risk-assessment'
 
-export type CardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type CardKind = 'control' | 'explorer' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
 
 export interface SchemaField {
@@ -34,6 +34,33 @@ export interface DataProfileSnapshot {
   tokenEstimate: number
 }
 
+export interface CatalogExplorationProgress {
+  query: string
+  total: number
+  discovered: number
+  inspected: number
+  failed: number
+  incidents: number
+  concurrency: number
+  state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
+  checkpointAt: string
+  datasets: CatalogDatasetCheckpoint[]
+}
+
+export interface CatalogDatasetCheckpoint {
+  urn: string
+  name: string
+  status: 'healthy' | 'warning' | 'unavailable'
+  fieldCount: number
+  ownerCount: number
+  upstreamCount: number
+  downstreamCount: number
+  issues: string[]
+  fingerprint: string
+  capturedAt: string
+  expiresAt: string
+}
+
 export interface PipelineNodeData extends Record<string, unknown> {
   kind: CardKind
   label: string
@@ -51,11 +78,13 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubUpstream?: { urn: string; name: string; sensitive: boolean }[]
   datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
   profile?: DataProfileSnapshot
+  exploration?: CatalogExplorationProgress
   patchScope?: 'graph-only'
   monitorMode?: 'event-loop'
   parallelMode?: 'branch-fanout'
   diagramMode?: 'incident-workstream'
   controlMode?: 'autonomous-player'
+  explorerMode?: 'catalog-fanout'
   rule?: string
   agentAdded?: boolean
   pinned?: boolean
@@ -95,6 +124,7 @@ export interface AgentProposal {
 
 export const cardLabels: Record<CardKind, string> = {
   control: 'DATA LAB Control',
+  explorer: 'Catalog Explorer',
   source: 'Data Source',
   profile: 'Data Profile',
   analysis: 'Data Analysis',
@@ -305,12 +335,15 @@ export function newCard(kind: CardKind, index: number): PipelineNode {
                   ? 'group=incident | inputs=parallel_diffs | merge=atomic'
                   : kind === 'control'
                     ? 'objective=maintain governed graph | mode=autonomous | on_review=checkpoint_and_resume | on_idle=monitor'
+                    : kind === 'explorer'
+                      ? 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true'
             : undefined,
       patchScope: kind === 'patch' ? 'graph-only' : undefined,
       monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
       parallelMode: kind === 'parallel' ? 'branch-fanout' : undefined,
       diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
       controlMode: kind === 'control' ? 'autonomous-player' : undefined,
+      explorerMode: kind === 'explorer' ? 'catalog-fanout' : undefined,
     },
   }
 }

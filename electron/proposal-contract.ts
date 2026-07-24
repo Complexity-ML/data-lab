@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>
 
 export type ProposalActionType = 'add_card' | 'update_card' | 'add_edge' | 'remove_edge'
-export type ProposalCardKind = 'control' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type ProposalCardKind = 'control' | 'explorer' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 
 export interface ValidatedProposalAction {
   type: ProposalActionType
@@ -30,9 +30,9 @@ export interface ValidatedProposal {
 
 const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'confidence', 'writeback', 'evidence', 'actions'] as const
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
-const kinds = new Set<ProposalCardKind>(['control', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<ProposalCardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
-const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
+const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', explorer: 'Catalog Explorer', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
@@ -60,6 +60,16 @@ export function riskAssessmentRuleError(rule: string | null): string | undefined
   if (riskType === 'data' && (severity === 'unknown' || affectedAssets === 0)) return 'Data risk requires a concrete severity and at least one affected asset'
   if (riskType === 'collection' && affectedAssets > 0) return 'Collection reliability cannot claim affected data assets'
   if (riskType === 'none' && (affectedAssets > 0 || !['unknown', 'low'].includes(severity ?? ''))) return 'risk_type=none cannot claim affected assets or elevated severity'
+  return undefined
+}
+
+export function catalogExplorerRuleError(rule: string | null): string | undefined {
+  const normalized = rule?.toLowerCase() ?? ''
+  if (!/scope\s*=\s*all_datasets\b/.test(normalized)) return 'Catalog Explorer requires scope=all_datasets'
+  const concurrency = Number(normalized.match(/(?:^|\|)\s*audit_concurrency\s*=\s*(\d+)/)?.[1])
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) return 'Catalog Explorer audit_concurrency must be between 1 and 8'
+  if (!/(?:^|\|)\s*checkpoint\s*=\s*versioned\b/.test(normalized)) return 'Catalog Explorer requires checkpoint=versioned'
+  if (!/(?:^|\|)\s*resume\s*=\s*true\b/.test(normalized)) return 'Catalog Explorer requires resume=true'
   return undefined
 }
 
@@ -110,6 +120,7 @@ function compactGraph(payload: unknown) {
   const nodeIds = new Set<string>()
   const reviewNodeIds = new Set<string>()
   const riskNodeIds = new Set<string>()
+  const explorerNodeIds = new Set<string>()
   for (const [index, item] of graph.nodes.entries()) {
     const node = record(item, `Graph node ${index + 1}`)
     const id = identifier(node.id, `Graph node ${index + 1} id`)!
@@ -117,6 +128,7 @@ function compactGraph(payload: unknown) {
     nodeIds.add(id)
     if (node.kind === 'review') reviewNodeIds.add(id)
     if (node.kind === 'risk') riskNodeIds.add(id)
+    if (node.kind === 'explorer') explorerNodeIds.add(id)
   }
   const edgeIds = new Set<string>()
   for (const [index, item] of graph.edges.entries()) {
@@ -125,7 +137,7 @@ function compactGraph(payload: unknown) {
     if (edgeIds.has(id)) throw new Error(`Graph contains duplicate edge id ${id}`)
     edgeIds.add(id)
   }
-  return { nodeIds, edgeIds, reviewNodeIds, riskNodeIds }
+  return { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds }
 }
 
 function validateAction(value: unknown, index: number): ValidatedProposalAction {
@@ -160,7 +172,7 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (!Array.isArray(proposal.evidence) || proposal.evidence.length > 12) throw new Error('evidence must contain at most 12 entries')
   if (!Array.isArray(proposal.actions) || proposal.actions.length > 20) throw new Error('actions must contain at most 20 entries')
 
-  const { nodeIds, edgeIds, reviewNodeIds, riskNodeIds } = compactGraph(payload)
+  const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
   const aliases = new Set<string>()
   const removedEdges = new Set<string>()
@@ -177,6 +189,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
         const error = riskAssessmentRuleError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
+      if (action.kind === 'explorer') {
+        const error = catalogExplorerRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       if (nodeIds.has(action.node_id) || aliases.has(action.node_id)) throw new Error(`Proposal contains duplicate node id ${action.node_id}`)
       aliases.add(action.node_id)
       continue
@@ -186,6 +202,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
       requireNull(action, ['source', 'target', 'source_handle'], index)
       if ((action.kind === 'risk' || riskNodeIds.has(action.node_id)) && (action.kind === 'risk' || action.rule !== null)) {
         const error = riskAssessmentRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
+      if ((action.kind === 'explorer' || explorerNodeIds.has(action.node_id)) && (action.kind === 'explorer' || action.rule !== null)) {
+        const error = catalogExplorerRuleError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
       continue

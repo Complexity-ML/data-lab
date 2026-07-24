@@ -1,5 +1,5 @@
-import { addEdge, reconnectEdge, useEdgesState, useNodesState, type Connection, type Edge } from '@xyflow/react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEdgesState, useNodesState } from '@xyflow/react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { AppFooter } from './components/AppFooter'
 import { AppHeader, type AgentPlayerState } from './components/AppHeader'
 import { ProposalReviewModal } from './components/ProposalReviewModal'
@@ -7,13 +7,13 @@ import type { SettingsSection } from './components/shared/SettingsModal'
 import { KeyboardShortcutsModal } from './components/shared/KeyboardShortcutsModal'
 import { WorkspaceRecoveryModal } from './components/shared/WorkspaceRecoveryModal'
 import { materializeAiProposal } from './domain/ai'
-import { buildCardReworkRequest, buildPipelineAgentRequest, buildReviewAssistantRequest } from './domain/agent-context'
-import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, resumePipelineAtomically, type AtomicPipelineRun } from './domain/atomic-execution'
+import { buildPipelineAgentRequest } from './domain/agent-context'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, type AtomicPipelineRun } from './domain/atomic-execution'
 import type { DataHubAssetSummary, DataHubEvidence } from './domain/datahub'
 import { addDataProfileToProposal, canReuseDataProfile, dataProfileEvidence } from './domain/data-profile'
+import { ensureAutonomousSystemCards } from './domain/autonomous-system'
 import { layoutPipeline } from './domain/layout'
-import { createPipelineExport, parsePipelineExport } from './domain/pipeline-io'
-import { applyProposal, cardLabels, initialEdges, initialNodes, newCard, type AgentProposal, type CardKind, type PipelineNode } from './domain/pipeline'
+import { applyProposal, initialEdges, initialNodes, type AgentProposal, type CatalogExplorationProgress, type PipelineNode } from './domain/pipeline'
 import { findEquivalentVersion, graphsEquivalent } from './domain/versioning'
 import { errorMessage, notifyError, notifyToast } from './domain/toasts'
 import { recordDiagnostic } from './domain/diagnostics'
@@ -26,6 +26,15 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useWorkspacePersistence } from './hooks/useWorkspacePersistence'
 import { useAppUpdates } from './hooks/useAppUpdates'
 import { useLiveIncidentMonitor, type LiveIncidentTrigger } from './hooks/useLiveIncidentMonitor'
+import { useCatalogExplorer } from './hooks/useCatalogExplorer'
+import { usePipelineInteractions } from './hooks/usePipelineInteractions'
+import { useReviewAssistant } from './hooks/useReviewAssistant'
+import { useDiagnosticsActions } from './hooks/useDiagnosticsActions'
+import { useSelectedCardRework } from './hooks/useSelectedCardRework'
+import { useAutonomyPolicy } from './hooks/useAutonomyPolicy'
+import { useIncidentEvents } from './hooks/useIncidentEvents'
+import { useAtomicReviewResolver } from './hooks/useAtomicReviewResolver'
+import { useAppTheme } from './hooks/useAppTheme'
 import { CardInspectorView } from './views/CardInspectorView'
 import { CardLibraryView } from './views/CardLibraryView'
 import { PipelineCanvasView } from './views/PipelineCanvasView'
@@ -33,20 +42,12 @@ import { AgentActionsView, type AgentActionLog } from './views/AgentActionsView'
 import { IncidentReportsView } from './views/IncidentReportsView'
 import { LiveActivityView } from './views/LiveActivityView'
 import { useLanguage } from './i18n'
-import { summarizeIncidentEvents, type IncidentEvent, type IncidentEventInput } from './domain/incidents'
-import { incidentDiagramNodeIds } from './domain/incident-diagram'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from './domain/source-routing'
 import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
-import { defaultAutonomyPolicy, normalizeAutonomyPolicy, policyForcesProposalReview, type AutonomyPolicy } from './domain/autonomy-policy'
+import { policyForcesProposalReview } from './domain/autonomy-policy'
 import { classifyConnectivityFailure } from './domain/connectivity'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
-const autonomyPolicyStorageKey = 'data-lab-autonomy-policy'
-function storedAutonomyPolicy() {
-  try { return normalizeAutonomyPolicy(JSON.parse(window.localStorage.getItem(autonomyPolicyStorageKey) ?? 'null')) }
-  catch { return defaultAutonomyPolicy }
-}
-
 export default function App() {
   const { language } = useLanguage()
   const platformClass = window.dataLab?.platform ? `platform-${window.dataLab.platform}` : 'platform-web'
@@ -61,8 +62,6 @@ export default function App() {
   const [agentRunning, setAgentRunning] = useState(false)
   const [playerStarting, setPlayerStarting] = useState(false)
   const [playerState, setPlayerState] = useState<AgentPlayerState>('stopped')
-  const [reviewAssistantBusy, setReviewAssistantBusy] = useState(false)
-  const [reviewAssistantAnswer, setReviewAssistantAnswer] = useState<{ summary: string; rationale: string; evidence: string[]; model: string }>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
@@ -74,36 +73,17 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const [actionHistory, setActionHistory] = useState<AgentActionLog[]>([])
-  const [incidentEvents, setIncidentEvents] = useState<IncidentEvent[]>([])
   const [pendingWorkspacePrompt, setPendingWorkspacePrompt] = useState<string>()
   const [autonomousStepRequest, setAutonomousStepRequest] = useState<{ objective: string; sessionId: number }>()
   const agentRunId = useRef(0)
   const playerSessionId = useRef(0)
   const playerStartupBlocked = useRef(false)
-  const reviewAssistantRunId = useRef(0)
   const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
   const proposalApprovalRunning = useRef(false)
   const resumePlayerAfterReview = useRef(false)
   const monitorBootstrapAttempted = useRef(false)
   const autonomousStepTimer = useRef<number | undefined>(undefined)
-  const flowInstance = useRef<{ fitView(options?: { duration?: number; padding?: number; nodes?: { id: string }[] }): Promise<boolean>; screenToFlowPosition(point: { x: number; y: number }): { x: number; y: number } } | null>(null)
-
-  const resolveAtomicReview = (candidateNodes: PipelineNode[], candidateEdges: typeof edges, decision: 'approved' | 'rejected') => {
-    const previous = activeAtomicRun.current
-    if (!previous || previous.state !== 'waiting') return candidateNodes
-    const reviewDecisions = Object.fromEntries(candidateNodes
-      .filter((node) => node.data.kind === 'review' && previous.nodeStates[node.id] === 'waiting')
-      .map((node) => [node.id, decision]))
-    if (Object.keys(reviewDecisions).length === 0) return candidateNodes
-    try {
-      const resumed = resumePipelineAtomically(candidateNodes, candidateEdges, previous, reviewDecisions)
-      activeAtomicRun.current = resumed
-      return applyAtomicRunState(candidateNodes, resumed)
-    } catch (error) {
-      recordDiagnostic({ category: 'provider', action: 'branch.resume', status: 'error', detail: { decision, message: errorMessage(error, 'Unknown resume error') } })
-      return candidateNodes
-    }
-  }
+  const resolveAtomicReview = useAtomicReviewResolver(activeAtomicRun)
 
   const appUpdates = useAppUpdates(setActivity)
   const { active, activeAiSource, aiStatus, cancelChatGPTLogin, chatGPTConnecting, chatGPTStatus, configureChatGPT, connectChatGPT, disconnectChatGPT, refreshAiModelCatalog, saveAiConnection, selectActiveAgentSource, testAiConnection } = useAiConnections(setActivity)
@@ -122,30 +102,78 @@ export default function App() {
     setSelectedId,
   })
   const workspacePersistence = useWorkspacePersistence({ edges, inspectorOpen, libraryOpen, nodes, projectTitle, setActivity, setEdges, setInspectorOpen, setLibraryOpen, setNodes, setProjectTitle, setSelectedId, setVersions, versions })
+  const incidents = useIncidentEvents(workspacePersistence.activeWorkspaceId)
+  const incidentEvents = incidents.events
+  const incidentSummaries = incidents.summaries
+  const logIncident = incidents.record
+  const diagnostics = useDiagnosticsActions(incidents.setEvents)
   const graphHistory = useGraphHistory({ edges, nodes, setActivity, setEdges, setNodes })
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('data-lab-theme') === 'dark' ? 'dark' : 'light')
-  const [autonomyPolicy, setAutonomyPolicy] = useState<AutonomyPolicy>(storedAutonomyPolicy)
+  const [theme, setTheme] = useAppTheme()
+  const [autonomyPolicy, setAutonomyPolicy] = useAutonomyPolicy()
   const issues = useMemo(() => validatePipeline(nodes, edges), [nodes, edges])
   const selected = nodes.find((node) => node.id === selectedId)
+  const pipeline = usePipelineInteractions({
+    edges,
+    inspectorOpen,
+    invalidateDataHubContext,
+    libraryOpen,
+    nodes,
+    persistImportedWorkspace: workspacePersistence.persistImportedWorkspace,
+    projectTitle,
+    selected,
+    selectedId,
+    setActivity,
+    setContextMenu,
+    setEdges,
+    setNodes,
+    setProjectTitle,
+    setProposal,
+    setSelectedId,
+    setVersions,
+    versions,
+  })
   const errors = issues.filter((issue) => issue.severity === 'error')
-  const incidentSummaries = useMemo(() => summarizeIncidentEvents(incidentEvents), [incidentEvents])
+  const reviewAssistant = useReviewAssistant({
+    active,
+    activeAiSource,
+    edges,
+    incidentSummaries,
+    issues,
+    language,
+    nodes,
+    openAiSettings: () => { setSettingsSection('ai'); setSettingsOpen(true) },
+    proposal,
+    setActivity,
+    versions,
+  })
+  const reworkSelectedWithAgent = useSelectedCardRework({
+    active,
+    activeAiSource,
+    activeAtomicRun,
+    agentRunId,
+    edges,
+    issues,
+    language,
+    nodes,
+    openAiSettings: () => { setSettingsSection('ai'); setSettingsOpen(true) },
+    recordPendingReview,
+    resumePlayerAfterReview,
+    selected,
+    setActivity,
+    setAgentRunning,
+    setContextMenu,
+    setNodes,
+    setProposal,
+    setProposalReviewOpen,
+    versions,
+  })
   const unresolvedIncidents = incidentSummaries.filter((incident) => incident.status !== 'resolved')
   const pendingProposalIsDistinct = Boolean(proposal?.incidentKey && !unresolvedIncidents.some((incident) => incident.incidentKey === proposal.incidentKey))
   const reportCount = unresolvedIncidents.length + (pendingProposalIsDistinct ? 1 : 0)
-  const activityBusy = agentRunning || playerStarting || reviewAssistantBusy || chatGPTConnecting || appUpdates.busy || Boolean(autonomousStepRequest)
+  const activityBusy = agentRunning || playerStarting || reviewAssistant.busy || chatGPTConnecting || appUpdates.busy || Boolean(autonomousStepRequest)
   const agentActionHistory = useMemo(() => actionHistory.filter((entry) => /\b(agent|autonomous|player|proposal|review|controller|iteration)\b/i.test(entry.message)), [actionHistory])
   const leftPanelOpen = libraryOpen || Boolean(leftOperationsPanel)
   const rightPanelOpen = inspectorOpen || reportsOpen
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    window.localStorage.setItem('data-lab-theme', theme)
-  }, [theme])
-
-  useEffect(() => {
-    window.localStorage.setItem(autonomyPolicyStorageKey, JSON.stringify(autonomyPolicy))
-  }, [autonomyPolicy])
-
   useEffect(() => {
     setActionHistory((current) => {
       if (current[0]?.message === activity) return current
@@ -153,20 +181,7 @@ export default function App() {
     })
   }, [activity])
 
-  useEffect(() => {
-    window.localStorage.removeItem('data-lab-versions')
-  }, [])
-
-  useEffect(() => {
-    setReviewAssistantAnswer(undefined)
-    setReviewAssistantBusy(false)
-    reviewAssistantRunId.current += 1
-  }, [proposal?.id])
-
-  useEffect(() => {
-    if (!window.dataLab?.listIncidentEvents) return
-    void window.dataLab.listIncidentEvents().then(setIncidentEvents).catch(() => undefined)
-  }, [workspacePersistence.activeWorkspaceId])
+  useEffect(() => { window.localStorage.removeItem('data-lab-versions') }, [])
 
   useEffect(() => {
     if (!window.dataLab) return
@@ -183,85 +198,9 @@ export default function App() {
     })
   }, [])
 
-  const onConnect = (connection: Connection) => {
-    if (!connection.source || !connection.target) return
-    const feedback = connection.sourceHandle === 'feedback'
-    setEdges((current) => addEdge({ ...connection, id: `e-${connection.source}-${connection.target}-${Date.now()}`, type: 'elastic', label: feedback ? 'next iteration' : undefined }, current))
-    setActivity(feedback ? 'Feedback boundary added · each trigger starts a new bounded atomic iteration' : 'Manual lineage connection added · run validation before publishing')
-  }
+  const { addCard, bindDataHubSource, deleteCard, dropLibraryCard, exportPipelineJson, fitCommittedGraph, flowInstance, focusIncidentDiagram, importPipelineJson, onConnect, onReconnect, updateSelected } = pipeline
 
-  const onReconnect = (oldEdge: Edge, connection: Connection) => {
-    if (!connection.source || !connection.target) return
-    const feedback = connection.sourceHandle === 'feedback'
-    setEdges((current) => reconnectEdge(oldEdge, connection, current, { shouldReplaceId: false }).map((edge) => edge.id === oldEdge.id
-      ? { ...edge, type: 'elastic', label: feedback ? 'next iteration' : undefined }
-      : edge))
-    setActivity(feedback ? 'Feedback cable reconnected · next bounded iteration preserved' : 'Elastic cable reconnected · lineage validation refreshed')
-  }
-
-  const addCard = (kind: CardKind, position?: { x: number; y: number }) => {
-    const created = newCard(kind, nodes.length)
-    const node = position ? { ...created, position } : created
-    setNodes((current) => [...current, node])
-    setSelectedId(node.id)
-    setActivity(`${cardLabels[kind]} card added as draft${position ? ' at the drop position' : ''}`)
-  }
-
-  const dropLibraryCard = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    const rawKind = event.dataTransfer.getData('application/data-lab-card')
-    if (!rawKind || !(rawKind in cardLabels) || !flowInstance.current) return
-    const point = flowInstance.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-    addCard(rawKind as CardKind, { x: point.x - 116, y: point.y - 66 })
-  }
-
-  const updateSelected = (patch: Partial<PipelineNode['data']>) => {
-    setNodes((current) => current.map((node) => node.id === selectedId ? { ...node, data: { ...node.data, ...patch } } : node))
-  }
-
-  const focusIncidentDiagram = (diagramId: string) => {
-    const nodeIds = incidentDiagramNodeIds(diagramId, nodes, edges)
-    if (!nodeIds.length) {
-      setActivity('Incident Diagram unavailable · no connected workstream found')
-      return
-    }
-    void flowInstance.current?.fitView({ duration: 260, padding: 0.24, nodes: nodeIds.map((id) => ({ id })) })
-    setActivity(`Incident workstream focused · ${nodeIds.length} cards across its parallel branches`)
-  }
-
-  const bindDataHubSource = (asset: DataHubAssetSummary) => {
-    if (!selected || selected.data.kind !== 'source') return
-    const previousUrn = selected.data.datahubUrn
-    setNodes((current) => current.map((node) => node.id === selected.id ? {
-      ...node,
-      data: {
-        ...node.data,
-        datahubUrn: asset.urn,
-        datahubPlatform: asset.platform,
-        datahubEnvironment: asset.environment,
-        datahubDomain: asset.domain,
-        datahubTags: asset.tags,
-        datahubQuality: asset.qualityStatus,
-        datahubFreshness: asset.freshness,
-        datahubUpstream: asset.upstream,
-        datahubDownstream: asset.downstream,
-        label: asset.name,
-        description: asset.description,
-        owner: asset.owners[0] ?? 'Unassigned',
-        schema: asset.fields,
-        status: asset.qualityStatus === 'failing' || asset.owners.length === 0 ? 'warning' : 'healthy',
-      },
-    } : node))
-    if (previousUrn && previousUrn !== asset.urn) void invalidateDataHubContext(previousUrn)
-    void invalidateDataHubContext(asset.urn)
-    setActivity(`${asset.name} bound atomically · ${asset.fields.length} fields · ${asset.downstream.length} downstream assets · fresh MCP read required before agent execution`)
-  }
-
-  const logIncident = useCallback(async (event: IncidentEventInput) => {
-    if (!window.dataLab?.recordIncidentEvent) return
-    const result = await window.dataLab.recordIncidentEvent(event).catch(() => ({ recorded: false as const }))
-    if (result.recorded && result.event) setIncidentEvents((current) => [result.event!, ...current.filter((candidate) => candidate.id !== result.event!.id)].slice(0, 200))
-  }, [])
+  const catalog = useCatalogExplorer({ inspectAsset: inspectDataHubAsset, logIncident, setActivity, setNodes })
 
   const queueAutonomousStep = (objective: string, sessionId = playerSessionId.current, delayMs = 650) => {
     if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
@@ -335,9 +274,11 @@ export default function App() {
     const routedSources = sourceSelection.sources
     const hasDataSource = nodes.some((node) => node.data.kind === 'source')
     const unboundSource = nodes.find((node) => node.data.kind === 'source' && !node.data.datahubUrn)
+    const catalogExplorer = nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
     let datahubEvidence: string[] = []
     let evidenceEntries: DataHubEvidence[] = []
     let blankCandidate: DataHubAssetSummary | undefined
+    let catalogProgress: CatalogExplorationProgress | undefined
     const profileCandidates = new Map<string, DataHubAssetSummary>()
     try {
       if (routedSources.length > 0) {
@@ -401,6 +342,18 @@ export default function App() {
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
+        if (catalogExplorer) catalog.updateProgress(catalogExplorer, {
+          query: dataHubDiscoveryQuery(agentRequest),
+          total: 0,
+          discovered: 0,
+          inspected: 0,
+          failed: 0,
+          incidents: 0,
+          concurrency: 4,
+          state: 'discovering',
+          checkpointAt: new Date().toISOString(),
+          datasets: [],
+        }, () => agentRunId.current === runId)
         let candidates: DataHubAssetSummary[] = []
         let discoveryError: unknown
         const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
@@ -410,33 +363,43 @@ export default function App() {
           try { candidates = await searchDataHubAssets('*') }
           catch (error) { discoveryError = error }
         }
-        blankCandidate = candidates[0]
+        if (candidates.length && agentRunId.current === runId) {
+          const explored = catalogExplorer ? await catalog.explore({
+            assets: candidates,
+            explorer: catalogExplorer,
+            query: discoveryQuery,
+            isCurrent: () => agentRunId.current === runId,
+          }) : undefined
+          if (explored) {
+            catalogProgress = explored.progress
+            evidenceEntries = explored.evidence
+            blankCandidate = explored.candidate
+            datahubEvidence = explored.summaries
+          }
+        }
         if (blankCandidate) {
-          const inspection = await inspectDataHubAsset(blankCandidate.urn)
-          blankCandidate = inspection.asset
-          profileCandidates.set(inspection.asset.urn, inspection.asset)
-          evidenceEntries = inspection.evidence.map((read) => ({ tool: read.name, urn: inspection.asset.urn, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
-          datahubEvidence = [
-            `Starting dataset candidate from DataHub: ${inspection.asset.name} (${inspection.asset.urn}). Add it as the Data Source card in the proposed graph.`,
-            `Schema: ${inspection.asset.fields.map((field) => `${field.name}:${field.type}${field.tags?.length ? `[${field.tags.join(',')}]` : ''}`).join(', ') || 'unavailable'}`,
-            `Governance: owners=${inspection.asset.owners.join(', ') || 'missing'}; tags=${inspection.asset.tags.join(', ') || 'none'}; quality=${inspection.asset.qualityStatus}; upstream=${inspection.asset.upstream.length}; downstream=${inspection.asset.downstream.length}`,
-            ...inspection.evidence.map((read) => `${read.name} · ${read.status} · ${read.summary}`),
-          ]
+          profileCandidates.set(blankCandidate.urn, blankCandidate)
+          datahubEvidence.unshift(
+            `Starting dataset candidate selected after complete catalog exploration: ${blankCandidate.name} (${blankCandidate.urn}). Add it as the Data Source card in the proposed graph.`,
+            `Selected schema: ${blankCandidate.fields.map((field) => `${field.name}:${field.type}${field.tags?.length ? `[${field.tags.join(',')}]` : ''}`).join(', ') || 'unavailable'}`,
+            `Selected governance: owners=${blankCandidate.owners.join(', ') || 'missing'}; tags=${blankCandidate.tags.join(', ') || 'none'}; quality=${blankCandidate.qualityStatus}; upstream=${blankCandidate.upstream.length}; downstream=${blankCandidate.downstream.length}`,
+          )
           if (incidentSummaries.some((incident) => incident.incidentKey === 'source-discovery:datahub' && incident.status !== 'resolved')) {
             await logIncident({
               incidentKey: 'source-discovery:datahub',
               transition: 'recovered',
               severity: 'info',
               title: 'DataHub source discovery recovered',
-              detail: `The catalog returned ${inspection.asset.name}; autonomous source selection can continue.`,
+              detail: `Catalog Explorer audited ${catalogProgress?.inspected ?? 0} datasets and selected ${blankCandidate.name}; autonomous source selection can continue.`,
               sourceSystem: 'DataHub',
-              sourceRef: inspection.asset.urn,
-              fingerprint: `source-discovery-recovered:${inspection.asset.urn}`,
+              sourceRef: blankCandidate.urn,
+              fingerprint: `source-discovery-recovered:${blankCandidate.urn}`,
               cardId: unboundSource?.id,
               branchId: unboundSource?.id,
             })
           }
         } else {
+          if (catalogExplorer && discoveryError) catalog.markDiscoveryFailed(catalogExplorer, discoveryQuery, () => agentRunId.current === runId)
           const connectivity = discoveryError ? classifyConnectivityFailure(discoveryError, 'DataHub source discovery') : undefined
           const failed = discoveryError !== undefined
           await logIncident({
@@ -523,6 +486,7 @@ export default function App() {
       }
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'success', detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length } })
       const nextProposal = materializeAiProposal(response, nodes, edges)
+      if (catalogExplorer && catalogProgress) catalog.attachProgress(nextProposal, catalogExplorer, catalogProgress)
       nextProposal.incidentKey = monitored?.incidentKey
       if (blankCandidate) {
         const proposedSource = nextProposal.addedNodes.find((node) => node.data.kind === 'source')
@@ -686,63 +650,8 @@ export default function App() {
     if (autonomousStepTimer.current !== undefined) window.clearTimeout(autonomousStepTimer.current)
   }, [])
 
-  const reworkSelectedWithAgent = async () => {
-    if (!selected) return
-    setContextMenu(undefined)
-    if (!window.dataLab) {
-      setActivity('AI provider unavailable in web preview · launch the Electron application')
-      return
-    }
-    const [status, currentChatGPT] = await Promise.all([window.dataLab.getAiStatus().catch(() => disconnectedAiStatus), window.dataLab.getChatGPTStatus().catch(() => disconnectedChatGPTStatus)])
-    const activeConnected = activeAiSource === 'chatgpt' ? currentChatGPT.connected : status.providers[activeAiSource].connected
-    if (!activeConnected) {
-      setSettingsSection('ai')
-      setSettingsOpen(true)
-      setActivity(`${active.label} is not connected · no card action was generated`)
-      return
-    }
-    setAgentRunning(true)
-    const runId = ++agentRunId.current
-    const atomicRun = executePipelineAtomically(nodes, edges)
-    activeAtomicRun.current = atomicRun
-    setNodes((current) => applyAtomicRunState(current, atomicRun))
-    const activeModel = activeAiSource === 'chatgpt' ? currentChatGPT.selectedModel ?? 'ChatGPT' : status.providers[activeAiSource].model
-    setActivity(`${activeModel} is reviewing ${selected.data.label} with version context…`)
-    try {
-      const source = selected.data.datahubUrn ? selected : nodes.find((node) => node.data.kind === 'source' && node.data.datahubUrn)
-      let evidenceEntries: DataHubEvidence[] = []
-      if (source?.data.datahubUrn) {
-        const audit = await window.dataLab.auditDataHubWithMcp(source.data.datahubUrn)
-        if (agentRunId.current !== runId) return
-        evidenceEntries = audit.reads.map((read) => ({ tool: read.name, urn: source.data.datahubUrn!, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale }))
-      }
-      const requestPayload = buildCardReworkRequest({ datahubEvidence: evidenceEntries, edges, focusNodeId: selected.id, issues, nodes, responseLanguage: language === 'fr' ? 'French' : 'English', versions })
-      const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
-      if (agentRunId.current !== runId) return
-      const nextProposal = materializeAiProposal(response, nodes, edges)
-      nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
-      const preview = applyProposal(nodes, edges, nextProposal)
-      const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
-      if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
-        setActivity(`Card proposal blocked as equivalent to ${equivalentVersion ? `${equivalentVersion.label} (${equivalentVersion.status ?? 'committed'})` : 'the current graph'} · no revision created`)
-        return
-      }
-      nextProposal.evidence = evidenceEntries
-      resumePlayerAfterReview.current = false
-      setProposal(nextProposal)
-      setProposalReviewOpen(true)
-      const reviewVersionId = recordPendingReview(nextProposal)
-      setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
-      if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
-    } catch (error) {
-      notifyError(error, 'Card analysis failed')
-      if (agentRunId.current !== runId) return
-      setActivity(`Card analysis failed · ${errorMessage(error, 'Unknown provider error')} · card unchanged`)
-    } finally { if (agentRunId.current === runId) setAgentRunning(false) }
-  }
-
   const playAgent = () => {
-    if (agentRunning || playerStarting || reviewAssistantBusy || proposal) return
+    if (agentRunning || playerStarting || reviewAssistant.busy || proposal) return
     if (!active.connected) {
       setSettingsSection('ai')
       setSettingsOpen(true)
@@ -755,21 +664,11 @@ export default function App() {
     playerStartupBlocked.current = true
     setPlayerStarting(true)
     setPlayerState('running')
-    let controller = nodes.find((node) => node.data.kind === 'control' && node.data.controlMode === 'autonomous-player')
-    if (!controller) {
-      controller = newCard('control', nodes.length)
-      controller = {
-        ...controller,
-        data: {
-          ...controller.data,
-          label: 'DATA LAB Controller',
-          description: 'Global autonomous policy. It controls review checkpoints, automatic resume and idle monitoring without entering dataset lineage.',
-          owner: 'DATA LAB Agent',
-          status: 'healthy',
-        },
-      }
-      setNodes((current) => [...current, controller!])
-      setActivity('DATA LAB Controller created · preparing the first autonomous graph iteration…')
+    const systemCards = ensureAutonomousSystemCards(nodes)
+    const controller = systemCards.controller
+    if (systemCards.added.length) {
+      setNodes((current) => [...current, ...systemCards.added])
+      setActivity(`${systemCards.added.map((node) => node.data.label).join(' and ')} created · preparing complete catalog exploration…`)
       setAutonomousStepRequest({
         objective: `Execute the persistent DATA LAB Control policy as coherent versioned iterations: ${controller.data.rule}`,
         sessionId,
@@ -807,7 +706,6 @@ export default function App() {
     setPlayerState('stopped')
     playerSessionId.current += 1
     agentRunId.current += 1
-    reviewAssistantRunId.current += 1
     setPlayerStarting(false)
     setAutonomousStepRequest(undefined)
     if (autonomousStepTimer.current !== undefined) {
@@ -817,7 +715,7 @@ export default function App() {
     playerStartupBlocked.current = false
     resumePlayerAfterReview.current = false
     setAgentRunning(false)
-    setReviewAssistantBusy(false)
+    reviewAssistant.stop()
     if (cancellingActiveRun) {
       setNodes((current) => current.map((node) => node.data.runState === 'completed' ? node : { ...node, data: { ...node.data, runState: 'stopped' } }))
       activeAtomicRun.current = undefined
@@ -827,58 +725,6 @@ export default function App() {
       : 'Autonomous player stopped · monitoring disabled · graph unchanged')
     if (window.dataLab) void window.dataLab.cancelAiProposal()
     if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
-  }
-
-  const stopReviewAssistant = () => {
-    reviewAssistantRunId.current += 1
-    setReviewAssistantBusy(false)
-    setActivity('Human Review assistant stopped · proposal and graph unchanged')
-    if (window.dataLab) void window.dataLab.cancelAiProposal()
-    if (window.dataLab) void window.dataLab.cancelChatGPTProposal()
-  }
-
-  const askReviewAssistant = async (question: string) => {
-    if (!proposal || reviewAssistantBusy || !window.dataLab) return
-    if (!active.connected) {
-      setSettingsSection('ai')
-      setSettingsOpen(true)
-      setActivity(`${active.label} is not connected · Human Review remains fully manual`)
-      return
-    }
-    const runId = ++reviewAssistantRunId.current
-    setReviewAssistantBusy(true)
-    setActivity(`${active.model} is reading the pending review · read-only assistant turn…`)
-    try {
-      const payload = buildReviewAssistantRequest({
-        edges,
-        incidentContext: incidentSummaries,
-        issues,
-        nodes,
-        proposal,
-        question,
-        responseLanguage: language === 'fr' ? 'French' : 'English',
-        versions,
-      })
-      const response = activeAiSource === 'chatgpt'
-        ? await window.dataLab.runChatGPTProposal(payload)
-        : await window.dataLab.runAiProposal(payload)
-      if (reviewAssistantRunId.current !== runId) return
-      setReviewAssistantAnswer({
-        summary: response.proposal.summary,
-        rationale: response.proposal.rationale,
-        evidence: response.proposal.evidence,
-        model: response.model,
-      })
-      setActivity(`${response.model} answered the reviewer · zero graph actions accepted`)
-      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'success', detail: { source: activeAiSource, model: response.model, actionCount: response.proposal.actions.length } })
-    } catch (error) {
-      if (reviewAssistantRunId.current !== runId) return
-      notifyError(error, 'Human Review assistant failed')
-      setActivity(`Human Review assistant failed · ${errorMessage(error, 'Unknown provider error')} · proposal unchanged`)
-      recordDiagnostic({ category: 'provider', action: 'review.assistant', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
-    } finally {
-      if (reviewAssistantRunId.current === runId) setReviewAssistantBusy(false)
-    }
   }
 
   const rejectAgentProposal = () => {
@@ -916,82 +762,6 @@ export default function App() {
       )
     },
   })
-
-  const deleteCard = (nodeId: string) => {
-    const node = nodes.find((candidate) => candidate.id === nodeId)
-    const attachedEdges = edges.filter((edge) => edge.source === nodeId || edge.target === nodeId).length
-    setNodes((current) => current.filter((candidate) => candidate.id !== nodeId))
-    setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
-    if (selectedId === nodeId) setSelectedId('')
-    setContextMenu(undefined)
-    setActivity(`${node?.data.label ?? 'Card'} deleted · ${attachedEdges} attached edge${attachedEdges === 1 ? '' : 's'} removed`)
-  }
-
-  const exportPipelineJson = () => {
-    const artifact = createPipelineExport(projectTitle, nodes, edges, versions)
-    const url = URL.createObjectURL(new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${projectTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'data-lab-pipeline'}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-    setActivity(`Pipeline exported · schema v${artifact.schemaVersion} · credentials and local paths excluded`)
-  }
-
-  const exportDiagnosticsJson = async () => {
-    if (!window.dataLab) { notifyError('Diagnostics require the Electron application'); return }
-    try {
-      const bundle = await window.dataLab.exportDiagnostics()
-      const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `data-lab-diagnostics-${new Date().toISOString().slice(0, 10)}.json`
-      link.click()
-      URL.revokeObjectURL(url)
-      notifyToast(`Exported ${bundle.events.length} sanitized local events`, 'success', 'Diagnostics ready')
-    } catch (error) { notifyError(error, 'Unable to export diagnostics') }
-  }
-
-  const openDiagnosticLogs = async () => {
-    if (!window.dataLab) { notifyError('Diagnostics require the Electron application'); return }
-    try { await window.dataLab.openDiagnosticLogs() } catch (error) { notifyError(error, 'Unable to open diagnostic logs') }
-  }
-
-  const loadDiagnosticBundle = async () => {
-    if (!window.dataLab) throw new Error('Diagnostics require the Electron application')
-    return window.dataLab.exportDiagnostics()
-  }
-
-  const clearIncidentReports = async () => {
-    if (!window.dataLab?.clearIncidentEvents) throw new Error('Incident cleanup requires the Electron application')
-    const result = await window.dataLab.clearIncidentEvents()
-    setIncidentEvents([])
-    notifyToast(`${result.deleted} local incident event${result.deleted === 1 ? '' : 's'} removed from this workspace.`, 'success', 'Reports cleared')
-    return result
-  }
-
-  const importPipelineJson = async (file: File) => {
-    try {
-      const artifact = parsePipelineExport(await file.text())
-      setNodes(artifact.graph.nodes)
-      setEdges(artifact.graph.edges)
-      setVersions(artifact.versions)
-      setProjectTitle(artifact.projectTitle)
-      setSelectedId(artifact.graph.nodes[0]?.id ?? '')
-      setProposal(undefined)
-      await workspacePersistence.persistImportedWorkspace({ projectTitle: artifact.projectTitle, nodes: artifact.graph.nodes, edges: artifact.graph.edges, versions: artifact.versions, projectSettings: { inspectorOpen, libraryOpen } })
-      setActivity(`Pipeline imported after full validation · ${artifact.graph.nodes.length} cards · schema v${artifact.schemaVersion}`)
-    } catch (error) {
-      notifyError(error, 'Pipeline import failed')
-      setActivity(`Import rejected · ${errorMessage(error, 'Invalid pipeline file')} · active workspace unchanged`)
-    }
-  }
-
-  const fitCommittedGraph = () => {
-    window.requestAnimationFrame(() => {
-      void flowInstance.current?.fitView({ duration: 240, padding: 0.22 })
-    })
-  }
 
   const approveAgentProposal = async (writebackRequested: boolean) => {
     if (proposalApprovalRunning.current) return false
@@ -1083,13 +853,13 @@ export default function App() {
       applying={proposalApprovalBusy}
       assistant={{
         activity,
-        answer: reviewAssistantAnswer,
-        busy: reviewAssistantBusy,
+        answer: reviewAssistant.answer,
+        busy: reviewAssistant.busy,
         connected: active.connected,
         context: { ai: active.connected ? `${active.label} ready` : `${active.label} offline`, cards: nodes.length, edges: edges.length, versions: versions.length, mcp: connectionMode === 'connected' ? `MCP ${mcpTransport} connected` : 'MCP offline', model: `${active.label} · ${active.model}` },
-        onAsk: (question) => { void askReviewAssistant(question) },
+        onAsk: (question) => { void reviewAssistant.ask(question) },
         onOpenSettings: () => { setSettingsSection('ai'); setSettingsOpen(true) },
-        onStop: stopReviewAssistant,
+        onStop: reviewAssistant.stop,
       }}
       proposal={proposal}
       relatedAssets={[...new Set(nodes.flatMap((node) => node.data.datahubUrn ? [node.data.datahubUrn] : []))]}
@@ -1128,7 +898,7 @@ export default function App() {
       onArchiveWorkspace={workspacePersistence.archiveWorkspace}
       onAutonomyPolicyChange={setAutonomyPolicy}
       onCheckForAppUpdate={appUpdates.check}
-      onClearIncidentReports={clearIncidentReports}
+      onClearIncidentReports={diagnostics.clearIncidentReports}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
       onClose={() => setSettingsOpen(false)}
       onCancelChatGPTLogin={cancelChatGPTLogin}
@@ -1140,17 +910,17 @@ export default function App() {
       onEmergencyStop={stopAgent}
       onDuplicateWorkspace={workspacePersistence.duplicateWorkspace}
       onDownloadAppUpdate={appUpdates.download}
-      onExportDiagnostics={exportDiagnosticsJson}
+      onExportDiagnostics={diagnostics.exportDiagnostics}
       onExportPipeline={exportPipelineJson}
       onImportPipeline={importPipelineJson}
       onInstallAppUpdate={appUpdates.install}
-      onLoadDiagnostics={loadDiagnosticBundle}
+      onLoadDiagnostics={diagnostics.loadBundle}
       onSaveDiagnosticSettings={async (settings) => {
         if (!window.dataLab) throw new Error('Diagnostics require the Electron application')
         return window.dataLab.saveDiagnosticSettings(settings)
       }}
       onLoadPreset={(presetId) => { workspacePersistence.detachWorkspace(); loadPreset(presetId); setSettingsOpen(false) }}
-      onOpenDiagnosticLogs={openDiagnosticLogs}
+      onOpenDiagnosticLogs={diagnostics.openLogs}
       onOpenSetupUpdater={appUpdates.openSetup}
       onOpenWorkspace={workspacePersistence.openWorkspace}
       onRefreshAiModelCatalog={refreshAiModelCatalog}
