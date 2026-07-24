@@ -265,7 +265,7 @@ async function connectClient(): Promise<Client> {
   return connectionPromise
 }
 
-async function discoverTools(client: Client, label = 'DataHub MCP tool discovery'): Promise<ToolCatalog> {
+async function discoverTools(client: Client, label = 'DataHub MCP tool discovery', timeoutMs = 12_000): Promise<ToolCatalog> {
   if (toolCatalog) return toolCatalog
   if (!toolDiscoveryPromise) {
     const pending = client.listTools().then((catalog) => {
@@ -276,7 +276,7 @@ async function discoverTools(client: Client, label = 'DataHub MCP tool discovery
     toolDiscoveryPromise = pending
     void pending.finally(() => { if (toolDiscoveryPromise === pending) toolDiscoveryPromise = undefined }).catch(() => undefined)
   }
-  return withTimeout(toolDiscoveryPromise, 12_000, label)
+  return withTimeout(toolDiscoveryPromise, timeoutMs, label)
 }
 
 export async function resolveReadableToolNames(discovery: () => Promise<{ tools: { name: string }[] }>): Promise<Set<string>> {
@@ -352,7 +352,25 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
   const config = configuration()
   if (config.mode === 'demo') return getDataHubMcpConfigurationStatus()
   const client = await connectClient()
-  const tools = await discoverTools(client)
+  let tools: ToolCatalog | undefined
+  try {
+    tools = await discoverTools(client, 'DataHub MCP initial tool discovery', 5_000)
+  } catch {
+    // A successful MCP handshake remains usable even when listTools is slow.
+    // Known reads have their own bounded calls and tool discovery keeps running
+    // in the background, so the UI must not remain stuck in "Connecting".
+    const names = [...knownReadTools].sort()
+    return {
+      mode: 'connected',
+      transport: activeMode ?? config.mode,
+      message: `DataHub MCP connected · tool discovery delayed · ${names.length} bounded read tools ready`,
+      serverVersion: client.getServerVersion()?.version,
+      toolCount: names.length,
+      tools: names,
+      writebackAvailable: false,
+      settings: config.settings,
+    }
+  }
   const names = tools.tools.map((tool) => tool.name).filter(safeToolName).sort()
   return {
     mode: 'connected',

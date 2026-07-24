@@ -84,7 +84,7 @@ Choose **Stable** for the latest published DATA LAB application release (recomme
 
 ## Continuous incident lifecycle
 
-With a bound Data Source and a Live Monitor card, DATA LAB fingerprints DataHub metadata, deduplicates repeated findings, records every incident transition in local SQLite, and can ask the agent for a bounded, versioned graph correction. Low-risk branches continue autonomously; uncertain or high-risk branches wait at their own Human Review checkpoint while unrelated branches remain runnable. Recovery and recurrence are preserved as an inspectable incident history.
+With a bound Data Source and a Live Monitor card, DATA LAB fingerprints catalog metadata, deduplicates repeated findings, records every incident transition in local SQLite, and can ask the agent for a bounded, versioned graph correction. A deterministic host Risk Gate calculates a non-lowerable review floor from evidence freshness, quality, ownership, sensitive fields/tags and lineage blast radius. Low-risk branches continue autonomously; uncertain or high-risk branches wait at their own Human Review checkpoint while unrelated atomic branches remain runnable and new monitor triggers are queued. Recovery and recurrence are preserved as an inspectable incident history.
 
 Collection failures are kept separate from data-quality findings. Offline network routes, DNS failures, refused connections, timeouts, authentication failures and TLS errors appear in Reports as DATA LAB connectivity incidents; they never claim that a dataset or downstream model is unhealthy. Successful source discovery records the corresponding recovery and resumes the bounded player loop.
 
@@ -96,7 +96,9 @@ When a proposal reaches Human Review, its giant review modal exposes a dedicated
 
 This monitoring loop lives inside the Electron session only. DATA LAB does **not** install a daemon, service, cloud worker or hidden 24/7 process: closing Electron stops every read and agent action immediately. SQLite preserves the ledger so the next launch can show what happened and resume only after the application is open again.
 
-![DATA LAB continuous incident lifecycle](docs/assets/akira-incident-lifecycle.png)
+![DATA LAB evidence-backed autonomous incident lifecycle](docs/assets/akira-incident-lifecycle.png)
+
+The gate is intentionally asymmetric: the model can explain or raise risk, but it cannot lower the host decision. `max_iterations` and `cooldown` bound repair work; the first changed fingerprint beyond the retry budget creates a native Human Review checkpoint instead of silently spinning or applying another autonomous patch. Every committed “correction” is a DATA LAB graph revision—never a hidden mutation of the source dataset.
 
 Windows keeps its standard system title bar and native minimize, maximize and close controls outside the DATA LAB interface. The Windows CI workflow builds and verifies an unsigned x64 NSIS/ZIP smoke package; unsigned builds cannot use the updater. See [Windows desktop support](docs/windows-desktop.md).
 

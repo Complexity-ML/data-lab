@@ -84,4 +84,40 @@ describe('live incident monitor lifecycle', () => {
       detail: expect.stringContaining('Dataset health was not evaluated'),
     }))
   })
+
+  it('keeps a branch trigger queued during Human Review and drains it after unblock', async () => {
+    vi.useFakeTimers()
+    try {
+      const source = {
+        ...newCard('source', 0),
+        id: 'source',
+        data: { ...newCard('source', 0).data, datahubUrn: audit.urn },
+      }
+      const monitor = { ...newCard('monitor', 1), id: 'monitor' }
+      const onTrigger = vi.fn(async () => undefined)
+      const { rerender } = renderHook(
+        ({ blocked }) => useLiveIncidentMonitor({
+          active: true,
+          agentBlocked: blocked,
+          nodes: [source, monitor],
+          edges: [{ id: 'source-monitor', source: source.id, target: monitor.id }],
+          audit: vi.fn(async () => audit),
+          onIncident: vi.fn(async () => undefined),
+          onTrigger,
+        }),
+        { initialProps: { blocked: true } },
+      )
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(onTrigger).not.toHaveBeenCalled()
+      rerender({ blocked: false })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+      expect(onTrigger).toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'evidence-change',
+        monitor: expect.objectContaining({ monitorId: 'monitor' }),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

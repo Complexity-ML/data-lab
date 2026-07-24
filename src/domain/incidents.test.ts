@@ -45,6 +45,17 @@ describe('continuous incident lifecycle', () => {
     expect(evaluateMonitorObservation(opened.next, healthy, policy)).toMatchObject({ transition: 'recovered', triggerAgent: false, next: { open: false, iterations: 0 } })
   })
 
+  it('escalates once when a changed incident exceeds its retry budget', () => {
+    const policy = parseLiveMonitorPolicy('cooldown=10s | max_iterations=2')
+    const first = evaluateMonitorObservation(undefined, { fingerprint: 'a', severity: 'warning', failedReads: 1, totalReads: 3 }, policy)
+    const second = evaluateMonitorObservation(first.next, { fingerprint: 'b', severity: 'warning', failedReads: 1, totalReads: 3 }, policy)
+    const exhausted = evaluateMonitorObservation(second.next, { fingerprint: 'c', severity: 'critical', failedReads: 3, totalReads: 3 }, policy)
+    const duplicate = evaluateMonitorObservation(exhausted.next, { fingerprint: 'c', severity: 'critical', failedReads: 3, totalReads: 3 }, policy)
+
+    expect(exhausted).toMatchObject({ triggerAgent: false, escalateToHumanReview: true, next: { iterations: 3 } })
+    expect(duplicate).toMatchObject({ triggerAgent: false, escalateToHumanReview: false })
+  })
+
   it('parses second, minute and hour cooldown units', () => {
     expect(parseLiveMonitorPolicy('cooldown=30s').cooldownMs).toBe(30_000)
     expect(parseLiveMonitorPolicy('cooldown=30m').cooldownMs).toBe(1_800_000)

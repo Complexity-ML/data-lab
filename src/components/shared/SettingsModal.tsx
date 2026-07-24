@@ -75,7 +75,7 @@ interface SettingsModalProps {
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSetAppUpdateChannel: (channel: AppUpdateChannel) => Promise<AppUpdateStatus>
   onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
-  onSyncDataHub: () => Promise<void>
+  onSyncDataHub: () => Promise<{ mode: 'demo' | 'connected'; message: string } | undefined>
   onTestCatalogConnector: (id: string) => Promise<{ connected: boolean; message: string }>
   onTestAiConnection: () => Promise<void>
   onValidate: () => void
@@ -189,8 +189,9 @@ export function SettingsModal(props: SettingsModalProps) {
       const token = dataHubTokenRef.current?.value.trim()
       await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', token: token || undefined, writebackEnabled: dataHubWriteback })
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
-      await onSyncDataHub()
-      setDataHubFeedback('DataHub connection saved securely and MCP tools discovered.')
+      const status = await onSyncDataHub()
+      if (!status || status.mode !== 'connected') throw new Error(status?.message ?? 'DataHub MCP did not complete the connection handshake.')
+      setDataHubFeedback(status.message)
     } catch (error) {
       notifyError(error, 'Unable to connect DataHub MCP')
       setDataHubFeedback(error instanceof Error ? error.message : 'Unable to connect DataHub MCP.')

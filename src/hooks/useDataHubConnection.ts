@@ -55,6 +55,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
       applyStatus(status)
       recordDiagnostic({ category: 'mcp', action: 'connection.sync', status: status.mode === 'connected' ? 'success' : 'warning', detail: { transport: status.transport, message: status.message, toolCount: status.toolCount } })
       setActivity(status.mode === 'connected' ? `${status.message} · ready for agent audits` : status.message)
+      return status
     } catch (error) {
       notifyError(error, 'DataHub MCP connection failed')
       recordDiagnostic({ category: 'mcp', action: 'connection.sync', status: 'error', detail: { message: error instanceof Error ? error.message : 'unknown error' } })
@@ -62,6 +63,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
       setWritebackAvailable(false)
       setMcpMessage(error instanceof Error ? error.message : 'unknown error')
       setActivity(`DataHub MCP connection failed · ${error instanceof Error ? error.message : 'unknown error'}`)
+      return undefined
     }
   }
 

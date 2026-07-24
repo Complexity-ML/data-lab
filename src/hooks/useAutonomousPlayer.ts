@@ -17,6 +17,8 @@ import { recordDiagnostic } from '../domain/diagnostics'
 import type { IncidentEventInput, IncidentSummary } from '../domain/incidents'
 import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from '../domain/agent-objective'
 import { applyProposal, type AgentProposal, type CatalogExplorationProgress, type PipelineNode } from '../domain/pipeline'
+import { ensureHostReviewCheckpoint } from '../domain/review-checkpoint'
+import { evaluateHostRisk, riskAssetsFromGraph } from '../domain/risk-gate'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from '../domain/source-routing'
 import { errorMessage, notifyError, notifyToast } from '../domain/toasts'
 import { findEquivalentVersion, graphsEquivalent, type PipelineVersion } from '../domain/versioning'
@@ -565,6 +567,26 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source' && (node.data.assetRef ?? node.data.datahubUrn) === sourceUrn)
         addDataProfileToProposal(nextProposal, nodes, profileCandidate, sourceNode)
       }
+      const initialMaterialChangeCount = nextProposal.addedNodes.length
+        + nextProposal.updatedNodes.length
+        + nextProposal.addedEdges.length
+        + nextProposal.removedEdgeIds.length
+      const riskAssets = new Map(riskAssetsFromGraph([...nodes, ...nextProposal.addedNodes]).map((asset) => [asset.urn, asset]))
+      for (const asset of profileCandidates.values()) riskAssets.set(asset.urn, asset)
+      const hostRisk = evaluateHostRisk([...riskAssets.values()], evidenceEntries, autonomyPolicy)
+      const retryExhausted = monitored?.reason === 'retry-exhausted'
+      const frequentReview = policyForcesProposalReview(autonomyPolicy, initialMaterialChangeCount)
+      if (retryExhausted || (initialMaterialChangeCount > 0 && (hostRisk.requiresHumanReview || frequentReview))) {
+        const reason = retryExhausted
+          ? `Retry budget exhausted for ${monitored.monitor.monitorLabel} after ${monitored.attempts - 1}/${monitored.monitor.policy.maxIterations} autonomous repair attempts. The incident remains open and this branch now requires an explicit decision.`
+          : frequentReview
+            ? 'The configured Frequent policy requires explicit approval for every material graph diff.'
+            : `${hostRisk.severity.toUpperCase()} host risk score ${hostRisk.score}: ${hostRisk.reasons.join(' ')}`
+        ensureHostReviewCheckpoint(nextProposal, nodes, edges, {
+          anchorId: monitored?.monitor.monitorId ?? routedSources[0]?.id ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source')?.id,
+          reason,
+        })
+      }
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
       const preview = applyProposal(nodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
@@ -801,7 +823,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     onTrigger: async (trigger) => {
       if (playerStartupBlocked.current) return
       await auditWithAgent(
-        `Live Monitor detected a connector metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, preserve its source provenance, update only the affected branch, and propose one coherent versioned correction.`,
+        trigger.reason === 'retry-exhausted'
+          ? `Live Monitor exhausted ${trigger.monitor.policy.maxIterations} autonomous repair attempts for ${trigger.monitor.sourceLabel}. Preserve the incident and source provenance, add or update a branch-local Human Review checkpoint, and do not apply another autonomous correction until a person decides.`
+          : `Live Monitor detected a connector metadata change for ${trigger.monitor.sourceLabel}. Investigate the incident, preserve its source provenance, update only the affected branch, and propose one coherent versioned correction.`,
         trigger,
       )
     },
