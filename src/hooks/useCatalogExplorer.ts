@@ -223,6 +223,13 @@ export function useCatalogExplorer(options: {
         return incidentSummaries.some((incident) => incident.incidentKey === `catalog-explorer:connectivity:${connector}` && incident.status !== 'resolved')
       })
       const failedConnectorGroups = catalogConnectionUnavailable ? connectorGroups : new Map<string, typeof unavailable>()
+      const recoveredDataIncidents = explored.inspections.flatMap((inspection) => {
+        if (isInspectionUnavailable(inspection)) return []
+        const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)
+        const incidentKey = `catalog-explorer:${inspection.asset.urn}`
+        if (!dataset || hasDataIncident(dataset) || !incidentSummaries.some((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')) return []
+        return [{ dataset, asset: inspection.asset, incidentKey }]
+      })
       await Promise.all([
         ...[...failedConnectorGroups.entries()].map(([connector, datasets]) => {
           const firstErrors = datasets
@@ -252,6 +259,18 @@ export function useCatalogExplorer(options: {
           sourceRef: connector,
           cardId: source.cardId,
           branchId: connector,
+        })),
+        ...recoveredDataIncidents.map(({ dataset, asset, incidentKey }) => logIncident({
+          incidentKey,
+          transition: 'recovered' as const,
+          severity: 'info' as const,
+          title: `Data quality recovered · ${dataset.name}`,
+          detail: 'A fresh bounded catalog inspection no longer reports a failing quality assertion. The previous incident remains available in history.',
+          sourceSystem: asset.sourceSystem ?? 'Catalog',
+          sourceRef: dataset.urn,
+          fingerprint: dataset.fingerprint,
+          cardId: input.explorer.id,
+          branchId: dataset.urn,
         })),
         ...explored.progress.datasets.filter(hasDataIncident).map((dataset) => logIncident({
         incidentKey: `catalog-explorer:${dataset.urn}`,

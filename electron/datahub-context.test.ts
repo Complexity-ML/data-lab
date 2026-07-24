@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { entityUrns, parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
+import { entityUrns, parseAssetContext, parseSearchResults, parseSearchTotal, qualityStatusFromEntity, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
 
 const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.customers,PROD)'
 
@@ -76,5 +76,15 @@ describe('DataHub MCP context normalization', () => {
     expect(asset.fields).toEqual([{ name: 'email', type: 'string', tags: ['PII'] }, { name: 'lifetime_value', type: 'number', tags: undefined }])
     expect(asset.upstream).toHaveLength(1)
     expect(asset.downstream[0]).toMatchObject({ name: 'customers', sensitive: true })
+  })
+
+  it('requires structured assertion evidence before declaring dataset quality', () => {
+    expect(qualityStatusFromEntity({
+      tags: { tags: [{ tag: { properties: { name: 'critical' } } }] },
+      description: 'The ingestion job is failing.',
+    })).toBe('unavailable')
+    expect(qualityStatusFromEntity({ assertions: [{ runEvents: [] }] })).toBe('unavailable')
+    expect(qualityStatusFromEntity({ assertions: [{ runEvents: [{ result: { type: 'FAILURE' } }] }] })).toBe('failing')
+    expect(qualityStatusFromEntity({ assertions: [{ runEvents: [{ result: { type: 'SUCCESS' } }] }] })).toBe('healthy')
   })
 })
