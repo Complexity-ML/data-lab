@@ -508,6 +508,7 @@ export default function App() {
         versions,
       })
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
+      if (agentRunId.current !== runId) return
       const providerConnectivityKey = `connectivity:provider:${activeAiSource}`
       if (incidentSummaries.some((incident) => incident.incidentKey === providerConnectivityKey && incident.status !== 'resolved')) {
         await logIncident({
@@ -521,7 +522,6 @@ export default function App() {
         })
       }
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'success', detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length } })
-      if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
       nextProposal.incidentKey = monitored?.incidentKey
       if (blankCandidate) {
@@ -651,6 +651,7 @@ export default function App() {
         void window.dataLab.notifyHumanReview({ cardLabel: 'Agent Decision', reason: nextProposal.summary, versionId: reviewVersionId })
       }
     } catch (error) {
+      if (agentRunId.current !== runId) return
       notifyError(error, 'Agent run failed')
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
       const connectivity = classifyConnectivityFailure(error, active.label)
@@ -663,7 +664,6 @@ export default function App() {
         sourceSystem: connectivity.sourceSystem,
         fingerprint: connectivity.fingerprint,
       })
-      if (agentRunId.current !== runId) return
       setActivity(`Agent run failed · ${errorMessage(error, 'Unknown provider error')} · graph unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }
   }
