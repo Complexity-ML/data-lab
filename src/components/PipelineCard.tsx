@@ -1,15 +1,17 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { Binoculars, Bot, Braces, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
+import { parseQueryCheckRule } from '../domain/query-check'
 import { parseWorkerPolicy } from '../domain/worker-policy'
 
 const icons = {
   control: Bot,
   explorer: Binoculars,
   worker: Cpu,
+  query: Braces,
   source: Database,
   profile: ChartColumn,
   analysis: BrainCircuit,
@@ -34,6 +36,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const isOutput = data.kind === 'output'
   const isSource = data.kind === 'source'
   const workerPolicy = data.kind === 'worker' ? parseWorkerPolicy(data.rule) : undefined
+  const queryPolicy = data.kind === 'query' ? parseQueryCheckRule(data.rule) : undefined
   const isSystem = data.kind === 'control' || data.kind === 'explorer' || workerPolicy?.role === 'exploration'
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
   const exploration = data.kind === 'explorer' ? data.exploration : undefined
@@ -56,6 +59,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
       {explorerPolicy && <span className="explorer-mode-badge">{explorerPolicy.scope === 'dataset' ? 'Focus' : 'Catalog'}</span>}
       {workerPolicy && <span className="worker-mode-badge">{workerPolicy.role} · {workerPolicy.concurrency}×</span>}
+      {queryPolicy && <span className="query-mode-badge">{queryPolicy.mode === 'governed_write' ? 'Governed POST' : 'Read check'}</span>}
       {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
@@ -90,6 +94,12 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{workerPolicy.batchSize}</strong> batch</span>
       <span><strong>{workerPolicy.concurrency}</strong> concurrent</span>
       <small>{workerPolicy.context.replace('_', ' ')} · {workerPolicy.merge} merge · {workerPolicy.retry} recovery</small>
+    </div>}
+    {queryPolicy && <div className="query-summary" aria-label="Verified query contract">
+      <span><strong>{queryPolicy.protocol ?? '—'}</strong> protocol</span>
+      <span><strong>{queryPolicy.operation ?? '—'}</strong> operation</span>
+      <span><strong>{queryPolicy.timeoutMs ?? '—'}</strong> ms</span>
+      <span><strong>{queryPolicy.response ?? '—'}</strong> response</span>
     </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>

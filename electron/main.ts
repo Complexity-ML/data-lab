@@ -257,12 +257,15 @@ app.whenReady().then(() => {
   ipcMain.handle(catalogInspectChannel, (_event, payload: { connectorId?: unknown; assetRef?: unknown; force?: unknown; mode?: unknown }) => inspectCatalogAsset(payload?.connectorId, payload?.assetRef, payload?.force === true, payload?.mode))
   ipcMain.handle(mcpWritebackChannel, async (event, payload: unknown) => {
     const request = parseDataHubDecisionRequest(payload)
+    const writebackOperation = getDataHubMcpConfigurationStatus().settings.transport === 'stdio'
+      ? 'createDocument · GraphQL GMS'
+      : 'save_document · MCP'
     const parent = BrowserWindow.fromWebContents(event.sender)
     const options = {
       type: 'warning' as const,
       title: 'Confirm DataHub write-back',
       message: 'Publish this approved Decision to DataHub?',
-      detail: `Tool: save_document\nRevision: ${request.revisionId}\nTitle: DATA LAB · ${request.title}\nRelated assets: ${request.relatedAssets.length}\n\nThis is an external mutation and cannot be undone by restoring the local graph.`,
+      detail: `Operation: ${writebackOperation}\nRevision: ${request.revisionId}\nTitle: DATA LAB · ${request.title}\nRelated assets: ${request.relatedAssets.length}\n\nThis is an external mutation and cannot be undone by restoring the local graph.`,
       buttons: ['Publish to DataHub', 'Cancel'],
       defaultId: 1,
       cancelId: 1,

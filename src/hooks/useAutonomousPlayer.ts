@@ -255,7 +255,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             continue
           }
 
-          setActivity(`Agent reading ${source.data.label} through DataHub MCP · source ${sourceIndex + 1}/${routedSources.length}…`)
+          setActivity(`Agent reading ${source.data.label} through the governed DataHub evidence route · source ${sourceIndex + 1}/${routedSources.length}…`)
           let audit: Awaited<ReturnType<NonNullable<typeof window.dataLab>['auditDataHubWithMcp']>>
           try {
             audit = forcedMonitorAudit ?? await window.dataLab.auditDataHubWithMcp(sourceUrn)
@@ -279,9 +279,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           }
           if (agentRunId.current !== runId) return
           const successfulReads = audit.reads.filter((read) => read.status === 'ok').length
-          datahubEvidence.push(...audit.reads.map((read) => `${source.data.label} · ${read.name} · ${read.status} · ${read.summary}`))
+          datahubEvidence.push(...audit.reads.map((read) => `${source.data.label} · ${read.capability ?? read.name} · ${read.status} · ${read.summary}`))
           evidenceEntries.push(...audit.reads.map((read) => ({
-            tool: read.name,
+            tool: read.capability ?? read.name,
             urn: sourceUrn,
             capturedAt: read.capturedAt,
             expiresAt: read.expiresAt,

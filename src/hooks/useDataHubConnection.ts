@@ -8,6 +8,7 @@ type McpTransport = 'demo' | 'http' | 'stdio'
 export type DataHubConnectionSettings = {
   transport: 'http' | 'stdio'
   url: string
+  catalogReadRoute?: 'auto' | 'gms' | 'mcp'
   tokenConfigured: boolean
   tokenSource: 'encrypted' | 'environment' | 'none'
   encryptionAvailable: boolean
@@ -67,7 +68,7 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     }
   }
 
-  const saveSettings = async (payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => {
+  const saveSettings = async (payload: { transport: 'http' | 'stdio'; url: string; catalogReadRoute?: 'auto' | 'gms' | 'mcp'; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => {
     if (!window.dataLab) throw new Error('DataHub settings require the Electron application')
     const status = await window.dataLab.saveDataHubMcpSettings(payload)
     applyStatus(status)

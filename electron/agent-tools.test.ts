@@ -252,6 +252,20 @@ describe('bounded DATA LAB agent tools', () => {
     expect(agentToolDefinitions.map((tool) => tool.name)).not.toContain('record_incident')
   })
 
+  it('exposes the complete card compatibility contract before planning', () => {
+    const session = new AgentToolSession(payload)
+    const result = session.execute('list_card_kinds', {})
+    const cards = result.cards as Array<{ kind: string; accepts_from: string[]; connects_to: string[]; source_handles: string[] }>
+    expect(cards.find((card) => card.kind === 'query')).toMatchObject({
+      accepts_from: expect.arrayContaining(['source', 'patch']),
+      connects_to: expect.arrayContaining(['profile', 'risk', 'review']),
+      source_handles: [],
+    })
+    expect(cards.find((card) => card.kind === 'split')?.source_handles).toEqual(['approved', 'quarantine'])
+    expect(cards.find((card) => card.kind === 'output')?.source_handles).toEqual(['feedback'])
+    expect(cards.find((card) => card.kind === 'control')?.connects_to).toEqual([])
+  })
+
   it('requires a Human Review card before finishing a review-gated plan', () => {
     const session = new AgentToolSession(payload)
     const first = session.execute('finish_plan', {

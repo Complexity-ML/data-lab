@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>
 
 export type ProposalActionType = 'add_card' | 'update_card' | 'add_edge' | 'remove_edge'
-export type ProposalCardKind = 'control' | 'explorer' | 'worker' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
+export type ProposalCardKind = 'control' | 'explorer' | 'worker' | 'query' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 
 export interface ValidatedProposalAction {
   type: ProposalActionType
@@ -30,12 +30,45 @@ export interface ValidatedProposal {
 
 const rootKeys = ['title', 'summary', 'rationale', 'requires_human_review', 'confidence', 'writeback', 'evidence', 'actions'] as const
 const actionKeys = ['type', 'node_id', 'kind', 'label', 'description', 'owner', 'rule', 'source', 'target', 'source_handle', 'reason'] as const
-const kinds = new Set<ProposalCardKind>(['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<ProposalCardKind>(['control', 'explorer', 'worker', 'query', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 const actionTypes = new Set<ProposalActionType>(['add_card', 'update_card', 'add_edge', 'remove_edge'])
-const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', explorer: 'Catalog Explorer', worker: 'Worker Node', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
+const cardNames: Record<ProposalCardKind, string> = { control: 'DATA LAB Control', explorer: 'Catalog Explorer', worker: 'Worker Node', query: 'Query Check', source: 'Data Source', profile: 'Data Profile', analysis: 'Data Analysis', impact: 'Impact Analysis', risk: 'Risk Assessment', patch: 'Compatibility Patch', monitor: 'Live Monitor', parallel: 'Parallel Agents', diagram: 'Incident Diagram', split: 'Split', decision: 'Agent Decision', transform: 'Transform', review: 'Human Review', validation: 'Validation', output: 'Output' }
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/
 const maximumNodes = 400
 const maximumEdges = 800
+export const proposalCardCompatibility: Record<ProposalCardKind, readonly ProposalCardKind[]> = {
+  control: [],
+  explorer: [],
+  worker: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  query: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  source: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  profile: ['worker', 'query', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'review', 'validation', 'output'],
+  analysis: ['worker', 'query', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  impact: ['worker', 'query', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  risk: ['worker', 'query', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'review', 'validation', 'output'],
+  patch: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  monitor: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'parallel', 'diagram', 'split', 'decision', 'validation', 'output'],
+  parallel: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  diagram: ['worker', 'query', 'impact', 'risk', 'patch', 'monitor', 'split', 'decision', 'review', 'validation', 'output'],
+  split: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'decision', 'transform', 'review', 'validation', 'output'],
+  decision: ['worker', 'query', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'transform', 'review', 'validation', 'output'],
+  transform: ['worker', 'query', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'],
+  review: ['worker', 'query', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'validation', 'output'],
+  validation: ['worker', 'query', 'patch', 'monitor', 'decision', 'review', 'output'],
+  output: ['monitor'],
+}
+
+export function proposalConnectionCompatibilityError(source: ProposalCardKind, target: ProposalCardKind, sourceHandle: string | null) {
+  if (source === 'control' || target === 'control') return 'DATA LAB Control is a global policy and cannot enter lineage'
+  if (source === 'explorer' || target === 'explorer') return 'Catalog Explorer is a host-owned sidecar and cannot enter lineage'
+  if (target === 'source') return 'Data Source must begin a lineage path'
+  if (source === 'output') return sourceHandle === 'feedback' && target === 'monitor' ? undefined : 'Output can connect only to Live Monitor through feedback'
+  if (sourceHandle === 'feedback') return 'feedback is reserved for Output → Live Monitor'
+  if (source === 'split' && !['approved', 'quarantine'].includes(sourceHandle ?? '')) return 'Split edges require approved or quarantine'
+  if (source !== 'split' && (sourceHandle === 'approved' || sourceHandle === 'quarantine')) return 'approved and quarantine are reserved for Split'
+  if (!proposalCardCompatibility[source].includes(target)) return `${source} cannot connect to ${target}`
+  return undefined
+}
 
 export function riskAssessmentRuleError(rule: string | null): string | undefined {
   const normalizedRule = rule?.toLowerCase()
@@ -60,6 +93,33 @@ export function riskAssessmentRuleError(rule: string | null): string | undefined
   if (riskType === 'data' && (severity === 'unknown' || affectedAssets === 0)) return 'Data risk requires a concrete severity and at least one affected asset'
   if (riskType === 'collection' && affectedAssets > 0) return 'Collection reliability cannot claim affected data assets'
   if (riskType === 'none' && (affectedAssets > 0 || !['unknown', 'low'].includes(severity ?? ''))) return 'risk_type=none cannot claim affected assets or elevated severity'
+  return undefined
+}
+
+export function queryCheckRuleError(rule: string | null): string | undefined {
+  const values = new Map((rule ?? '').split(/\s*\|\s*/).flatMap((clause) => {
+    const match = clause.match(/^\s*([a-z_]+)\s*=\s*(.+?)\s*$/i)
+    return match ? [[match[1].toLowerCase(), match[2].trim().toLowerCase()] as const] : []
+  }))
+  const connector = values.get('connector') ?? ''
+  const operation = values.get('operation') ?? ''
+  const mode = values.get('mode')
+  const timeout = Number(values.get('timeout_ms'))
+  const writeOperation = operation.endsWith('.write') || operation.endsWith('.update')
+  if (!/^[a-z][a-z0-9-]{1,31}$/.test(connector)) return 'Query Check requires a safe connector ID'
+  if (values.get('protocol') !== 'graphql') return 'Query Check supports protocol=graphql'
+  if (values.get('registry') !== 'connector_manifest') return 'Query Check operation must resolve through registry=connector_manifest'
+  if (!['catalog.search', 'entity.read', 'schema.read', 'lineage.read', 'document.write', 'metadata.update'].includes(operation)) return 'Query Check operation is not registered'
+  if (!['read_only', 'governed_write'].includes(mode ?? '')) return 'Query Check mode must be read_only or governed_write'
+  if (values.get('variables') !== 'host_validated') return 'Query Check variables must be host_validated'
+  if (!Number.isInteger(timeout) || timeout < 1_000 || timeout > 30_000) return 'Query Check timeout_ms must be between 1000 and 30000'
+  if (/__schema|__type/i.test(rule ?? '')) return 'Query Check forbids free GraphQL introspection'
+  if (writeOperation && (mode !== 'governed_write' || values.get('review') !== 'required' || values.get('dry_run') !== 'required' || values.get('rollback') !== 'versioned' || values.get('response') !== 'mutation_receipt')) {
+    return 'Governed writes require Human Review, dry-run, versioned rollback and a mutation receipt'
+  }
+  if (!writeOperation && (mode !== 'read_only' || values.get('review') !== 'not_required' || values.get('dry_run') !== 'not_applicable' || values.get('rollback') !== 'not_applicable' || values.get('response') !== 'bounded_metadata')) {
+    return 'Read queries require read_only mode and a bounded metadata response'
+  }
   return undefined
 }
 
@@ -141,6 +201,8 @@ function compactGraph(payload: unknown) {
   const riskNodeIds = new Set<string>()
   const explorerNodeIds = new Set<string>()
   const workerNodeIds = new Set<string>()
+  const queryNodeIds = new Set<string>()
+  const nodeKinds = new Map<string, ProposalCardKind>()
   for (const [index, item] of graph.nodes.entries()) {
     const node = record(item, `Graph node ${index + 1}`)
     const id = identifier(node.id, `Graph node ${index + 1} id`)!
@@ -150,6 +212,8 @@ function compactGraph(payload: unknown) {
     if (node.kind === 'risk') riskNodeIds.add(id)
     if (node.kind === 'explorer') explorerNodeIds.add(id)
     if (node.kind === 'worker') workerNodeIds.add(id)
+    if (node.kind === 'query') queryNodeIds.add(id)
+    if (kinds.has(node.kind as ProposalCardKind)) nodeKinds.set(id, node.kind as ProposalCardKind)
   }
   const edgeIds = new Set<string>()
   for (const [index, item] of graph.edges.entries()) {
@@ -158,7 +222,7 @@ function compactGraph(payload: unknown) {
     if (edgeIds.has(id)) throw new Error(`Graph contains duplicate edge id ${id}`)
     edgeIds.add(id)
   }
-  return { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds }
+  return { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds, queryNodeIds, nodeKinds }
 }
 
 function validateAction(value: unknown, index: number): ValidatedProposalAction {
@@ -193,8 +257,13 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
   if (!Array.isArray(proposal.evidence) || proposal.evidence.length > 12) throw new Error('evidence must contain at most 12 entries')
   if (!Array.isArray(proposal.actions) || proposal.actions.length > 20) throw new Error('actions must contain at most 20 entries')
 
-  const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds } = compactGraph(payload)
+  const { nodeIds, edgeIds, explorerNodeIds, reviewNodeIds, riskNodeIds, workerNodeIds, queryNodeIds, nodeKinds } = compactGraph(payload)
   const actions = proposal.actions.map(validateAction)
+  const virtualKinds = new Map(nodeKinds)
+  for (const action of actions) {
+    if (action.type === 'add_card' && action.node_id && action.kind) virtualKinds.set(action.node_id, action.kind)
+    if (action.type === 'update_card' && action.node_id && action.kind) virtualKinds.set(action.node_id, action.kind)
+  }
   const allExplorerNodeIds = new Set([
     ...explorerNodeIds,
     ...actions.flatMap((action) => action.type === 'add_card' && action.kind === 'explorer' && action.node_id ? [action.node_id] : []),
@@ -222,6 +291,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
         const error = workerPolicyError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
+      if (action.kind === 'query') {
+        const error = queryCheckRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       if (nodeIds.has(action.node_id) || aliases.has(action.node_id)) throw new Error(`Proposal contains duplicate node id ${action.node_id}`)
       aliases.add(action.node_id)
       continue
@@ -241,6 +314,10 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
         const error = workerPolicyError(action.rule)
         if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
       }
+      if ((action.kind === 'query' || queryNodeIds.has(action.node_id)) && (action.kind === 'query' || action.rule !== null)) {
+        const error = queryCheckRuleError(action.rule)
+        if (error) throw new Error(`Proposal action ${index + 1} · ${error}`)
+      }
       continue
     }
     if (action.type === 'remove_edge') {
@@ -254,11 +331,20 @@ export function validateProposal(value: unknown, payload: unknown): ValidatedPro
     if ((!nodeIds.has(action.source) && !aliases.has(action.source)) || (!nodeIds.has(action.target) && !aliases.has(action.target))) throw new Error(`Proposal action ${index + 1} contains a dangling edge`)
     if (allExplorerNodeIds.has(action.source) || allExplorerNodeIds.has(action.target)) throw new Error(`Proposal action ${index + 1} cannot connect the host-owned Catalog Explorer sidecar to dataset lineage`)
     if (action.source_handle && !['approved', 'quarantine', 'feedback'].includes(action.source_handle)) throw new Error(`Proposal action ${index + 1} has an invalid source handle`)
+    const sourceKind = virtualKinds.get(action.source)
+    const targetKind = virtualKinds.get(action.target)
+    const compatibilityError = sourceKind && targetKind ? proposalConnectionCompatibilityError(sourceKind, targetKind, action.source_handle) : undefined
+    if (compatibilityError) throw new Error(`Proposal action ${index + 1} · ${compatibilityError}`)
     addedEdgeCount += 1
   }
 
   if (nodeIds.size + aliases.size > maximumNodes || edgeIds.size - removedEdges.size + addedEdgeCount > maximumEdges) throw new Error('Proposal would grow the graph beyond the DATA LAB safety limits')
   const includesReview = actions.some((action) => action.kind === 'review' || (action.type === 'update_card' && Boolean(action.node_id && reviewNodeIds.has(action.node_id))))
+  const includesGovernedQueryWrite = actions.some((action) =>
+    action.rule !== null
+    && /(?:^|\|)\s*mode\s*=\s*governed_write\b/i.test(action.rule)
+    && (action.kind === 'query' || Boolean(action.node_id && queryNodeIds.has(action.node_id))))
+  if (includesGovernedQueryWrite && !proposal.requires_human_review) throw new Error('Governed Query Check writes require requires_human_review=true and a Human Review card action')
   if (proposal.requires_human_review && !includesReview) throw new Error('Human Review was requested without a Human Review card action')
   if (!proposal.requires_human_review && includesReview) throw new Error('Human Review card actions require requires_human_review=true')
   const request = record(payload, 'Agent request')

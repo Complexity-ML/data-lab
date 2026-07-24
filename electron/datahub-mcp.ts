@@ -12,6 +12,7 @@ import { secureStorageCapability } from './secure-storage.js'
 export type { DataHubAssetSummary } from './datahub-context.js'
 
 export type DataHubMcpTransport = 'demo' | 'http' | 'stdio'
+export type DataHubCatalogReadRoute = 'auto' | 'gms' | 'mcp'
 
 export interface DataHubMcpStatus {
   mode: 'demo' | 'connected'
@@ -27,6 +28,7 @@ export interface DataHubMcpStatus {
 export interface DataHubMcpPublicSettings {
   transport: 'http' | 'stdio'
   url: string
+  catalogReadRoute?: DataHubCatalogReadRoute
   tokenConfigured: boolean
   tokenSource: 'encrypted' | 'environment' | 'none'
   encryptionAvailable: boolean
@@ -35,6 +37,7 @@ export interface DataHubMcpPublicSettings {
 
 export interface DataHubMcpRead {
   name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
+  capability?: 'entity.read' | 'schema.read' | 'lineage.read'
   status: 'ok' | 'unavailable' | 'error'
   summary: string
   capturedAt: string
@@ -46,6 +49,7 @@ export interface DataHubMcpRead {
 export interface DataHubMcpAudit {
   urn: string
   transport: Exclude<DataHubMcpTransport, 'demo'>
+  route?: 'gms-graphql' | 'mcp'
   serverVersion?: string
   reads: DataHubMcpRead[]
 }
@@ -71,6 +75,12 @@ const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_entities: 5 * 60_000,
   list_schema_fields: 2 * 60_000,
   get_lineage: 90_000,
+}
+
+const evidenceCapability: Record<DataHubMcpRead['name'], NonNullable<DataHubMcpRead['capability']>> = {
+  get_entities: 'entity.read',
+  list_schema_fields: 'schema.read',
+  get_lineage: 'lineage.read',
 }
 
 export type DataHubInspectionMode = 'summary' | 'deep'
@@ -137,6 +147,7 @@ export function normalizeDataHubMcpStartupError(error: unknown, command: string)
 const settingKeys = {
   transport: 'datahub-mcp-transport',
   url: 'datahub-mcp-url',
+  catalogReadRoute: 'datahub-catalog-read-route',
   token: 'datahub-mcp-token',
   writeback: 'datahub-mcp-writeback',
 } as const
@@ -177,9 +188,19 @@ function configuration(resolveSecrets = false): { mode: DataHubMcpTransport; mes
   const token = storedToken || environmentToken
   const tokenConfigured = Boolean(encryptedToken || environmentToken)
   const writebackEnabled = loadAppSetting(userData, settingKeys.writeback) === 'true'
+  const storedCatalogReadRoute = loadAppSetting(userData, settingKeys.catalogReadRoute)
+  const environmentCatalogReadRoute = process.env.DATAHUB_CATALOG_READ_ROUTE?.trim()
+  const catalogReadRoute: DataHubCatalogReadRoute = selectedTransport === 'http' ? 'mcp' : (
+    storedCatalogReadRoute === 'gms' || storedCatalogReadRoute === 'mcp' || storedCatalogReadRoute === 'auto'
+      ? storedCatalogReadRoute
+      : environmentCatalogReadRoute === 'gms' || environmentCatalogReadRoute === 'mcp'
+        ? environmentCatalogReadRoute
+        : 'auto'
+  )
   const settings: DataHubMcpPublicSettings = {
     transport: selectedTransport,
     url,
+    catalogReadRoute,
     tokenConfigured,
     tokenSource: encryptedToken ? 'encrypted' : environmentToken ? 'environment' : 'none',
     encryptionAvailable: secureStorageCapability(),
@@ -351,7 +372,7 @@ export function getDataHubMcpConfigurationStatus(): DataHubMcpStatus {
     message: activeClient ? `DataHub MCP connected${tools.length ? ` · ${tools.length} tools available` : ''}` : config.message,
     toolCount: tools.length,
     tools,
-    writebackAvailable: Boolean(activeClient) && hasExplicitDataHubWritebackTool(toolCatalog),
+    writebackAvailable: config.mode === 'stdio' && Boolean(config.url) ? true : Boolean(activeClient) && hasExplicitDataHubWritebackTool(toolCatalog),
     settings: config.settings,
   }
 }
@@ -372,6 +393,12 @@ export async function saveDataHubMcpSettings(payload: unknown): Promise<DataHubM
   const userData = app.getPath('userData')
   saveAppSetting(userData, settingKeys.transport, transport)
   saveAppSetting(userData, settingKeys.url, url)
+  const catalogReadRoute = transport === 'http'
+    ? 'mcp'
+    : value.catalogReadRoute === 'gms' || value.catalogReadRoute === 'mcp'
+      ? value.catalogReadRoute
+      : 'auto'
+  saveAppSetting(userData, settingKeys.catalogReadRoute, catalogReadRoute)
   saveAppSetting(userData, settingKeys.writeback, value.writebackEnabled === true ? 'true' : 'false')
   if (value.clearToken === true) saveAppSetting(userData, settingKeys.token, '')
   else if (token) saveAppSetting(userData, settingKeys.token, safeStorage.encryptString(token).toString('base64'))
@@ -398,7 +425,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
       serverVersion: client.getServerVersion()?.version,
       toolCount: names.length,
       tools: names,
-      writebackAvailable: false,
+      writebackAvailable: config.mode === 'stdio' && Boolean(config.url),
       settings: config.settings,
     }
   }
@@ -410,7 +437,7 @@ export async function connectDataHubMcp(): Promise<DataHubMcpStatus> {
     serverVersion: client.getServerVersion()?.version,
     toolCount: names.length,
     tools: names,
-    writebackAvailable: hasExplicitDataHubWritebackTool(tools),
+    writebackAvailable: config.mode === 'stdio' && Boolean(config.url) ? true : hasExplicitDataHubWritebackTool(tools),
     settings: config.settings,
   }
 }
@@ -439,12 +466,12 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
   const cached = contextCache.get(cacheKey)
   if (!options.force && cached && cached.expiresAt > now) return {
     result: cached.result,
-    evidence: { name, status: 'ok' as const, summary: summarizeResult(cached.result), capturedAt: new Date(cached.capturedAt).toISOString(), expiresAt: new Date(cached.expiresAt).toISOString(), cached: true, stale: false },
+      evidence: { name, capability: evidenceCapability[name], status: 'ok' as const, summary: summarizeResult(cached.result), capturedAt: new Date(cached.capturedAt).toISOString(), expiresAt: new Date(cached.expiresAt).toISOString(), cached: true, stale: false },
   }
   const capturedAt = new Date(now).toISOString()
   if (!available.has(name)) return {
     result: undefined,
-    evidence: { name, status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+    evidence: { name, capability: evidenceCapability[name], status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
   }
   try {
     const result = assertBoundedMcpPayload(await runBoundedMcpRead(
@@ -455,12 +482,12 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
     if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
     return {
       result,
-      evidence: { name, status, summary: summarizeResult(result), capturedAt, expiresAt: new Date(expiresAt).toISOString(), cached: false, stale: status !== 'ok' },
+      evidence: { name, capability: evidenceCapability[name], status, summary: summarizeResult(result), capturedAt, expiresAt: new Date(expiresAt).toISOString(), cached: false, stale: status !== 'ok' },
     }
   } catch (error) {
     return {
       result: undefined,
-      evidence: { name, status: 'error' as const, summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+      evidence: { name, capability: evidenceCapability[name], status: 'error' as const, summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
     }
   }
 }
@@ -474,6 +501,7 @@ function cachedEntityRead(urn: string, force: boolean) {
     result: cached.result,
     evidence: {
       name: 'get_entities' as const,
+      capability: 'entity.read' as const,
       status: 'ok' as const,
       summary: summarizeResult(cached.result),
       capturedAt: new Date(cached.capturedAt).toISOString(),
@@ -481,6 +509,115 @@ function cachedEntityRead(urn: string, force: boolean) {
       cached: true,
       stale: false,
     },
+  }
+}
+
+const catalogEntitiesQuery = `query DataLabCatalogEntities($urns: [String!]!) {
+  entities(urns: $urns) {
+    urn
+    type
+    ... on Dataset {
+      name
+      platform { urn name }
+      properties { name description }
+      editableProperties { description }
+      ownership {
+        owners {
+          owner {
+            ... on CorpUser { urn username }
+            ... on CorpGroup { urn name }
+          }
+        }
+      }
+      tags { tags { tag { urn name properties { name } } } }
+      schemaMetadata { fields { fieldPath nativeDataType } }
+      health { type status message }
+    }
+  }
+}`
+
+const gmsCatalogCircuit = { failures: 0, openUntil: 0 }
+
+function catalogGraphqlEndpoint(url: string) {
+  const parsed = new URL(url)
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/api/graphql`
+  parsed.search = ''
+  parsed.hash = ''
+  return parsed.toString()
+}
+
+async function postDataHubGraphql<T>(config: ReturnType<typeof configuration>, query: string, variables: Record<string, unknown>, label: string): Promise<T> {
+  if (config.mode !== 'stdio' || !config.url) throw new Error('Direct GMS catalog reads require a local stdio DataHub connection')
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), resolveCatalogEntityTimeoutMs())
+  try {
+    const response = await fetch(catalogGraphqlEndpoint(config.url), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
+      },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(`DataHub GMS GraphQL returned HTTP ${response.status}`)
+    const payload = assertBoundedMcpPayload(await response.json(), label)
+    if (!payload || typeof payload !== 'object') throw new Error('DataHub GMS GraphQL returned an invalid response')
+    const value = payload as { data?: T; errors?: { message?: unknown }[] }
+    if (value.errors?.length) {
+      const message = value.errors.map((error) => sanitizeEvidenceSummary(String(error.message ?? 'GraphQL error'))).join(' · ')
+      throw new Error(message.slice(0, 1_000))
+    }
+    if (!value.data) throw new Error('DataHub GMS GraphQL returned no data')
+    return value.data
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw new Error(`DataHub GMS GraphQL timed out after ${resolveCatalogEntityTimeoutMs() / 1_000}s`)
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function readEntityBatchFromGms(urns: string[], config: ReturnType<typeof configuration>) {
+  const data = await postDataHubGraphql<{ entities?: unknown[] }>(
+    config,
+    catalogEntitiesQuery,
+    { urns },
+    'DataHub GMS GraphQL entity response',
+  )
+  const entities = Array.isArray(data.entities) ? data.entities : []
+    const byUrn = new Map(entities.flatMap((entity) => {
+      if (!entity || typeof entity !== 'object' || Array.isArray(entity)) return []
+      const entityUrn = (entity as { urn?: unknown }).urn
+      return typeof entityUrn === 'string' && urns.includes(entityUrn) ? [[entityUrn, entity] as const] : []
+    }))
+  return byUrn
+}
+
+async function readEntityBatchViaGms(urns: string[], reads: Map<string, Awaited<ReturnType<typeof readCachedTool>>>) {
+  const config = configuration(true)
+  const entities = await readEntityBatchFromGms(urns, config)
+  const capturedAtMs = Date.now()
+  const capturedAt = new Date(capturedAtMs).toISOString()
+  const expiresAtMs = capturedAtMs + resolveEvidenceTtlMs().get_entities
+  for (const urn of urns) {
+    const entity = entities.get(urn)
+    if (!entity) throw new Error(`DataHub GMS GraphQL omitted ${urn}`)
+    const result = { structuredContent: { result: [entity] } }
+    contextCache.set(`get_entities:${JSON.stringify({ urns: [urn] })}`, { result, capturedAt: capturedAtMs, expiresAt: expiresAtMs })
+    reads.set(urn, {
+      result,
+      evidence: {
+        name: 'get_entities',
+        capability: 'entity.read',
+        status: 'ok',
+        summary: 'Catalog entity summary received from DataHub GMS GraphQL.',
+        capturedAt,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        cached: false,
+        stale: false,
+      },
+    })
   }
 }
 
@@ -494,13 +631,44 @@ async function readEntityBatch(urns: string[], force: boolean) {
   }
   if (!missing.length) return reads
 
+  const config = configuration(true)
+  const route = config.settings.catalogReadRoute ?? 'auto'
+  const mayUseGms = config.mode === 'stdio' && Boolean(config.url) && route !== 'mcp'
+  if (mayUseGms) {
+    try {
+      if (Date.now() < gmsCatalogCircuit.openUntil) throw new Error('DataHub GMS GraphQL is cooling down after a recent transport failure')
+      await readEntityBatchViaGms(missing, reads)
+      gmsCatalogCircuit.failures = 0
+      gmsCatalogCircuit.openUntil = 0
+      return reads
+    } catch (error) {
+      gmsCatalogCircuit.failures += 1
+      gmsCatalogCircuit.openUntil = Date.now() + Math.min(60_000, 5_000 * (2 ** Math.min(3, gmsCatalogCircuit.failures - 1)))
+      const capturedAt = new Date().toISOString()
+      for (const urn of missing) reads.set(urn, {
+        result: undefined,
+        evidence: {
+          name: 'get_entities',
+          capability: 'entity.read',
+          status: 'error',
+          summary: `${error instanceof Error ? error.message : 'Unknown GMS GraphQL error'} (${urn})`,
+          capturedAt,
+          expiresAt: capturedAt,
+          cached: false,
+          stale: true,
+        },
+      })
+      return reads
+    }
+  }
+
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   const capturedAt = new Date().toISOString()
   if (!available.has('get_entities')) {
     for (const urn of missing) reads.set(urn, {
       result: undefined,
-      evidence: { name: 'get_entities', status: 'unavailable', summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+      evidence: { name: 'get_entities', capability: 'entity.read', status: 'unavailable', summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
     })
     return reads
   }
@@ -531,6 +699,7 @@ async function readEntityBatch(urns: string[], force: boolean) {
         result,
         evidence: {
           name: 'get_entities' as const,
+          capability: 'entity.read' as const,
           status: 'ok' as const,
           summary: 'Catalog entity summary received.',
           capturedAt: entityCapturedAt,
@@ -544,6 +713,7 @@ async function readEntityBatch(urns: string[], force: boolean) {
         result: undefined,
         evidence: {
           name: 'get_entities' as const,
+          capability: 'entity.read' as const,
           status: 'error' as const,
           summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`,
           capturedAt: entityCapturedAt,
@@ -584,6 +754,7 @@ async function flushSummaryInspections() {
         result: undefined,
         evidence: {
           name: 'get_entities' as const,
+          capability: 'entity.read' as const,
           status: 'error' as const,
           summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`,
           capturedAt,
@@ -597,6 +768,7 @@ async function flushSummaryInspections() {
       const read = reads.get(item.urn)
       const evidence = read?.evidence ?? {
         name: 'get_entities' as const,
+        capability: 'entity.read' as const,
         status: 'error' as const,
         summary: `No batch result was produced (${item.urn})`,
         capturedAt: new Date().toISOString(),
@@ -624,6 +796,89 @@ function inspectDataHubAssetSummary(urn: string, force: boolean) {
     summaryFlushScheduled = true
     setTimeout(() => { void flushSummaryInspections() }, 0)
   })
+}
+
+const deepDatasetQuery = `query DataLabDeepDataset($urn: String!) {
+  entity(urn: $urn) {
+    urn
+    type
+    ... on Dataset {
+      name
+      platform { urn name }
+      properties { name description }
+      editableProperties { description }
+      ownership {
+        owners {
+          owner {
+            ... on CorpUser { urn username properties { displayName } }
+            ... on CorpGroup { urn name properties { displayName } }
+          }
+        }
+      }
+      tags { tags { tag { urn name properties { name } } } }
+      glossaryTerms { terms { term { urn properties { name } } } }
+      domain { domain { urn properties { name } } }
+      schemaMetadata { fields { fieldPath nativeDataType } }
+      health { type status message }
+      upstream: lineage(input: { direction: UPSTREAM, start: 0, count: 30 }) {
+        relationships {
+          entity {
+            urn
+            type
+            ... on Dataset { name tags { tags { tag { urn name properties { name } } } } }
+          }
+        }
+      }
+      downstream: lineage(input: { direction: DOWNSTREAM, start: 0, count: 30 }) {
+        relationships {
+          entity {
+            urn
+            type
+            ... on Dataset { name tags { tags { tag { urn name properties { name } } } } }
+          }
+        }
+      }
+    }
+  }
+}`
+
+async function inspectDataHubAssetViaGms(urn: string, config: ReturnType<typeof configuration>) {
+  const data = await postDataHubGraphql<{ entity?: Record<string, unknown> }>(
+    config,
+    deepDatasetQuery,
+    { urn },
+    'DataHub GMS GraphQL deep dataset response',
+  )
+  const entity = data.entity
+  if (!entity || entity.urn !== urn) throw new Error('DataHub GMS GraphQL omitted the requested dataset')
+  const capturedAtMs = Date.now()
+  const capturedAt = new Date(capturedAtMs).toISOString()
+  const ttls = resolveEvidenceTtlMs()
+  const evidence = ([
+    ['get_entities', 'Entity, ownership, tags and health received from DataHub GMS GraphQL.'],
+    ['list_schema_fields', 'Schema fields received from DataHub GMS GraphQL.'],
+    ['get_lineage', 'Upstream lineage received from DataHub GMS GraphQL.'],
+    ['get_lineage', 'Downstream lineage received from DataHub GMS GraphQL.'],
+  ] as const).map(([name, summary]) => ({
+    name,
+    capability: evidenceCapability[name],
+    status: 'ok' as const,
+    summary,
+    capturedAt,
+    expiresAt: new Date(capturedAtMs + ttls[name]).toISOString(),
+    cached: false,
+    stale: false,
+  }))
+  const asset = parseAssetContext({
+    urn,
+    entityPayload: { result: [entity] },
+    schemaPayload: { fields: (entity.schemaMetadata as { fields?: unknown[] } | undefined)?.fields ?? [] },
+    upstreamPayload: entity.upstream,
+    downstreamPayload: entity.downstream,
+    capturedAt,
+    expiresAt: evidence.map((read) => read.expiresAt).sort()[0],
+  })
+  return { asset, evidence }
 }
 
 export function buildDataHubSearchQuery(query: string): string {
@@ -702,6 +957,41 @@ export async function mapWithRetryConcurrency<T, R>(
 
 export async function searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]> {
   const structuredQuery = buildDataHubSearchQuery(query)
+  const config = configuration(true)
+  const route = config.settings.catalogReadRoute ?? 'auto'
+  if (config.mode === 'stdio' && config.url && route !== 'mcp') {
+    const pageSize = 250
+    const searchPage = async (start: number) => postDataHubGraphql<{
+      search?: { total?: number; searchResults?: unknown[] }
+    }>(
+      config,
+      `query DataLabCatalogSearch($input: SearchInput!) {
+        search(input: $input) {
+          total
+          searchResults {
+            entity {
+              urn
+              type
+              ... on Dataset { name properties { name } }
+            }
+          }
+        }
+      }`,
+      { input: { type: 'DATASET', query: structuredQuery, start, count: pageSize } },
+      `DataHub GMS GraphQL catalog search page ${Math.floor(start / pageSize) + 1}`,
+    )
+    const first = await searchPage(0)
+    const firstPayload = first.search ?? {}
+    const total = resolveCatalogSearchTotal(Number(firstPayload.total ?? 0))
+    const offsets = Array.from({ length: Math.max(0, Math.ceil(total / pageSize) - 1) }, (_, index) => (index + 1) * pageSize)
+    const remaining = await mapWithConcurrency(offsets, 3, searchPage)
+    const seen = new Set<string>()
+    return [firstPayload, ...remaining.map((page) => page.search ?? {})].flatMap((page) => parseSearchResults(page)).flatMap((match) => {
+      if (seen.has(match.urn)) return []
+      seen.add(match.urn)
+      return [parseAssetContext({ urn: match.urn, name: match.name })]
+    }).slice(0, total)
+  }
   const pageSize = 10
   const searchPage = async (offset: number, attempt: number) => {
     const client = await connectClient()
@@ -747,6 +1037,11 @@ export function resolveCatalogSearchTotal(total: number) {
 export async function inspectDataHubAsset(urn: string, force = false, mode: DataHubInspectionMode = 'deep'): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
   validateDatasetUrn(urn)
   if (mode === 'summary') return inspectDataHubAssetSummary(urn, force)
+  const config = configuration(true)
+  const route = config.settings.catalogReadRoute ?? 'auto'
+  if (config.mode === 'stdio' && config.url && route !== 'mcp') {
+    return inspectDataHubAssetViaGms(urn, config)
+  }
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
@@ -793,14 +1088,31 @@ export function parseDataHubDecisionRequest(payload: unknown): DataHubDecisionRe
   return { revisionId, title, rationale, author, relatedAssets }
 }
 
-export async function writeDataHubDecision(payload: unknown): Promise<{ written: true; tool: 'save_document'; summary: string }> {
-  const config = configuration()
+export async function writeDataHubDecision(payload: unknown): Promise<{ written: true; tool: 'createDocument' | 'save_document'; summary: string }> {
+  const config = configuration(true)
   if (!config.settings.writebackEnabled) throw new Error('DataHub write-back is disabled in Settings')
   const { revisionId, title, rationale, author, relatedAssets } = parseDataHubDecisionRequest(payload)
+  const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
+  if (config.mode === 'stdio' && config.url) {
+    const data = await postDataHubGraphql<{ createDocument?: string }>(
+      config,
+      'mutation DataLabCreateDecision($input: CreateDocumentInput!) { createDocument(input: $input) }',
+      {
+        input: {
+          subType: 'Decision',
+          title: `DATA LAB · ${title}`,
+          contents: { text: content },
+          relatedAssets,
+        },
+      },
+      'DataHub GMS GraphQL createDocument response',
+    )
+    if (!data.createDocument?.startsWith('urn:li:')) throw new Error('DataHub GMS GraphQL did not return the created Decision URN')
+    return { written: true, tool: 'createDocument', summary: `Decision published as ${data.createDocument}` }
+  }
   const client = await connectClient()
   const listed = await discoverTools(client, 'DataHub MCP mutation discovery')
   if (!hasExplicitDataHubWritebackTool(listed)) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
-  const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
   const result = assertBoundedMcpPayload(await callToolWithSdkTimeout(client, { name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }, 20_000, 'save_document'), 'save_document response')
   if (result.isError) throw new Error(summarizeResult(result))
   return { written: true, tool: 'save_document', summary: summarizeResult(result) }
@@ -808,6 +1120,17 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
 
 export async function auditDataHubWithMcp(urn: string, force = false): Promise<DataHubMcpAudit> {
   validateDatasetUrn(urn)
+  const config = configuration(true)
+  const route = config.settings.catalogReadRoute ?? 'auto'
+  if (config.mode === 'stdio' && config.url && route !== 'mcp') {
+    const inspection = await inspectDataHubAssetViaGms(urn, config)
+    return {
+      urn,
+      transport: 'stdio',
+      route: 'gms-graphql',
+      reads: inspection.evidence,
+    }
+  }
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
@@ -822,6 +1145,7 @@ export async function auditDataHubWithMcp(urn: string, force = false): Promise<D
   return {
     urn,
     transport: activeMode ?? 'stdio',
+    route: 'mcp',
     serverVersion: client.getServerVersion()?.version,
     reads,
   }

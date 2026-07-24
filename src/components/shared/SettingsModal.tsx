@@ -28,6 +28,7 @@ interface SettingsModalProps {
   dataHubSettings: {
     transport: 'http' | 'stdio'
     url: string
+    catalogReadRoute?: 'auto' | 'gms' | 'mcp'
     tokenConfigured: boolean
     tokenSource: 'encrypted' | 'environment' | 'none'
     encryptionAvailable: boolean
@@ -74,7 +75,7 @@ interface SettingsModalProps {
   onSaveCatalogConnector: (settings: CatalogConnectorManifest & { token?: string; clearToken?: boolean }) => Promise<unknown>
   onSelectActiveAiSource: (source: ActiveAiSource) => Promise<void>
   onSetAppUpdateChannel: (channel: AppUpdateChannel) => Promise<AppUpdateStatus>
-  onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
+  onSaveDataHubSettings: (settings: { transport: 'http' | 'stdio'; url: string; catalogReadRoute?: 'auto' | 'gms' | 'mcp'; token?: string; clearToken?: boolean; writebackEnabled?: boolean }) => Promise<unknown>
   onSyncDataHub: () => Promise<{ mode: 'demo' | 'connected'; message: string } | undefined>
   onTestCatalogConnector: (id: string) => Promise<{ connected: boolean; message: string }>
   onTestAiConnection: () => Promise<void>
@@ -104,6 +105,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [dataHubBusy, setDataHubBusy] = useState(false)
   const [dataHubFeedback, setDataHubFeedback] = useState('')
   const [dataHubTransport, setDataHubTransport] = useState<'http' | 'stdio'>(dataHubSettings.transport)
+  const [dataHubCatalogReadRoute, setDataHubCatalogReadRoute] = useState<'auto' | 'gms' | 'mcp'>(dataHubSettings.catalogReadRoute ?? 'auto')
   const [dataHubWriteback, setDataHubWriteback] = useState(dataHubSettings.writebackEnabled)
   const [catalogKind, setCatalogKind] = useState<CatalogConnectorKind>('mcp')
   const [catalogFeedback, setCatalogFeedback] = useState('')
@@ -126,6 +128,7 @@ export function SettingsModal(props: SettingsModalProps) {
   useEffect(() => { if (initialSection) setActiveSection(initialSection) }, [initialSection])
   useEffect(() => { if (activeSection !== 'diagnostics') setReportsClearArmed(false) }, [activeSection])
   useEffect(() => { setDataHubTransport(dataHubSettings.transport) }, [dataHubSettings.transport])
+  useEffect(() => { setDataHubCatalogReadRoute(dataHubSettings.catalogReadRoute ?? 'auto') }, [dataHubSettings.catalogReadRoute])
   useEffect(() => { setDataHubWriteback(dataHubSettings.writebackEnabled) }, [dataHubSettings.writebackEnabled])
   useEffect(() => { diagnosticLoaderRef.current = onLoadDiagnostics }, [onLoadDiagnostics])
   useEffect(() => {
@@ -187,7 +190,7 @@ export function SettingsModal(props: SettingsModalProps) {
     setDataHubFeedback('')
     try {
       const token = dataHubTokenRef.current?.value.trim()
-      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', token: token || undefined, writebackEnabled: dataHubWriteback })
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() ?? '', catalogReadRoute: dataHubCatalogReadRoute, token: token || undefined, writebackEnabled: dataHubWriteback })
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
       const status = await onSyncDataHub()
       if (!status || status.mode !== 'connected') throw new Error(status?.message ?? 'DataHub MCP did not complete the connection handshake.')
@@ -202,7 +205,7 @@ export function SettingsModal(props: SettingsModalProps) {
     setDataHubBusy(true)
     setDataHubFeedback('')
     try {
-      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() || dataHubSettings.url, clearToken: true, writebackEnabled: dataHubWriteback })
+      await onSaveDataHubSettings({ transport: dataHubTransport, url: dataHubUrlRef.current?.value.trim() || dataHubSettings.url, catalogReadRoute: dataHubCatalogReadRoute, clearToken: true, writebackEnabled: dataHubWriteback })
       if (dataHubTokenRef.current) dataHubTokenRef.current.value = ''
       setDataHubFeedback(dataHubSettings.tokenSource === 'environment' ? 'The app token was cleared. An environment token may remain active.' : 'The encrypted DataHub token was removed.')
     } catch (error) {
@@ -541,14 +544,15 @@ export function SettingsModal(props: SettingsModalProps) {
         {activeSection === 'connections' && <article className="settings-page">
           <div className="settings-page-heading"><small>CONNECTIONS</small><h3>Catalog and evidence sources</h3><p>Connect normalized MCP or HTTP API catalogs without coupling pipeline cards to a vendor.</p></div>
           <section className="settings-section">
-            <div className="settings-section-title"><span>Built-in · DataHub MCP</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Streamable HTTP' : 'Local stdio'}</small></div>
-            <div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub MCP {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton disabled={dataHubBusy || connectionMode !== 'connected'} onClick={() => void onSyncDataHub()} variant="ghost">Sync now</ActionButton></div>
+            <div className="settings-section-title"><span>Built-in · DataHub</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Remote MCP' : 'GraphQL GMS + local MCP'}</small></div>
+            <div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton disabled={dataHubBusy || connectionMode !== 'connected'} onClick={() => void onSyncDataHub()} variant="ghost">Sync now</ActionButton></div>
             <div className="ai-option-grid">
               <label className="settings-field"><span>Transport</span><select onChange={(event) => setDataHubTransport(event.target.value as 'http' | 'stdio')} value={dataHubTransport}><option value="stdio">Local stdio (DataHub OSS)</option><option value="http">Streamable HTTP MCP</option></select><small>{dataHubTransport === 'stdio' ? 'Launches mcp-server-datahub locally through uvx; quickstart works without a token.' : 'Connects to an already hosted MCP endpoint.'}</small></label>
               <label className="settings-field"><span>{dataHubTransport === 'stdio' ? 'DataHub GMS URL' : 'MCP server URL'}</span><input defaultValue={dataHubSettings.url} key={`datahub-url-${dataHubSettings.url}`} placeholder={dataHubTransport === 'stdio' ? 'http://localhost:8080' : 'https://mcp.example.com/mcp'} ref={dataHubUrlRef} type="url" /><small>Only HTTP or HTTPS endpoints are accepted.</small></label>
+              <label className="settings-field"><span>Dataset read route</span><select disabled={dataHubTransport === 'http'} onChange={(event) => setDataHubCatalogReadRoute(event.target.value as 'auto' | 'gms' | 'mcp')} value={dataHubTransport === 'http' ? 'mcp' : dataHubCatalogReadRoute}><option value="auto">Auto · GraphQL for local Docker</option><option value="gms">GraphQL GMS only</option><option value="mcp">MCP tools only</option></select><small>{dataHubTransport === 'http' ? 'Remote Streamable HTTP uses the MCP endpoint.' : 'GraphQL reads catalog batches, schema and lineage directly. MCP remains available for agent tools and governed write-back.'}</small></label>
             </div>
             <label className="settings-field"><span>Personal access token <em>optional for local OSS</em></span><input autoComplete="off" placeholder={dataHubSettings.tokenConfigured ? 'Token configured · enter a new value to rotate' : 'Leave empty for an unauthenticated local quickstart'} ref={dataHubTokenRef} type="password" /><small>{dataHubSettings.tokenSource === 'encrypted' ? 'Stored with the operating system secure credential service.' : dataHubSettings.tokenSource === 'environment' ? 'Loaded from the launch environment; never exposed to the renderer.' : dataHubTransport === 'stdio' ? 'Your current quickstart has token authentication disabled, so this field can stay empty.' : dataHubSettings.encryptionAvailable ? 'Hosted endpoints generally require a token; it will be encrypted before SQLite persistence.' : 'Secure credential storage is unavailable; DATA LAB will refuse to save a token.'}</small></label>
-            <label className="datahub-writeback-toggle"><span><strong>Approved DataHub write-back</strong><small>Disabled by default. When enabled, only the explicitly advertised <code>save_document</code> mutation can run after a human approves its exact preview.</small></span><input checked={dataHubWriteback} onChange={(event) => setDataHubWriteback(event.target.checked)} type="checkbox" /></label>
+            <label className="datahub-writeback-toggle"><span><strong>Approved DataHub write-back</strong><small>Disabled by default. A local connection uses GraphQL <code>createDocument</code>; remote MCP uses its explicitly advertised mutation. Both require the exact native human confirmation.</small></span><input checked={dataHubWriteback} onChange={(event) => setDataHubWriteback(event.target.checked)} type="checkbox" /></label>
             <div className="ai-connection-actions"><ActionButton disabled={dataHubBusy || !dataHubSettings.tokenConfigured} onClick={() => void removeDataHubToken()} variant="ghost">Remove saved token</ActionButton><ActionButton disabled={dataHubBusy} icon={<Database size={14} />} onClick={() => void saveAndConnectDataHub()} variant="primary">{dataHubBusy ? 'Connecting…' : 'Save & connect'}</ActionButton></div>
             {dataHubFeedback && <p aria-live="polite" className="settings-feedback">{dataHubFeedback}</p>}
           </section>

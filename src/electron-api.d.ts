@@ -34,6 +34,7 @@ interface DataHubMcpStatus {
   settings: {
     transport: 'http' | 'stdio'
     url: string
+    catalogReadRoute?: 'auto' | 'gms' | 'mcp'
     tokenConfigured: boolean
     tokenSource: 'encrypted' | 'environment' | 'none'
     encryptionAvailable: boolean
@@ -44,9 +45,11 @@ interface DataHubMcpStatus {
 export interface DataHubMcpAudit {
   urn: string
   transport: 'http' | 'stdio'
+  route?: 'gms-graphql' | 'mcp'
   serverVersion?: string
   reads: {
     name: 'get_entities' | 'list_schema_fields' | 'get_lineage'
+    capability?: 'entity.read' | 'schema.read' | 'lineage.read'
     status: 'ok' | 'unavailable' | 'error'
     summary: string
     capturedAt: string
@@ -65,12 +68,12 @@ declare global {
       loadDatasetContext(urn: string): Promise<DataHubDatasetContext>
       getDataHubMcpStatus(): Promise<DataHubMcpStatus>
       connectDataHubMcp(): Promise<DataHubMcpStatus>
-      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }): Promise<DataHubMcpStatus>
+      saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; catalogReadRoute?: 'auto' | 'gms' | 'mcp'; token?: string; clearToken?: boolean; writebackEnabled?: boolean }): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string, force?: boolean): Promise<DataHubMcpAudit>
       searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]>
       inspectDataHubAsset(urn: string, force?: boolean, mode?: 'summary' | 'deep'): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
       invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
-      writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'save_document'; summary: string }>
+      writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'createDocument' | 'save_document'; summary: string }>
       listCatalogConnectors(): Promise<CatalogConnectorSummary[]>
       saveCatalogConnector(payload: CatalogConnectorManifest & { token?: string; clearToken?: boolean }): Promise<CatalogConnectorSummary[]>
       deleteCatalogConnector(id: string): Promise<CatalogConnectorSummary[]>
