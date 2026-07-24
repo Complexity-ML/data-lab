@@ -103,6 +103,8 @@ export function executePipelineAtomically(nodes: PipelineNode[], edges: Edge[], 
             ? 'Risk Assessment atom committed with evidence type, severity, confidence and affected assets kept distinct from collection reliability.'
           : node.data.kind === 'monitor'
             ? 'Live Monitor evaluated one bounded evidence iteration.'
+            : node.data.kind === 'worker'
+              ? 'Worker Node completed one deterministic bounded batch and exposed an atomic checkpoint.'
             : node.data.kind === 'parallel'
               ? 'Independent agent branches released with branch-only context; token usage remains observable and uncapped.'
             : 'Atomic card commit completed.'

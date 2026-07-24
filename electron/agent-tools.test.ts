@@ -151,6 +151,25 @@ describe('bounded DATA LAB agent tools', () => {
     ])
   })
 
+  it('supplies a bounded generic Worker Node policy', () => {
+    const session = new AgentToolSession(payload)
+    expect(session.execute('add_card', {
+      node_id: 'worker-audit',
+      kind: 'worker',
+      label: 'Audit worker',
+      description: null,
+      owner: null,
+      rule: null,
+      reason: 'Process connected audit cards in deterministic batches.',
+    }).ok).toBe(true)
+    expect(session.execute('inspect_graph', { node_ids: ['worker-audit'] }).queued_actions).toEqual([
+      expect.objectContaining({
+        kind: 'worker',
+        rule: 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic',
+      }),
+    ])
+  })
+
   it('rejects a data risk inferred from an unavailable connector', () => {
     const session = new AgentToolSession(payload)
     expect(session.execute('add_card', {

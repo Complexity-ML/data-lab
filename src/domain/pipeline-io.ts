@@ -5,7 +5,7 @@ import type { DataHubEvidence } from './datahub'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
-const kinds = new Set<CardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function redactExportText(value: string) {
   return value
@@ -143,6 +143,7 @@ function cleanNodeData(data: Record<string, unknown>, trustHostProof: boolean): 
     diagramMode: kind === 'diagram' ? 'incident-workstream' : undefined,
     controlMode: kind === 'control' ? 'autonomous-player' : undefined,
     explorerMode: kind === 'explorer' ? 'catalog-fanout' : undefined,
+    workerMode: kind === 'worker' ? 'bounded-execution' : undefined,
     pinned: data.pinned === true,
   }
 }

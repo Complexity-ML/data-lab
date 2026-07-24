@@ -24,6 +24,13 @@ export const cardRoleContracts: Record<CardKind, CardRoleContract> = {
     output: 'CatalogCoverage + DatasetEvidenceFingerprints + IncidentCandidates',
     allowedTools: ['search', 'get_entities', 'list_schema_fields', 'get_lineage'],
   },
+  worker: {
+    role: 'Bounded execution worker',
+    mission: 'Process one deterministic batch with branch-only context, preserve a replayable checkpoint, and return an atomically mergeable result for exploration, risk, incident or patch workflows.',
+    input: 'TypedWorkItems + PreviousWorkerCheckpoint',
+    output: 'CompletedItems + FailedItems + WorkerCheckpoint',
+    allowedTools: [],
+  },
   source: {
     role: 'Catalog loader',
     mission: 'Resolve the governed dataset and expose a trusted schema envelope.',

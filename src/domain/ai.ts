@@ -62,7 +62,7 @@ export interface AiProposalResponse {
   toolTrace?: { tool: string; status: 'read' | 'accepted' | 'rejected'; summary: string }[]
 }
 
-const kinds = new Set<CardKind>(['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
+const kinds = new Set<CardKind>(['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'])
 
 function identifier(value: string, fallback: string) {
   const clean = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
@@ -107,11 +107,13 @@ function nodePatch(action: AiAction, current?: PipelineNodeData): Partial<Pipeli
   if (effectiveKind === 'diagram') patch.diagramMode = 'incident-workstream'
   if (effectiveKind === 'control') patch.controlMode = 'autonomous-player'
   if (effectiveKind === 'explorer') patch.explorerMode = 'catalog-fanout'
+  if (effectiveKind === 'worker') patch.workerMode = 'bounded-execution'
   if (text(action.label)) patch.label = text(action.label, '', 120)
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
   if (effectiveKind === 'monitor') patch.rule = completeMonitorRule(action.rule, current?.kind === 'monitor' ? current.rule : undefined)
   else if (effectiveKind === 'explorer') patch.rule = text(action.rule, current?.kind === 'explorer' ? current.rule : 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true', 2_000)
+  else if (effectiveKind === 'worker') patch.rule = text(action.rule, current?.kind === 'worker' ? current.rule : 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic', 2_000)
   else if (text(action.rule)) patch.rule = text(action.rule, '', 2_000)
   return patch
 }
@@ -151,6 +153,8 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
           ? completeMonitorRule(action.rule)
           : action.kind === 'explorer'
             ? text(action.rule, 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true', 2_000)
+            : action.kind === 'worker'
+              ? text(action.rule, 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic', 2_000)
             : text(action.rule, undefined, 2_000) || undefined,
         status: 'draft',
         schema: [],
@@ -161,6 +165,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         diagramMode: action.kind === 'diagram' ? 'incident-workstream' : undefined,
         controlMode: action.kind === 'control' ? 'autonomous-player' : undefined,
         explorerMode: action.kind === 'explorer' ? 'catalog-fanout' : undefined,
+        workerMode: action.kind === 'worker' ? 'bounded-execution' : undefined,
       },
     })
   }

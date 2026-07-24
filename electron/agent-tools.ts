@@ -1,4 +1,4 @@
-import { riskAssessmentRuleError, validateProposal, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
+import { riskAssessmentRuleError, validateProposal, workerPolicyError, type ProposalCardKind, type ValidatedProposal, type ValidatedProposalAction } from './proposal-contract.js'
 
 type JsonRecord = Record<string, unknown>
 type ToolStatus = 'read' | 'accepted' | 'rejected'
@@ -9,7 +9,7 @@ export interface AgentToolTrace {
   summary: string
 }
 
-const kinds = ['control', 'explorer', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
+const kinds = ['control', 'explorer', 'worker', 'source', 'profile', 'analysis', 'impact', 'risk', 'patch', 'monitor', 'parallel', 'diagram', 'split', 'decision', 'transform', 'review', 'validation', 'output'] as const
 const nullableText = { type: ['string', 'null'] }
 const objectSchema = (properties: JsonRecord) => ({
   type: 'object',
@@ -116,6 +116,7 @@ export const agentToolDefinitions = [
 const cardRoles: Record<ProposalCardKind, string> = {
   control: 'Persist the autonomous objective and player resume/monitor policy.',
   explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. Update its checkpoint but never connect it to dataset lineage.',
+  worker: 'Process any connected card work as bounded deterministic batches with branch-only context and atomic checkpoints.',
   source: 'Resolve a governed DataHub dataset.',
   profile: 'Keep compact versioned schema, quality and freshness memory without raw rows.',
   analysis: 'Read trusted metadata and produce findings.',
@@ -220,6 +221,7 @@ export class AgentToolSession {
     if (kind === 'review') return supplied ?? 'checkpoint=branch | on_approve=resume_next_iteration | on_reject=repair_loop'
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
     if (kind === 'explorer') return supplied ?? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
+    if (kind === 'worker') return supplied ?? 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic'
     if (kind === 'risk') return supplied ?? 'scope=downstream_ml | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage'
     if (kind === 'monitor') {
       let rule = supplied ?? ''
@@ -287,6 +289,10 @@ export class AgentToolSession {
           const error = riskAssessmentRuleError(rule)
           if (error) throw new Error(error)
         }
+        if (kind === 'worker') {
+          const error = workerPolicyError(rule)
+          if (error) throw new Error(error)
+        }
         if (kind === 'monitor' && (!rule?.includes('on_change(metadata_fingerprint)') || !rule.includes('cooldown=') || !rule.includes('max_iterations='))) {
           throw new Error('Live Monitor requires on_change(metadata_fingerprint), cooldown and max_iterations')
         }
@@ -324,6 +330,10 @@ export class AgentToolSession {
           : kind ? this.normalizedRule(kind, args.rule) : suppliedRule
         if (effectiveKind === 'risk' && suppliedRule) {
           const error = riskAssessmentRuleError(rule)
+          if (error) throw new Error(error)
+        }
+        if (effectiveKind === 'worker' && suppliedRule) {
+          const error = workerPolicyError(rule)
           if (error) throw new Error(error)
         }
         if (!kind && !label && !description && !owner && !rule) throw new Error('update_card requires at least one changed field')

@@ -26,6 +26,16 @@ describe('versioned pipeline JSON exchange', () => {
     expect(() => parsePipelineExport(JSON.stringify(value))).toThrow('references a missing card')
   })
 
+  it('round-trips a bounded generic Worker Node', () => {
+    const worker = { ...newCard('worker', 0), id: 'worker-audit' }
+    const imported = parsePipelineExport(JSON.stringify(createPipelineExport('Worker policy', [worker], [], [])))
+    expect(imported.graph.nodes[0]?.data).toMatchObject({
+      kind: 'worker',
+      workerMode: 'bounded-execution',
+      rule: 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic',
+    })
+  })
+
   it('does not trust an exported host proof after crossing the import boundary', () => {
     const asset: DataHubAssetSummary = {
       urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers,PROD)',

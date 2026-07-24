@@ -1,10 +1,11 @@
-import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, UserCheck, WandSparkles } from 'lucide-react'
+import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, UserCheck, WandSparkles } from 'lucide-react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { cardLabels, type CardKind } from '../domain/pipeline'
 
 const palette: { kind: CardKind; description: string; icon: typeof Database }[] = [
   { kind: 'control', description: 'Persistent autonomous player policy', icon: Bot },
   { kind: 'explorer', description: 'Discover and audit the complete catalog', icon: Binoculars },
+  { kind: 'worker', description: 'Run bounded reusable work batches', icon: Cpu },
   { kind: 'source', description: 'Table, API or event stream', icon: Database },
   { kind: 'profile', description: 'Compact reusable data reading', icon: ChartColumn },
   { kind: 'analysis', description: 'Read schema, quality and lineage', icon: BrainCircuit },

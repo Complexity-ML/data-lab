@@ -1,13 +1,15 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
+import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
+import { parseWorkerPolicy } from '../domain/worker-policy'
 
 const icons = {
   control: Bot,
   explorer: Binoculars,
+  worker: Cpu,
   source: Database,
   profile: ChartColumn,
   analysis: BrainCircuit,
@@ -35,6 +37,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
   const exploration = data.kind === 'explorer' ? data.exploration : undefined
   const explorerPolicy = data.kind === 'explorer' ? parseCatalogExplorerPolicy(data.rule) : undefined
+  const workerPolicy = data.kind === 'worker' ? parseWorkerPolicy(data.rule) : undefined
 
   useEffect(() => {
     updateNodeInternals(id)
@@ -52,6 +55,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
       {explorerPolicy && <span className="explorer-mode-badge">{explorerPolicy.scope === 'dataset' ? 'Focus' : 'Catalog'}</span>}
+      {workerPolicy && <span className="worker-mode-badge">{workerPolicy.role} · {workerPolicy.concurrency}×</span>}
       {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
@@ -81,6 +85,11 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{exploration.concurrency}</strong> workers</span>
       <span><strong>{exploration.incidents}</strong> data incidents</span>
       <small>{explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · {exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache</small>
+    </div>}
+    {workerPolicy && <div className="worker-summary" aria-label="Bounded worker policy">
+      <span><strong>{workerPolicy.batchSize}</strong> batch</span>
+      <span><strong>{workerPolicy.concurrency}</strong> concurrent</span>
+      <small>{workerPolicy.context.replace('_', ' ')} · {workerPolicy.merge} merge · {workerPolicy.retry} recovery</small>
     </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>
