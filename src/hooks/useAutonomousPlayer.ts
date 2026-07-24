@@ -10,7 +10,7 @@ import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
-import { shouldCallAgentForCatalog } from '../domain/catalog-explorer'
+import { selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -342,54 +342,86 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
-        setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
-        if (catalogExplorer) {
-          const checkpoint = catalogExplorer.data.exploration
-          catalog.updateProgress(catalogExplorer, {
-            query: dataHubDiscoveryQuery(agentRequest),
-            total: checkpoint?.total ?? 0,
-            discovered: checkpoint?.discovered ?? 0,
-            inspected: checkpoint?.inspected ?? 0,
-            failed: checkpoint?.failed ?? 0,
-            incidents: checkpoint?.incidents ?? 0,
-            governanceGaps: checkpoint?.governanceGaps ?? 0,
-            concurrency: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? checkpoint?.concurrency ?? 4,
-            batchSize: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.batchSize ?? checkpoint?.batchSize ?? 8,
-            remaining: checkpoint?.remaining ?? Math.max(0, (checkpoint?.total ?? 0) - (checkpoint?.inspected ?? 0)),
-            mode: explorerPolicy?.scope === 'dataset' ? 'dataset' : checkpoint?.mode ?? 'catalog',
-            cacheMode: explorerPolicy?.cacheMode ?? checkpoint?.cacheMode ?? 'prefer',
-            phase: 'discover',
-            state: 'discovering',
-            checkpointAt: new Date().toISOString(),
-            datasets: checkpoint?.datasets ?? [],
-          }, () => agentRunId.current === runId)
-        }
         let candidates: DataHubAssetSummary[] = catalogExplorer ? catalog.assetsFor(catalogExplorer.id) : []
         let discoveryError: unknown
         const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
-        try {
-          if (!candidates.length && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets(discoveryQuery)
-        }
-        catch (error) { discoveryError = error }
-        if (!candidates.length && discoveryQuery !== '*' && explorerPolicy?.scope !== 'dataset') {
-          try { candidates = await searchDataHubAssets('*') }
+        const completedCheckpoint = catalogExplorer?.data.exploration?.state === 'complete'
+          ? catalogExplorer.data.exploration
+          : undefined
+        if (completedCheckpoint) {
+          catalogProgress = completedCheckpoint
+          setActivity(`Catalog Explorer checkpoint ${completedCheckpoint.inspected}/${completedCheckpoint.total} complete · restoring the reviewed source for one targeted repair…`)
+          try {
+            const preferredSources = [...versions].reverse().flatMap((version) => version.nodes.flatMap((node) => {
+              if (node.data.kind !== 'source') return []
+              const urn = node.data.assetRef ?? node.data.datahubUrn
+              return urn ? [{ urn, connectorId: node.data.connectorId }] : []
+            }))
+            const candidateUrn = selectCatalogCandidateUrn(completedCheckpoint, preferredSources.map((source) => source.urn))
+            if (!candidates.length && !candidateUrn && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets('*')
+            const summary = candidates.find((candidate) => candidate.urn === candidateUrn || candidate.assetRef === candidateUrn)
+            if (candidateUrn) {
+              const connectorId = preferredSources.find((source) => source.urn === candidateUrn)?.connectorId ?? summary?.connectorId
+              const inspection = await inspectDataHubAsset(candidateUrn, false, connectorId, 'deep')
+              if (agentRunId.current !== runId) return
+              blankCandidate = inspection.asset
+              evidenceEntries = inspection.evidence
+              datahubEvidence = [
+                `Completed Catalog Explorer checkpoint restored without reopening discovery: ${completedCheckpoint.inspected}/${completedCheckpoint.total} datasets.`,
+                `Targeted repair source restored from version memory: ${inspection.asset.name} (${inspection.asset.urn}).`,
+                ...inspection.evidence.map((read) => `${read.tool} · ${read.status} · ${read.summary}`),
+              ]
+            }
+          } catch (error) {
+            discoveryError = error
+          }
+        } else {
+          setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
+          if (catalogExplorer) {
+            const checkpoint = catalogExplorer.data.exploration
+            catalog.updateProgress(catalogExplorer, {
+              query: discoveryQuery,
+              total: checkpoint?.total ?? 0,
+              discovered: checkpoint?.discovered ?? 0,
+              inspected: checkpoint?.inspected ?? 0,
+              failed: checkpoint?.failed ?? 0,
+              incidents: checkpoint?.incidents ?? 0,
+              governanceGaps: checkpoint?.governanceGaps ?? 0,
+              concurrency: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? checkpoint?.concurrency ?? 4,
+              batchSize: explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.batchSize ?? checkpoint?.batchSize ?? 8,
+              remaining: checkpoint?.remaining ?? Math.max(0, (checkpoint?.total ?? 0) - (checkpoint?.inspected ?? 0)),
+              mode: explorerPolicy?.scope === 'dataset' ? 'dataset' : checkpoint?.mode ?? 'catalog',
+              cacheMode: explorerPolicy?.cacheMode ?? checkpoint?.cacheMode ?? 'prefer',
+              phase: 'discover',
+              state: 'discovering',
+              checkpointAt: new Date().toISOString(),
+              datasets: checkpoint?.datasets ?? [],
+            }, () => agentRunId.current === runId)
+          }
+          try {
+            if (!candidates.length && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets(discoveryQuery)
+          }
           catch (error) { discoveryError = error }
-        }
-        if ((candidates.length || explorerPolicy?.scope === 'dataset') && agentRunId.current === runId) {
-          const previousProgress = catalogExplorer?.data.exploration
-          const explored = catalogExplorer ? await catalog.explore({
-            assets: candidates,
-            explorer: catalogExplorer,
-            worker: catalogWorker,
-            query: discoveryQuery,
-            isCurrent: () => agentRunId.current === runId,
-          }) : undefined
-          if (explored) {
-            catalogProgress = explored.progress
-            evidenceEntries = explored.evidence
-            blankCandidate = explored.candidate
-            datahubEvidence = explored.summaries
-            continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
+          if (!candidates.length && discoveryQuery !== '*' && explorerPolicy?.scope !== 'dataset') {
+            try { candidates = await searchDataHubAssets('*') }
+            catch (error) { discoveryError = error }
+          }
+          if ((candidates.length || explorerPolicy?.scope === 'dataset') && agentRunId.current === runId) {
+            const previousProgress = catalogExplorer?.data.exploration
+            const explored = catalogExplorer ? await catalog.explore({
+              assets: candidates,
+              explorer: catalogExplorer,
+              worker: catalogWorker,
+              query: discoveryQuery,
+              isCurrent: () => agentRunId.current === runId,
+            }) : undefined
+            if (explored) {
+              catalogProgress = explored.progress
+              evidenceEntries = explored.evidence
+              blankCandidate = explored.candidate
+              datahubEvidence = explored.summaries
+              continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
+            }
           }
         }
         if (blankCandidate) {
@@ -479,7 +511,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         return
       }
       const newProfileRisk = [...profileCandidates.values()].some((asset) => asset.qualityStatus === 'failing')
-      if (continueCatalogWithoutModel && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress!, newProfileRisk)) {
+      if (continueCatalogWithoutModel && catalogProgress && catalogProgress.state !== 'complete' && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress, newProfileRisk)) {
         if (expectedPlayerSessionId !== undefined) {
           queueAutonomousStep('Continue the next local Catalog Explorer batch from its versioned checkpoint. Call the model only when a new data incident is found or the catalog audit completes.', expectedPlayerSessionId, 120)
         }

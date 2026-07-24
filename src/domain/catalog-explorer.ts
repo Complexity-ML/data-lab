@@ -143,6 +143,19 @@ export function rankCatalogCandidateUrns(progress: CatalogExplorationProgress) {
     .map((checkpoint) => checkpoint.urn)
 }
 
+export function selectCatalogCandidateUrn(
+  progress: CatalogExplorationProgress,
+  preferredUrns: string[] = [],
+) {
+  const available = new Set(
+    progress.datasets
+      .filter((checkpoint) => checkpoint.status !== 'unavailable')
+      .map((checkpoint) => checkpoint.urn),
+  )
+  return preferredUrns.find((urn) => available.has(urn))
+    ?? rankCatalogCandidateUrns(progress)[0]
+}
+
 function fingerprint(value: string) {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {

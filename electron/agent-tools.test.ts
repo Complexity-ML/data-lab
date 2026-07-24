@@ -252,6 +252,52 @@ describe('bounded DATA LAB agent tools', () => {
     expect(agentToolDefinitions.map((tool) => tool.name)).not.toContain('record_incident')
   })
 
+  it('exposes a complete catalog checkpoint as terminal bounded evidence', () => {
+    const session = new AgentToolSession({
+      ...payload,
+      catalogCheckpoints: [{
+        explorerId: 'catalog-explorer',
+        state: 'complete',
+        inspected: 67,
+        total: 67,
+        remaining: 0,
+        incidents: 0,
+        governanceGaps: 63,
+        terminal: true,
+        recommendedSourceUrn: 'urn:order-details',
+        restartPolicy: 'Do not restart discovery.',
+        datasets: [{ urn: 'urn:order-details', name: 'order_details', status: 'warning', issues: ['owner missing'] }],
+      }],
+    })
+
+    expect(session.execute('read_catalog_checkpoint', { explorer_id: 'catalog-explorer' })).toMatchObject({
+      ok: true,
+      checkpoints: [{
+        state: 'complete',
+        inspected: 67,
+        total: 67,
+        terminal: true,
+        recommendedSourceUrn: 'urn:order-details',
+      }],
+      policy: {
+        complete_is_terminal: true,
+        must_not_restart_complete_checkpoint: true,
+        raw_rows_exposed: false,
+      },
+    })
+    expect(session.execute('inspect_graph', { node_ids: [] })).toMatchObject({
+      catalog_checkpoints: [{
+        explorerId: 'catalog-explorer',
+        terminal: true,
+        recommendedSourceUrn: 'urn:order-details',
+      }],
+    })
+    expect(session.execute('validate_plan', {})).toMatchObject({
+      ok: true,
+      catalog_checkpoint_policy: expect.stringContaining('terminal'),
+    })
+  })
+
   it('exposes the complete card compatibility contract before planning', () => {
     const session = new AgentToolSession(payload)
     const result = session.execute('list_card_kinds', {})
@@ -264,6 +310,10 @@ describe('bounded DATA LAB agent tools', () => {
     expect(cards.find((card) => card.kind === 'split')?.source_handles).toEqual(['approved', 'quarantine'])
     expect(cards.find((card) => card.kind === 'output')?.source_handles).toEqual(['feedback'])
     expect(cards.find((card) => card.kind === 'control')?.connects_to).toEqual([])
+    expect(result.catalog_policy).toMatchObject({
+      complete_is_terminal: true,
+      reopen_only_on: ['explicit_refresh', 'new_monitor_evidence'],
+    })
   })
 
   it('requires a Human Review card before finishing a review-gated plan', () => {

@@ -29,9 +29,16 @@ export const agentToolDefinitions = [
   {
     type: 'function',
     name: 'inspect_graph',
-    description: 'Read the current graph plus every action already queued in this planning turn. Call before changing an existing graph.',
+    description: 'Read the current graph, terminal catalog checkpoint summaries and every action already queued in this planning turn. Call before changing an existing graph.',
     strict: true,
     parameters: objectSchema({ node_ids: { type: 'array', items: { type: 'string' }, maxItems: 24 } }),
+  },
+  {
+    type: 'function',
+    name: 'read_catalog_checkpoint',
+    description: 'Read one bounded host-owned Catalog Explorer checkpoint, its coverage, evidence-backed issues and recommended versioned source. A complete checkpoint is terminal and must not be restarted.',
+    strict: true,
+    parameters: objectSchema({ explorer_id: nullableText }),
   },
   {
     type: 'function',
@@ -115,7 +122,7 @@ export const agentToolDefinitions = [
 
 const cardRoles: Record<ProposalCardKind, string> = {
   control: 'Persist the autonomous objective and player resume/monitor policy.',
-  explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. Update its checkpoint but never connect it to dataset lineage.',
+  explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. A complete checkpoint is terminal: restore its recommended source instead of restarting discovery. Never connect it to dataset lineage.',
   worker: 'Process any connected card work as bounded deterministic batches with branch-only context and atomic checkpoints.',
   query: 'Verify a host-registered GraphQL read or governed write contract without accepting arbitrary query text.',
   source: 'Resolve a governed DataHub dataset.',
@@ -268,6 +275,11 @@ export class AgentToolSession {
             lineage_start: 'source',
             feedback: 'output.feedback -> monitor',
           },
+          catalog_policy: {
+            complete_is_terminal: true,
+            repair: 'read_catalog_checkpoint -> restore recommended_source_urn -> inspect only that source',
+            reopen_only_on: ['explicit_refresh', 'new_monitor_evidence'],
+          },
         })
       }
       if (tool === 'inspect_graph') {
@@ -280,7 +292,36 @@ export class AgentToolSession {
           },
           source_scope: record(record(this.payload).sourceScope),
           autonomy_policy: record(record(this.payload).autonomyPolicy),
+          catalog_checkpoints: (Array.isArray(record(this.payload).catalogCheckpoints)
+            ? record(this.payload).catalogCheckpoints as unknown[]
+            : []).map(record).map((checkpoint) => ({
+              explorerId: checkpoint.explorerId,
+              state: checkpoint.state,
+              inspected: checkpoint.inspected,
+              total: checkpoint.total,
+              terminal: checkpoint.terminal,
+              recommendedSourceUrn: checkpoint.recommendedSourceUrn,
+              restartPolicy: checkpoint.restartPolicy,
+            })),
           queued_actions: this.actions,
+        })
+      }
+      if (tool === 'read_catalog_checkpoint') {
+        const root = record(this.payload)
+        const checkpoints = Array.isArray(root.catalogCheckpoints) ? root.catalogCheckpoints.map(record) : []
+        const explorerId = text(args.explorer_id, 120)
+        const selected = explorerId
+          ? checkpoints.filter((checkpoint) => checkpoint.explorerId === explorerId)
+          : checkpoints
+        return this.result(tool, 'read', `${selected.length} bounded catalog checkpoint(s) inspected`, {
+          checkpoints: selected.slice(0, 4),
+          policy: {
+            complete_is_terminal: true,
+            must_not_restart_complete_checkpoint: true,
+            repair: 'Restore recommendedSourceUrn from version memory and inspect only that source before repairing the rejected diff.',
+            reopen_only_on: ['explicit_refresh', 'new_monitor_evidence'],
+            raw_rows_exposed: false,
+          },
         })
       }
       if (tool === 'inspect_incident_context') {
@@ -414,8 +455,14 @@ export class AgentToolSession {
       }
       if (tool === 'validate_plan') {
         const proposal = validateProposal(proposalWith(this.actions, { requires_human_review: this.includesReview() }), this.payload)
+        const completeCheckpoints = (Array.isArray(record(this.payload).catalogCheckpoints)
+          ? record(this.payload).catalogCheckpoints as unknown[]
+          : []).map(record).filter((checkpoint) => checkpoint.terminal === true)
         return this.result(tool, 'read', `${proposal.actions.length} queued action(s) satisfy the proposal contract`, {
           action_count: proposal.actions.length,
+          catalog_checkpoint_policy: completeCheckpoints.length
+            ? 'Complete checkpoint is terminal; this plan must repair from its recommended source without restarting catalog discovery.'
+            : 'Resume only remaining bounded catalog work.',
         })
       }
       if (tool === 'finish_plan') {
