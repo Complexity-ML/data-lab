@@ -5,7 +5,7 @@ import { app, safeStorage } from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { posix, win32 } from 'node:path'
-import { parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
+import { entityUrns, parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
 import { BoundedTaskPool, dataHubMcpReadLimit } from './mcp-read-limiter.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 import { secureStorageCapability } from './secure-storage.js'
@@ -72,6 +72,8 @@ const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   list_schema_fields: 2 * 60_000,
   get_lineage: 90_000,
 }
+
+export type DataHubInspectionMode = 'summary' | 'deep'
 
 export function hasExplicitDataHubWritebackTool(catalog: ToolCatalog | undefined): boolean {
   const tool = catalog?.tools.find((candidate) => candidate.name === 'save_document')
@@ -439,6 +441,146 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
   }
 }
 
+function cachedEntityRead(urn: string, force: boolean) {
+  const now = Date.now()
+  const cacheKey = `get_entities:${JSON.stringify({ urns: [urn] })}`
+  const cached = contextCache.get(cacheKey)
+  if (force || !cached || cached.expiresAt <= now) return undefined
+  return {
+    result: cached.result,
+    evidence: {
+      name: 'get_entities' as const,
+      status: 'ok' as const,
+      summary: summarizeResult(cached.result),
+      capturedAt: new Date(cached.capturedAt).toISOString(),
+      expiresAt: new Date(cached.expiresAt).toISOString(),
+      cached: true,
+      stale: false,
+    },
+  }
+}
+
+async function readEntityBatch(urns: string[], force: boolean) {
+  const reads = new Map<string, Awaited<ReturnType<typeof readCachedTool>>>()
+  const missing: string[] = []
+  for (const urn of urns) {
+    const cached = cachedEntityRead(urn, force)
+    if (cached) reads.set(urn, cached)
+    else missing.push(urn)
+  }
+  if (!missing.length) return reads
+
+  const client = await connectClient()
+  const available = await discoverReadableToolNames(client)
+  const capturedAtMs = Date.now()
+  const capturedAt = new Date(capturedAtMs).toISOString()
+  if (!available.has('get_entities')) {
+    for (const urn of missing) reads.set(urn, {
+      result: undefined,
+      evidence: { name: 'get_entities', status: 'unavailable', summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+    })
+    return reads
+  }
+
+  try {
+    const result = assertBoundedMcpPayload(await runBoundedMcpRead(
+      () => withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: missing } }), 20_000, `get_entities batch (${missing.length})`),
+    ), 'get_entities batch response')
+    if (result.isError) throw new Error(summarizeResult(result))
+    const payload = readStructuredToolResult(result)
+    const returned = entityUrns(payload)
+    const expiresAtMs = capturedAtMs + resolveEvidenceTtlMs().get_entities
+    const expiresAt = new Date(expiresAtMs).toISOString()
+    for (const urn of missing) {
+      if (!returned.has(urn)) {
+        reads.set(urn, {
+          result: undefined,
+          evidence: { name: 'get_entities', status: 'error', summary: `Batch response omitted the requested entity (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+        })
+        continue
+      }
+      const cacheKey = `get_entities:${JSON.stringify({ urns: [urn] })}`
+      contextCache.set(cacheKey, { result, capturedAt: capturedAtMs, expiresAt: expiresAtMs })
+      reads.set(urn, {
+        result,
+        evidence: { name: 'get_entities', status: 'ok', summary: `Batch get_entities returned ${returned.size} dataset${returned.size === 1 ? '' : 's'}.`, capturedAt, expiresAt, cached: false, stale: false },
+      })
+    }
+  } catch (error) {
+    for (const urn of missing) reads.set(urn, {
+      result: undefined,
+      evidence: { name: 'get_entities', status: 'error', summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
+    })
+  }
+  return reads
+}
+
+type PendingSummaryInspection = {
+  urn: string
+  force: boolean
+  resolve(value: { asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }): void
+}
+let pendingSummaryInspections: PendingSummaryInspection[] = []
+let summaryFlushScheduled = false
+
+async function flushSummaryInspections() {
+  summaryFlushScheduled = false
+  const pending = pendingSummaryInspections
+  pendingSummaryInspections = []
+  for (let offset = 0; offset < pending.length; offset += 32) {
+    const batch = pending.slice(offset, offset + 32)
+    const urns = [...new Set(batch.map((item) => item.urn))]
+    let reads: Awaited<ReturnType<typeof readEntityBatch>>
+    try {
+      reads = await readEntityBatch(urns, batch.some((item) => item.force))
+    } catch (error) {
+      const capturedAt = new Date().toISOString()
+      reads = new Map(urns.map((urn) => [urn, {
+        result: undefined,
+        evidence: {
+          name: 'get_entities' as const,
+          status: 'error' as const,
+          summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`,
+          capturedAt,
+          expiresAt: capturedAt,
+          cached: false,
+          stale: true,
+        },
+      }]))
+    }
+    for (const item of batch) {
+      const read = reads.get(item.urn)
+      const evidence = read?.evidence ?? {
+        name: 'get_entities' as const,
+        status: 'error' as const,
+        summary: `No batch result was produced (${item.urn})`,
+        capturedAt: new Date().toISOString(),
+        expiresAt: new Date().toISOString(),
+        cached: false,
+        stale: true,
+      }
+      item.resolve({
+        asset: parseAssetContext({
+          urn: item.urn,
+          entityPayload: readStructuredToolResult(read?.result),
+          capturedAt: evidence.capturedAt,
+          expiresAt: evidence.expiresAt,
+        }),
+        evidence: [evidence],
+      })
+    }
+  }
+}
+
+function inspectDataHubAssetSummary(urn: string, force: boolean) {
+  return new Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }>((resolve) => {
+    pendingSummaryInspections.push({ urn, force, resolve })
+    if (summaryFlushScheduled) return
+    summaryFlushScheduled = true
+    setTimeout(() => { void flushSummaryInspections() }, 0)
+  })
+}
+
 export function buildDataHubSearchQuery(query: string): string {
   const clean = query.trim().slice(0, 500)
   if (clean === '*') return '*'
@@ -556,8 +698,9 @@ export function resolveCatalogSearchTotal(total: number) {
   return Math.min(Math.max(0, Math.floor(total)), 2_000)
 }
 
-export async function inspectDataHubAsset(urn: string, force = false): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
+export async function inspectDataHubAsset(urn: string, force = false, mode: DataHubInspectionMode = 'deep'): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpRead[] }> {
   validateDatasetUrn(urn)
+  if (mode === 'summary') return inspectDataHubAssetSummary(urn, force)
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema

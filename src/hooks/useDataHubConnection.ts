@@ -82,10 +82,10 @@ export function useDataHubConnection(setActivity: (message: string) => void) {
     return assets
   }
 
-  const inspectAsset = async (urn: string, force = false, connectorId?: string) => {
+  const inspectAsset = async (urn: string, force = false, connectorId?: string, mode: 'summary' | 'deep' = 'deep') => {
     if (!window.dataLab) throw new Error('DataHub inspection requires the Electron application')
     const resolvedConnector = connectorId ?? connectorByAssetRef.current.get(urn) ?? 'datahub'
-    return window.dataLab.inspectCatalogAsset ? window.dataLab.inspectCatalogAsset(resolvedConnector, urn, force) : window.dataLab.inspectDataHubAsset(urn, force).then((inspection) => ({
+    return window.dataLab.inspectCatalogAsset ? window.dataLab.inspectCatalogAsset(resolvedConnector, urn, force, mode) : window.dataLab.inspectDataHubAsset(urn, force, mode).then((inspection) => ({
       asset: { ...inspection.asset, connectorId: 'datahub', sourceSystem: 'DataHub', assetRef: urn },
       evidence: inspection.evidence.map((read) => ({ ...read, connectorId: 'datahub', sourceSystem: 'DataHub', assetRef: urn, urn, tool: read.name })),
     }))
