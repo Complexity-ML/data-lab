@@ -2,6 +2,7 @@ import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflo
 import { Binoculars, Bot, BrainCircuit, ChartColumn, ChartNetwork, CheckCircle2, CirclePause, CircleStop, CircleX, Database, Dices, FileDiff, GitBranch, LayoutDashboard, LoaderCircle, Network, Radar, SearchCheck, Send, ShieldAlert, Sparkles, UserCheck, WandSparkles } from 'lucide-react'
 import { useEffect } from 'react'
 import type { PipelineNode } from '../domain/pipeline'
+import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 
 const icons = {
@@ -33,6 +34,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const isSystem = data.kind === 'control' || data.kind === 'explorer'
   const risk = data.kind === 'risk' ? parseRiskAssessmentRule(data.rule) : undefined
   const exploration = data.kind === 'explorer' ? data.exploration : undefined
+  const explorerPolicy = data.kind === 'explorer' ? parseCatalogExplorerPolicy(data.rule) : undefined
 
   useEffect(() => {
     updateNodeInternals(id)
@@ -49,7 +51,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'parallel' && <span className="parallel-mode-badge">Fan out</span>}
       {data.kind === 'diagram' && <span className="diagram-mode-badge">Subgraph</span>}
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
-      {data.kind === 'explorer' && <span className="explorer-mode-badge">Catalog</span>}
+      {explorerPolicy && <span className="explorer-mode-badge">{explorerPolicy.scope === 'dataset' ? 'Focus' : 'Catalog'}</span>}
       {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.riskType ?? 'risk'} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
@@ -73,12 +75,12 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{risk.scope || '—'}</strong> scope</span>
     </div>}
     {exploration && <div className="explorer-summary" aria-label="Catalog exploration progress">
-      <span><strong>{exploration.discovered}/{exploration.total || '?'}</strong> discovered</span>
+      <div className="explorer-progress-track"><i style={{ width: `${exploration.total ? Math.min(100, Math.round((exploration.inspected / exploration.total) * 100)) : 0}%` }} /></div>
       <span><strong>{exploration.inspected}/{exploration.total || '?'}</strong> inspected</span>
-      <span><strong>{exploration.incidents}</strong> incidents</span>
-      {exploration.failed > 0
-        ? <span><strong>{exploration.failed}</strong> unavailable</span>
-        : <span><strong>{exploration.governanceGaps}</strong> governance</span>}
+      <span><strong>{exploration.remaining ?? Math.max(0, exploration.total - exploration.inspected)}</strong> queued</span>
+      <span><strong>{exploration.concurrency}</strong> workers</span>
+      <span><strong>{exploration.incidents}</strong> data incidents</span>
+      <small>{explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · {exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache</small>
     </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>

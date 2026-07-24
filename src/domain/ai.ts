@@ -111,7 +111,7 @@ function nodePatch(action: AiAction, current?: PipelineNodeData): Partial<Pipeli
   if (text(action.description)) patch.description = text(action.description, '', 500)
   if (text(action.owner)) patch.owner = text(action.owner, '', 120)
   if (effectiveKind === 'monitor') patch.rule = completeMonitorRule(action.rule, current?.kind === 'monitor' ? current.rule : undefined)
-  else if (effectiveKind === 'explorer') patch.rule = text(action.rule, current?.kind === 'explorer' ? current.rule : 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true', 2_000)
+  else if (effectiveKind === 'explorer') patch.rule = text(action.rule, current?.kind === 'explorer' ? current.rule : 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true', 2_000)
   else if (text(action.rule)) patch.rule = text(action.rule, '', 2_000)
   return patch
 }
@@ -150,7 +150,7 @@ export function materializeAiProposal(response: AiProposalResponse, nodes: Pipel
         rule: action.kind === 'monitor'
           ? completeMonitorRule(action.rule)
           : action.kind === 'explorer'
-            ? text(action.rule, 'scope=all_datasets | page_size=10 | page_concurrency=6 | audit_concurrency=4 | checkpoint=versioned | resume=true', 2_000)
+            ? text(action.rule, 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true', 2_000)
             : text(action.rule, undefined, 2_000) || undefined,
         status: 'draft',
         schema: [],

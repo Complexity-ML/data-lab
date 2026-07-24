@@ -49,7 +49,6 @@ describe('versioned pipeline JSON exchange', () => {
       expect.objectContaining({ id: 'sensitive-unprotected-source-output', severity: 'error' }),
     ]))
   })
-
   it('migrates a legacy failed catalog checkpoint into a resumable connector pause', () => {
     const explorer = newCard('explorer', 0)
     explorer.data.exploration = {

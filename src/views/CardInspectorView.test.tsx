@@ -43,4 +43,36 @@ describe('DataHub lineage impact', () => {
     expect(screen.queryByText('asset-31')).toBeNull()
     expect(screen.getByText('Expansion is bounded to 30 assets.', { exact: false })).toBeTruthy()
   })
+
+  it('exposes one adjustable Catalog Explorer card without composite subcards', () => {
+    const selected = newCard('explorer', 0)
+    const update = vi.fn()
+    render(<CardInspectorView
+      dataHubConnected
+      errorCount={0}
+      issues={[]}
+      onAgentRework={vi.fn()}
+      onBindDataHubSource={vi.fn()}
+      onClose={vi.fn()}
+      onFocusDiagram={vi.fn()}
+      onInspectDataHubAsset={vi.fn()}
+      onOpenDataHubSettings={vi.fn()}
+      onSearchDataHub={vi.fn()}
+      onSelectNode={vi.fn()}
+      onUpdate={update}
+      selected={selected}
+      workbenchAssets={{}}
+    />)
+
+    expect(screen.getByText('One atomic card · adjustable execution')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Catalog batch size'), { target: { value: '12' } })
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      rule: expect.stringContaining('batch_size=12'),
+    }))
+    fireEvent.change(screen.getByLabelText('Catalog Explorer scope'), { target: { value: 'dataset' } })
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      rule: expect.stringContaining('scope=dataset'),
+      exploration: undefined,
+    }))
+  })
 })

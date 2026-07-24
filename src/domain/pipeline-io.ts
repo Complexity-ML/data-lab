@@ -97,9 +97,13 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     incidents: bounded('incidents'),
     governanceGaps: bounded('governanceGaps'),
     concurrency: Math.max(1, Math.min(16, bounded('concurrency', 16) || 4)),
-    batchSize: bounded('batchSize', 32) || undefined,
+    batchSize: Math.max(1, Math.min(32, bounded('batchSize', 32) || 8)),
     batchDurationMs: bounded('batchDurationMs', 300_000) || undefined,
     batchFailed: bounded('batchFailed', 32),
+    remaining: bounded('remaining'),
+    mode: source.mode === 'dataset' ? 'dataset' : 'catalog',
+    cacheMode: source.cacheMode === 'refresh' ? 'refresh' : 'prefer',
+    phase: ['discover', 'inspect', 'checkpoint'].includes(String(source.phase)) ? source.phase as CatalogExplorationProgress['phase'] : 'checkpoint',
     state: legacyConnectorPause ? 'paused' : state,
     pauseReason: source.pauseReason === 'cancelled' || source.pauseReason === 'connector_unavailable'
       ? source.pauseReason

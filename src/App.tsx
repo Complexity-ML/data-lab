@@ -144,6 +144,7 @@ export default function App() {
     approveProposal: pipelineVersions.approveProposal,
     autonomyPolicy,
     commitAutonomousProposal: pipelineVersions.commitAutonomousProposal,
+    discardInvalidProposal: pipelineVersions.discardInvalidProposal,
     connectionMode: dataHub.catalogConnectionMode,
     edges,
     fitCommittedGraph: pipeline.fitCommittedGraph,

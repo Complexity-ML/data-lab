@@ -98,4 +98,16 @@ describe('agent proposal approval', () => {
     })
     expect(result.current.versions.at(-1)?.nodes.find((node) => node.id === review.id)?.data.runState).toBe('completed')
   })
+
+  it('discards an atomically invalid implementation while preserving it in history for agent repair', () => {
+    const { result } = renderHook(() => useApprovalHarness())
+    act(() => { result.current.recordPendingReview(proposal) })
+    act(() => { result.current.discardInvalidProposal(['explorer-edge-catalog']) })
+
+    expect(result.current.currentProposal).toBeUndefined()
+    expect(result.current.versions.at(-1)?.status).toBe('rejected')
+    expect(result.current.nodes).toEqual([])
+    expect(result.current.activity).toContain('Human intent approved')
+    expect(result.current.activity).toContain('agent repairing')
+  })
 })

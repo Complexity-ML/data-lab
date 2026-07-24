@@ -287,4 +287,23 @@ describe('Catalog Explorer', () => {
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(true)
     expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'cancelled' })).toBe(false)
   })
+
+  it('opens a connector incident only after the catalog circuit actually fails', () => {
+    const base = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 4,
+      failed: 2,
+      incidents: 0,
+      governanceGaps: 2,
+      concurrency: 4,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(shouldOpenCatalogConnectivityIncident(base)).toBe(false)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'failed' })).toBe(true)
+  })
 })
