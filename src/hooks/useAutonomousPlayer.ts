@@ -365,6 +365,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           catch (error) { discoveryError = error }
         }
         if ((candidates.length || explorerPolicy?.scope === 'dataset') && agentRunId.current === runId) {
+          const previousProgress = catalogExplorer?.data.exploration
           const explored = catalogExplorer ? await catalog.explore({
             assets: candidates,
             explorer: catalogExplorer,
@@ -377,6 +378,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             evidenceEntries = explored.evidence
             blankCandidate = explored.candidate
             datahubEvidence = explored.summaries
+            continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
           }
         }
         if (blankCandidate) {
