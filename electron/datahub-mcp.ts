@@ -93,6 +93,10 @@ export function resolveEvidenceTtlMs(environment: NodeJS.ProcessEnv = process.en
   }
 }
 
+export function resolveCatalogEntityTimeoutMs(environment: NodeJS.ProcessEnv = process.env) {
+  return boundedTtl(environment.DATAHUB_CATALOG_ENTITY_TIMEOUT_MS, 8_000)
+}
+
 export function resolveDataHubMcpCommand(
   environment: NodeJS.ProcessEnv = process.env,
   platform = process.platform,
@@ -472,8 +476,7 @@ async function readEntityBatch(urns: string[], force: boolean) {
 
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
-  const capturedAtMs = Date.now()
-  const capturedAt = new Date(capturedAtMs).toISOString()
+  const capturedAt = new Date().toISOString()
   if (!available.has('get_entities')) {
     for (const urn of missing) reads.set(urn, {
       result: undefined,
@@ -482,45 +485,56 @@ async function readEntityBatch(urns: string[], force: boolean) {
     return reads
   }
 
-  try {
-    const result = assertBoundedMcpPayload(await runBoundedMcpRead(
-      () => withTimeout(client.callTool({ name: 'get_entities', arguments: { urns: missing } }), 20_000, `get_entities batch (${missing.length})`),
-    ), 'get_entities batch response')
-    if (result.isError) throw new Error(summarizeResult(result))
-    const payload = readStructuredToolResult(result)
-    const returned = entityUrns(payload)
-    const expiresAtMs = capturedAtMs + resolveEvidenceTtlMs().get_entities
-    const expiresAt = new Date(expiresAtMs).toISOString()
-    for (const urn of missing) {
-      if (!returned.has(urn)) {
-        reads.set(urn, {
-          result: undefined,
-          evidence: { name: 'get_entities', status: 'error', summary: `Batch response omitted the requested entity (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
-        })
-        continue
-      }
+  // DataHub MCP currently loops over array arguments internally and performs
+  // several GraphQL reads per URN. A slow entity can therefore time out the
+  // whole apparent "batch". Isolate catalog summaries so healthy entities
+  // finish independently and the failed URN can be deferred.
+  const fetched = await mapWithConcurrency(missing, 2, async (urn) => {
+    const capturedAtMs = Date.now()
+    const entityCapturedAt = new Date(capturedAtMs).toISOString()
+    try {
+      const result = assertBoundedMcpPayload(await runBoundedMcpRead(
+        () => withTimeout(
+          client.callTool({ name: 'get_entities', arguments: { urns: [urn] } }),
+          resolveCatalogEntityTimeoutMs(),
+          'get_entities catalog summary',
+        ),
+      ), 'get_entities catalog summary response')
+      if (result.isError) throw new Error(summarizeResult(result))
+      const returned = entityUrns(readStructuredToolResult(result))
+      if (!returned.has(urn)) throw new Error('get_entities response omitted the requested entity')
+      const expiresAtMs = capturedAtMs + resolveEvidenceTtlMs().get_entities
       const cacheKey = `get_entities:${JSON.stringify({ urns: [urn] })}`
       contextCache.set(cacheKey, { result, capturedAt: capturedAtMs, expiresAt: expiresAtMs })
-      reads.set(urn, {
+      return [urn, {
         result,
-        evidence: { name: 'get_entities', status: 'ok', summary: `Batch get_entities returned ${returned.size} dataset${returned.size === 1 ? '' : 's'}.`, capturedAt, expiresAt, cached: false, stale: false },
-      })
+        evidence: {
+          name: 'get_entities' as const,
+          status: 'ok' as const,
+          summary: 'Catalog entity summary received.',
+          capturedAt: entityCapturedAt,
+          expiresAt: new Date(expiresAtMs).toISOString(),
+          cached: false,
+          stale: false,
+        },
+      }] as const
+    } catch (error) {
+      return [urn, {
+        result: undefined,
+        evidence: {
+          name: 'get_entities' as const,
+          status: 'error' as const,
+          summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`,
+          capturedAt: entityCapturedAt,
+          expiresAt: entityCapturedAt,
+          cached: false,
+          stale: true,
+        },
+      }] as const
     }
-  } catch (error) {
-    if (missing.length > 1) {
-      const recovered = await mapWithConcurrency(missing, 2, async (urn) => {
-        const single = await readEntityBatch([urn], force)
-        return [urn, single.get(urn)] as const
-      })
-      for (const [urn, read] of recovered) {
-        if (read) reads.set(urn, read)
-      }
-      return reads
-    }
-    for (const urn of missing) reads.set(urn, {
-      result: undefined,
-      evidence: { name: 'get_entities', status: 'error', summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
-    })
+  })
+  for (const [urn, read] of fetched) {
+    reads.set(urn, read)
   }
   return reads
 }

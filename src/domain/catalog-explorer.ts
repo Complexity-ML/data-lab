@@ -23,6 +23,19 @@ export function shouldOpenCatalogConnectivityIncident(progress: CatalogExplorati
   return (progress.state === 'failed' || progress.pauseReason === 'connector_unavailable' || progress.pauseReason === 'retry_exhausted') && progress.failed > 0
 }
 
+export function resetCatalogRetryState(progress: CatalogExplorationProgress): CatalogExplorationProgress {
+  return {
+    ...progress,
+    state: progress.state === 'complete' ? 'complete' : 'idle',
+    pauseReason: undefined,
+    connectorRetryCount: 0,
+    connectorRecoveryStreak: 0,
+    connectorFailureFingerprint: undefined,
+    nextRetryAt: undefined,
+    checkpointAt: new Date().toISOString(),
+  }
+}
+
 function preferCheckpoint(left: CatalogDatasetCheckpoint, right: CatalogDatasetCheckpoint) {
   return Date.parse(right.capturedAt) >= Date.parse(left.capturedAt) ? right : left
 }
@@ -182,15 +195,20 @@ export async function inspectCatalogInParallel(
   const configuredBatchSize = Math.max(1, Math.min(32, Math.floor(options.batchSize ?? options.maxInspections ?? (assets.length || 1))))
   const inspections: CatalogInspection[] = []
   const previous = new Map((options.previous ?? []).map((checkpoint) => [checkpoint.urn, checkpoint]))
-  const reusable = assets.flatMap((asset) => {
-    const checkpoint = previous.get(asset.urn)
-    return checkpoint && checkpoint.status !== 'unavailable' && Date.parse(checkpoint.expiresAt) > Date.now() ? [checkpoint] : []
-  })
   const checkpoints: CatalogDatasetCheckpoint[] = assets.flatMap((asset) => {
     const checkpoint = previous.get(asset.urn)
     return checkpoint ? [checkpoint] : []
   })
-  const pending = assets.filter((asset) => !reusable.some((checkpoint) => checkpoint.urn === asset.urn))
+  // New catalog entries must not queue behind one pathological entity forever.
+  // Unavailable checkpoints remain retryable, but only after every never-read
+  // dataset has received its first bounded inspection.
+  const uninspected = assets.filter((asset) => !previous.has(asset.urn))
+  const expired = assets.filter((asset) => {
+    const checkpoint = previous.get(asset.urn)
+    return checkpoint && checkpoint.status !== 'unavailable' && Date.parse(checkpoint.expiresAt) <= Date.now()
+  })
+  const retryable = assets.filter((asset) => previous.get(asset.urn)?.status === 'unavailable')
+  const pending = [...uninspected, ...expired, ...retryable]
   const inspectionBudget = Math.max(1, Math.min(configuredBatchSize, Math.floor(options.maxInspections ?? configuredBatchSize), pending.length || 1))
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
@@ -275,6 +293,7 @@ export async function inspectCatalogInParallel(
 
   emit('inspecting')
   let connectorUnavailable = false
+  let consecutiveUnavailable = 0
   const runStartedAt = Date.now()
   const inspectBatch = async (batch: DataHubAssetSummary[]) => {
     const results = await Promise.all(batch.map(async (asset) => {
@@ -315,24 +334,23 @@ export async function inspectCatalogInParallel(
     return batchCheckpoints
   }
 
-  // One real dataset inspection acts as the connector health gate. A dead MCP
-  // transport therefore costs one bounded read, not a full parallel batch.
-  if (scheduled.length && !options.isCancelled?.()) {
-    const preflight = await inspectBatch(scheduled.slice(0, 1))
-    if (preflight.every((checkpoint) => checkpoint.status === 'unavailable')) {
-      connectorUnavailable = true
-      effectiveConcurrency = 1
-      connectorRecoveryStreak = 0
-    }
-  }
-  for (let offset = 1; !connectorUnavailable && offset < scheduled.length && !options.isCancelled?.(); offset += requestedConcurrency) {
+  for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += requestedConcurrency) {
     const batchCheckpoints = await inspectBatch(scheduled.slice(offset, offset + requestedConcurrency))
+    // A single slow or malformed entity is partial catalog evidence, not proof
+    // that the whole connector is offline. A complete concurrent batch (or two
+    // consecutive singleton probes) is enough to open the circuit.
     if (batchCheckpoints.length > 0 && batchCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
-      connectorUnavailable = true
-      effectiveConcurrency = 1
-      connectorRecoveryStreak = 0
+      consecutiveUnavailable += batchCheckpoints.length
+      connectorUnavailable = batchCheckpoints.length > 1 || consecutiveUnavailable >= 2
+      if (connectorUnavailable) {
+        effectiveConcurrency = 1
+        break
+      }
+    } else {
+      consecutiveUnavailable = 0
     }
   }
+  if (connectorUnavailable) connectorRecoveryStreak = 0
   if (!connectorUnavailable && batchProcessed > 0 && batchFailed === 0) {
     connectorRetryCount = 0
     connectorFailureFingerprint = undefined

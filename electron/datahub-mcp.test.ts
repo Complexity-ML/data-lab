@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -152,6 +152,12 @@ describe('DataHub MCP connection settings', () => {
       DATAHUB_CACHE_SCHEMA_TTL_MS: '2500',
       DATAHUB_CACHE_LINEAGE_TTL_MS: '99999999',
     })).toEqual({ get_entities: 10_000, list_schema_fields: 5_000, get_lineage: 3_600_000 })
+  })
+
+  it('bounds catalog summary reads separately from deep dataset inspection', () => {
+    expect(resolveCatalogEntityTimeoutMs({})).toBe(8_000)
+    expect(resolveCatalogEntityTimeoutMs({ DATAHUB_CATALOG_ENTITY_TIMEOUT_MS: '12000' })).toBe(12_000)
+    expect(resolveCatalogEntityTimeoutMs({ DATAHUB_CATALOG_ENTITY_TIMEOUT_MS: '1000' })).toBe(5_000)
   })
 
   it('persists endpoint metadata and an encrypted token without exposing the credential', async () => {
