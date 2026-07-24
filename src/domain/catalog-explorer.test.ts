@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -97,11 +97,11 @@ describe('Catalog Explorer', () => {
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(1)
+    expect(inspect).toHaveBeenCalledTimes(4)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 1,
-      failed: 1,
+      inspected: 4,
+      failed: 4,
       concurrency: 1,
       connectorRecoveryStreak: 0,
       incidents: 0,
@@ -219,11 +219,11 @@ describe('Catalog Explorer', () => {
 
     const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
 
-    expect(inspect).toHaveBeenCalledTimes(9)
+    expect(inspect).toHaveBeenCalledTimes(8)
     expect(result.progress).toMatchObject({
       total: 12,
-      inspected: 9,
-      failed: 5,
+      inspected: 8,
+      failed: 4,
       concurrency: 1,
       incidents: 0,
       state: 'paused',
@@ -283,6 +283,58 @@ describe('Catalog Explorer', () => {
     expect(result.progress).toMatchObject({ inspected: 3, failed: 0, state: 'complete' })
   })
 
+  it('inspects never-read datasets before retrying an unavailable checkpoint', async () => {
+    const assets = Array.from({ length: 5 }, (_, index) => asset(index))
+    const unavailable = {
+      ...checkpointForInspection(inspection(assets[0]!)),
+      status: 'unavailable' as const,
+      expiresAt: capturedAt,
+    }
+    const inspect = vi.fn(async (urn: string) => inspection(assets.find((candidate) => candidate.urn === urn)!))
+
+    await inspectCatalogInParallel(assets, inspect, {
+      maxInspections: 2,
+      previous: [unavailable],
+    })
+
+    expect(inspect).toHaveBeenNthCalledWith(1, assets[1]!.urn)
+    expect(inspect).toHaveBeenNthCalledWith(2, assets[2]!.urn)
+    expect(inspect).not.toHaveBeenCalledWith(assets[0]!.urn)
+  })
+
+  it('resets connector retry exhaustion for a new player session without losing coverage', () => {
+    const progress = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 11,
+      failed: 2,
+      incidents: 0,
+      governanceGaps: 3,
+      concurrency: 1,
+      connectorRetryCount: 3,
+      connectorRetryLimit: 3,
+      connectorFailureFingerprint: 'failure',
+      connectorRecoveryStreak: 0,
+      nextRetryAt: freshExpiry,
+      state: 'paused' as const,
+      pauseReason: 'retry_exhausted' as const,
+      checkpointAt: capturedAt,
+      datasets: [checkpointForInspection(inspection(asset(0)))],
+    }
+
+    expect(resetCatalogRetryState(progress)).toMatchObject({
+      inspected: 11,
+      failed: 2,
+      connectorRetryCount: 0,
+      connectorRecoveryStreak: 0,
+      state: 'idle',
+      datasets: progress.datasets,
+    })
+    expect(resetCatalogRetryState(progress).pauseReason).toBeUndefined()
+    expect(resetCatalogRetryState(progress).connectorFailureFingerprint).toBeUndefined()
+  })
+
   it('never regresses inspected coverage when a checkpoint retry fails again', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     const previousDatasets = assets.slice(0, 8).map((value, index) => ({
@@ -312,13 +364,13 @@ describe('Catalog Explorer', () => {
     }, { maxInspections: 4, previous: previousDatasets, previousProgress })
 
     expect(result.progress).toMatchObject({
-      inspected: 8,
-      failed: 4,
+      inspected: 12,
+      failed: 8,
       connectorRetryCount: 2,
       state: 'paused',
       pauseReason: 'connector_unavailable',
     })
-    expect(new Set(result.progress.datasets.map((checkpoint) => checkpoint.urn)).size).toBe(8)
+    expect(new Set(result.progress.datasets.map((checkpoint) => checkpoint.urn)).size).toBe(12)
   })
 
   it('stops connector retries after the persisted limit without calling the connector', async () => {

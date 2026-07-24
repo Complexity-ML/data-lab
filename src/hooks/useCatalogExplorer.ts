@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -16,6 +16,7 @@ export function useCatalogExplorer(options: {
 }) {
   const { incidentSummaries, inspectAsset, logIncident, setActivity, setNodes } = options
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
+  const resetRetriesRequested = useRef(false)
   const checkpointKey = useCallback((explorer: PipelineNode, query: string) => {
     const value = `${explorer.id}:${explorer.data.rule ?? ''}:${query}`
     let hash = 2166136261
@@ -101,7 +102,11 @@ export function useCatalogExplorer(options: {
     catalogAssets.current.set(input.explorer.id, assets)
     const key = checkpointKey(input.explorer, input.query)
     const persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
-    const previousProgress = mergeCatalogProgress(input.explorer.data.exploration, persistedProgress ?? undefined)
+    const mergedProgress = mergeCatalogProgress(input.explorer.data.exploration, persistedProgress ?? undefined)
+    const previousProgress = resetRetriesRequested.current && mergedProgress
+      ? resetCatalogRetryState(mergedProgress)
+      : mergedProgress
+    resetRetriesRequested.current = false
     const configuredConcurrency = policy.scope === 'dataset' ? 1 : workerPolicy?.concurrency ?? policy.concurrency
     const configuredBatchSize = policy.scope === 'dataset' ? 1 : workerPolicy?.batchSize ?? policy.batchSize
     const concurrency = policy.scope === 'dataset'
@@ -345,6 +350,9 @@ export function useCatalogExplorer(options: {
   }, [checkpointKey, persistProgress, updateProgress])
 
   const assetsFor = useCallback((explorerId: string) => catalogAssets.current.get(explorerId) ?? [], [])
+  const resetRetriesOnNextExplore = useCallback(() => {
+    resetRetriesRequested.current = true
+  }, [])
 
-  return { assetsFor, attachProgress, explore, markDiscoveryFailed, updateProgress }
+  return { assetsFor, attachProgress, explore, markDiscoveryFailed, resetRetriesOnNextExplore, updateProgress }
 }

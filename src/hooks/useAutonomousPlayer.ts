@@ -743,6 +743,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       setActivity(`${active.label} is not connected · autonomous player remains stopped`)
       return
     }
+    if (playerState === 'stopped') catalog.resetRetriesOnNextExplore()
     const sessionId = ++playerSessionId.current
     monitorBootstrapAttempted.current = false
     setAutonomousStepRequest(undefined)
