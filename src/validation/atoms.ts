@@ -44,6 +44,8 @@ export const pipelineTerminalsAtom: ValidationAtom = {
   label: 'Required pipeline terminals',
   run({ nodes }) {
     if (nodes.length === 0) return []
+    const hasLineageIntent = nodes.some((node) => node.data.kind !== 'control' && node.data.kind !== 'explorer')
+    if (!hasLineageIntent) return []
     const findings: ValidationIssue[] = []
     if (!nodes.some((node) => node.data.kind === 'source')) findings.push(issue(this.id, { id: 'missing-source', severity: 'error', title: 'Data Source is required', detail: 'A runnable pipeline must start from at least one Data Source card.' }))
     if (!nodes.some((node) => node.data.kind === 'output')) findings.push(issue(this.id, { id: 'missing-output', severity: 'error', title: 'Terminal Output is required', detail: 'A runnable pipeline must end at least one branch with an Output card.' }))
