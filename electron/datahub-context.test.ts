@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
+import { entityUrns, parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
 
 const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.customers,PROD)'
 
@@ -36,6 +36,21 @@ describe('DataHub MCP context normalization', () => {
       { entity: { urn, properties: { name: 'customers' } } },
       { entity: { urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,orders,PROD)', properties: { name: 'orders' } } },
     ] })).toBe(2)
+  })
+
+  it('indexes batched get_entities results and reads embedded schema summaries', () => {
+    const secondUrn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.orders,PROD)'
+    const entityPayload = {
+      result: [
+        { urn, name: 'customers', schemaMetadata: { fields: [{ fieldPath: 'email', nativeDataType: 'VARCHAR' }] } },
+        { urn: secondUrn, name: 'orders', schemaMetadata: { fields: [{ fieldPath: 'amount', nativeDataType: 'DECIMAL' }] } },
+      ],
+    }
+
+    expect(entityUrns(entityPayload)).toEqual(new Set([urn, secondUrn]))
+    expect(parseAssetContext({ urn: secondUrn, entityPayload }).fields).toEqual([
+      { name: 'amount', type: 'number', tags: undefined },
+    ])
   })
 
   it('normalizes schema, classifications, ownership, quality and bounded lineage', () => {

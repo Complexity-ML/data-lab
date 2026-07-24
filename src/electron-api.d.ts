@@ -68,7 +68,7 @@ declare global {
       saveDataHubMcpSettings(payload: { transport: 'http' | 'stdio'; url: string; token?: string; clearToken?: boolean; writebackEnabled?: boolean }): Promise<DataHubMcpStatus>
       auditDataHubWithMcp(urn: string, force?: boolean): Promise<DataHubMcpAudit>
       searchDataHubAssets(query: string): Promise<DataHubAssetSummary[]>
-      inspectDataHubAsset(urn: string, force?: boolean): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
+      inspectDataHubAsset(urn: string, force?: boolean, mode?: 'summary' | 'deep'): Promise<{ asset: DataHubAssetSummary; evidence: DataHubMcpAudit['reads'] }>
       invalidateDataHubContext(urn?: string): Promise<{ invalidated: true }>
       writeDataHubDecision(payload: { revisionId: string; title: string; rationale: string; author: string; relatedAssets: string[] }): Promise<{ written: true; tool: 'save_document'; summary: string }>
       listCatalogConnectors(): Promise<CatalogConnectorSummary[]>
@@ -76,7 +76,7 @@ declare global {
       deleteCatalogConnector(id: string): Promise<CatalogConnectorSummary[]>
       testCatalogConnector(id: string): Promise<{ connected: boolean; message: string }>
       searchCatalogAssets(query: string): Promise<CatalogAssetSummary[]>
-      inspectCatalogAsset(connectorId: string, assetRef: string, force?: boolean): Promise<CatalogInspection>
+      inspectCatalogAsset(connectorId: string, assetRef: string, force?: boolean, mode?: 'summary' | 'deep'): Promise<CatalogInspection>
       notifyHumanReview(payload: { cardLabel: string; reason: string; versionId?: string; remind?: boolean }): Promise<{ shown: boolean; deduplicated?: boolean }>
       getAiStatus(): Promise<AiStatus>
       saveAiSettings(payload: Partial<AiSettings> & { apiKey?: string; clearKey?: boolean }): Promise<AiStatus>

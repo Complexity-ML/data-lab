@@ -203,7 +203,8 @@ describe('visual pipeline workspace regressions', () => {
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
     expect(api.searchDataHubAssets).toHaveBeenCalledTimes(1)
     expect(api.searchDataHubAssets).toHaveBeenCalledWith('*')
-    expect(api.inspectDataHubAsset).toHaveBeenCalledWith(asset.urn, false)
+    expect(api.inspectDataHubAsset).toHaveBeenNthCalledWith(1, asset.urn, false, 'summary')
+    expect(api.inspectDataHubAsset).toHaveBeenNthCalledWith(2, asset.urn, false, 'deep')
     expect(api.runChatGPTProposal).toHaveBeenCalledWith(expect.objectContaining({
       datahubEvidence: expect.arrayContaining([
         expect.stringContaining('Starting dataset candidate selected after complete catalog exploration: customers'),

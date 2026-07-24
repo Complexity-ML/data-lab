@@ -43,7 +43,7 @@ interface AutonomousPlayerOptions {
   connectionMode: 'demo' | 'connected'
   edges: Edge[]
   fitCommittedGraph(): void
-  inspectDataHubAsset(urn: string, force?: boolean, connectorId?: string): Promise<CatalogInspection>
+  inspectDataHubAsset(urn: string, force?: boolean, connectorId?: string, mode?: 'summary' | 'deep'): Promise<CatalogInspection>
   inspectorOpen: boolean
   issues: ValidationIssue[]
   language: string

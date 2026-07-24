@@ -40,6 +40,13 @@ function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
+export function entityUrns(payload: unknown): Set<string> {
+  return new Set(array(record(payload).result).flatMap((candidate) => {
+    const urn = record(candidate).urn
+    return typeof urn === 'string' && urn.startsWith('urn:li:dataset:') ? [urn] : []
+  }))
+}
+
 export function readStructuredToolResult(result: unknown): unknown {
   const value = record(result)
   if (value.structuredContent && typeof value.structuredContent === 'object') return value.structuredContent
@@ -128,7 +135,14 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
   const domain = record(record(entity.domain).domain)
   const domainName = record(domain.properties).name
   const schema = record(options.schemaPayload)
-  const fields = array(schema.fields).map((value) => {
+  const entitySchema = record(entity.schemaMetadata)
+  const legacyEntitySchema = record(entity.schema)
+  const schemaFields = array(schema.fields).length
+    ? array(schema.fields)
+    : array(entitySchema.fields).length
+      ? array(entitySchema.fields)
+      : array(legacyEntitySchema.fields)
+  const fields = schemaFields.map((value) => {
     const field = record(value)
     const fieldTags = [...new Set([...array(field.editedTags), ...array(field.editedGlossaryTerms)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 160)))]
     return { name: sanitizeCatalogText(field.fieldPath, 240), type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }

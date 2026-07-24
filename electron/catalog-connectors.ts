@@ -342,15 +342,16 @@ export async function searchCatalogAssets(queryValue: unknown) {
   })
 }
 
-export async function inspectCatalogAsset(connectorIdValue: unknown, assetRefValue: unknown, force = false) {
+export async function inspectCatalogAsset(connectorIdValue: unknown, assetRefValue: unknown, force = false, modeValue: unknown = 'deep') {
   const connectorId = text(connectorIdValue, 32) || 'datahub'
   const assetRef = text(assetRefValue, 2_000)
+  const mode = modeValue === 'summary' ? 'summary' : 'deep'
   if (!assetRef) throw new Error('A catalog asset reference is required')
   if (connectorId === 'datahub') {
-    const inspection = await inspectDataHubAsset(assetRef, force)
+    const inspection = await inspectDataHubAsset(assetRef, force, mode)
     return {
       asset: { ...inspection.asset, connectorId: 'datahub', sourceSystem: 'DataHub', assetRef },
-      evidence: inspection.evidence.map((read) => ({ ...read, connectorId: 'datahub', sourceSystem: 'DataHub', assetRef, urn: assetRef })),
+      evidence: inspection.evidence.map((read) => ({ ...read, tool: read.name, connectorId: 'datahub', sourceSystem: 'DataHub', assetRef, urn: assetRef })),
     }
   }
   const connector = storedManifests().find((item) => item.id === connectorId && item.enabled)

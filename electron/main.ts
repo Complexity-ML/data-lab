@@ -244,9 +244,9 @@ app.whenReady().then(() => {
     if (typeof payload?.query !== 'string') throw new Error('Invalid DataHub search request')
     return searchDataHubAssets(payload.query)
   })
-  ipcMain.handle(mcpInspectChannel, (_event, payload: { urn?: unknown; force?: unknown }) => {
+  ipcMain.handle(mcpInspectChannel, (_event, payload: { urn?: unknown; force?: unknown; mode?: unknown }) => {
     if (typeof payload?.urn !== 'string') throw new Error('Invalid DataHub inspection request')
-    return inspectDataHubAsset(payload.urn, payload.force === true)
+    return inspectDataHubAsset(payload.urn, payload.force === true, payload.mode === 'summary' ? 'summary' : 'deep')
   })
   ipcMain.handle(mcpInvalidateChannel, (_event, payload: { urn?: unknown }) => invalidateDataHubContext(typeof payload?.urn === 'string' ? payload.urn : undefined))
   ipcMain.handle(catalogConnectorsListChannel, () => listCatalogConnectors())
@@ -254,7 +254,7 @@ app.whenReady().then(() => {
   ipcMain.handle(catalogConnectorDeleteChannel, (_event, payload: { id?: unknown }) => deleteCatalogConnector(payload?.id))
   ipcMain.handle(catalogConnectorTestChannel, (_event, payload: { id?: unknown }) => testCatalogConnector(payload?.id))
   ipcMain.handle(catalogSearchChannel, (_event, payload: { query?: unknown }) => searchCatalogAssets(payload?.query))
-  ipcMain.handle(catalogInspectChannel, (_event, payload: { connectorId?: unknown; assetRef?: unknown; force?: unknown }) => inspectCatalogAsset(payload?.connectorId, payload?.assetRef, payload?.force === true))
+  ipcMain.handle(catalogInspectChannel, (_event, payload: { connectorId?: unknown; assetRef?: unknown; force?: unknown; mode?: unknown }) => inspectCatalogAsset(payload?.connectorId, payload?.assetRef, payload?.force === true, payload?.mode))
   ipcMain.handle(mcpWritebackChannel, async (event, payload: unknown) => {
     const request = parseDataHubDecisionRequest(payload)
     const parent = BrowserWindow.fromWebContents(event.sender)

@@ -9,7 +9,7 @@ import { parseWorkerPolicy } from '../domain/worker-policy'
 
 export function useCatalogExplorer(options: {
   incidentSummaries: IncidentSummary[]
-  inspectAsset(urn: string, force?: boolean): Promise<CatalogInspection>
+  inspectAsset(urn: string, force?: boolean, connectorId?: string, mode?: 'summary' | 'deep'): Promise<CatalogInspection>
   logIncident(event: IncidentEventInput): Promise<void>
   setActivity(value: string): void
   setNodes: Dispatch<SetStateAction<PipelineNode[]>>
@@ -97,6 +97,7 @@ export function useCatalogExplorer(options: {
         }
       : undefined
     const assets = focusedAsset ? [focusedAsset] : input.assets
+    const assetByUrn = new Map(assets.map((asset) => [asset.urn, asset]))
     catalogAssets.current.set(input.explorer.id, assets)
     const key = checkpointKey(input.explorer, input.query)
     const persistedProgress = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
@@ -127,12 +128,17 @@ export function useCatalogExplorer(options: {
     }, input.isCurrent, input.worker)
 
     const explored = await inspectCatalogInParallel(assets, async (urn) => {
-      // A failed catalog read is retried from the versioned checkpoint. Repeating
-      // the whole four-tool inspection immediately can double a 20-second MCP
-      // timeout and amplify an already overloaded connector.
+      const asset = assetByUrn.get(urn)
+      // Catalog coverage uses the connector's lightweight summary path. DataHub
+      // coalesces concurrent summary reads into one batch get_entities call;
+      // schema and lineage are reserved for the selected candidate below.
       const inspection = policy.cacheMode === 'refresh'
-        ? await inspectAsset(urn, true)
-        : await inspectWithBoundedRetry(urn, inspectAsset, { retryUnavailable: policy.scope === 'dataset' })
+        ? await inspectAsset(urn, true, asset?.connectorId, 'summary')
+        : await inspectWithBoundedRetry(
+            urn,
+            (assetUrn, force) => inspectAsset(assetUrn, force, asset?.connectorId, 'summary'),
+            { retryUnavailable: policy.scope === 'dataset' },
+          )
       return {
         asset: inspection.asset,
         evidence: inspection.evidence.map((read) => ({
@@ -173,9 +179,12 @@ export function useCatalogExplorer(options: {
       return rank(right) - rank(left)
     })
     let candidate = ranked.length ? inspectedByUrn.get(ranked[0]!.urn) ?? byUrn.get(ranked[0]!.urn) : undefined
-    if (candidate && !inspectedByUrn.has(candidate.urn)) {
+    if (candidate) {
       try {
-        const hydrated = await inspectAsset(candidate.urn)
+        // One evidence-backed candidate per atomic batch receives the expensive
+        // schema + upstream/downstream lineage audit. The remaining catalog
+        // assets keep their bounded entity summaries until promoted.
+        const hydrated = await inspectAsset(candidate.assetRef ?? candidate.urn, false, candidate.connectorId, 'deep')
         candidate = hydrated.asset
         evidence.push(...hydrated.evidence.map((read) => ({
           tool: read.tool,
