@@ -76,7 +76,9 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{exploration.discovered}/{exploration.total || '?'}</strong> discovered</span>
       <span><strong>{exploration.inspected}/{exploration.total || '?'}</strong> inspected</span>
       <span><strong>{exploration.incidents}</strong> incidents</span>
-      <span><strong>{exploration.failed}</strong> unavailable</span>
+      {exploration.failed > 0
+        ? <span><strong>{exploration.failed}</strong> unavailable</span>
+        : <span><strong>{exploration.governanceGaps}</strong> governance</span>}
     </div>}
     {data.rule && <code>{data.rule}</code>}
     <footer>

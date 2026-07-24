@@ -6,6 +6,17 @@ export interface CatalogInspection {
   evidence: DataHubEvidence[]
 }
 
+const dataIncidentIssues = new Set(['quality failing'])
+const governanceIssues = new Set(['owner missing', 'tags missing'])
+
+export function hasDataIncident(checkpoint: CatalogDatasetCheckpoint) {
+  return checkpoint.issues.some((issue) => dataIncidentIssues.has(issue))
+}
+
+export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
+  return checkpoint.issues.some((issue) => governanceIssues.has(issue))
+}
+
 function fingerprint(value: string) {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
@@ -22,6 +33,7 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     ...(unavailable ? ['metadata unavailable'] : []),
     ...(asset.freshness.stale ? ['stale evidence'] : []),
     ...(asset.owners.length === 0 ? ['owner missing'] : []),
+    ...(asset.tags.length === 0 ? ['tags missing'] : []),
     ...(asset.qualityStatus === 'failing' ? ['quality failing'] : []),
   ]
   const status: CatalogDatasetCheckpoint['status'] = unavailable ? 'unavailable' : issues.length ? 'warning' : 'healthy'
@@ -58,6 +70,7 @@ export async function inspectCatalogInParallel(
     concurrency?: number
     previous?: CatalogDatasetCheckpoint[]
     isCancelled?(): boolean
+    maxInspections?: number
     onCheckpoint?(progress: CatalogExplorationProgress, inspections: CatalogInspection[]): void
     query?: string
   } = {},
@@ -71,14 +84,17 @@ export async function inspectCatalogInParallel(
   })
   const checkpoints: CatalogDatasetCheckpoint[] = [...reusable]
   const pending = assets.filter((asset) => !reusable.some((checkpoint) => checkpoint.urn === asset.urn))
+  const inspectionBudget = Math.max(1, Math.min(32, Math.floor(options.maxInspections ?? pending.length)))
+  const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
 
   const emit = (state: CatalogExplorationProgress['state']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
-    // Collection failures are connector reliability signals, not evidence that
-    // the underlying dataset is unhealthy.
-    const incidents = checkpoints.filter((item) => item.status === 'warning').length
+    // Collection failures and governance gaps are not evidence that the
+    // underlying dataset is unhealthy.
+    const incidents = checkpoints.filter(hasDataIncident).length
+    const governanceGaps = checkpoints.filter(hasGovernanceGap).length
     options.onCheckpoint?.({
       query: options.query ?? '*',
       total: assets.length,
@@ -86,6 +102,7 @@ export async function inspectCatalogInParallel(
       inspected: checkpoints.length,
       failed,
       incidents,
+      governanceGaps,
       concurrency,
       state,
       checkpointAt: new Date().toISOString(),
@@ -95,8 +112,8 @@ export async function inspectCatalogInParallel(
 
   emit('inspecting')
   let connectorUnavailable = false
-  for (let offset = 0; offset < pending.length && !options.isCancelled?.(); offset += concurrency) {
-    const batch = pending.slice(offset, offset + concurrency)
+  for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += concurrency) {
+    const batch = scheduled.slice(offset, offset + concurrency)
     const batchCheckpoints = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
@@ -122,13 +139,19 @@ export async function inspectCatalogInParallel(
     checkpoints.push(...batchCheckpoints)
     emit('inspecting')
 
-    const sessionCheckpoints = checkpoints.filter((checkpoint) => !reusable.some((item) => item.urn === checkpoint.urn))
-    if (sessionCheckpoints.length >= Math.min(concurrency, pending.length) && sessionCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
+    if (batchCheckpoints.length > 0 && batchCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
       connectorUnavailable = true
       break
     }
   }
-  const state: CatalogExplorationProgress['state'] = options.isCancelled?.() ? 'paused' : connectorUnavailable ? 'failed' : 'complete'
+  const hasMore = scheduled.length < pending.length
+  const state: CatalogExplorationProgress['state'] = options.isCancelled?.()
+    ? 'paused'
+    : connectorUnavailable
+      ? 'failed'
+      : hasMore
+        ? 'inspecting'
+        : 'complete'
   emit(state)
   return { inspections, progress: {
     query: options.query ?? '*',
@@ -136,7 +159,8 @@ export async function inspectCatalogInParallel(
     discovered: assets.length,
     inspected: checkpoints.length,
     failed: checkpoints.filter((item) => item.status === 'unavailable').length,
-    incidents: checkpoints.filter((item) => item.status === 'warning').length,
+    incidents: checkpoints.filter(hasDataIncident).length,
+    governanceGaps: checkpoints.filter(hasGovernanceGap).length,
     concurrency,
     state,
     checkpointAt: new Date().toISOString(),

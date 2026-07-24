@@ -532,13 +532,16 @@ export async function inspectDataHubAsset(urn: string, force = false): Promise<{
   const client = await connectClient()
   const available = await discoverReadableToolNames(client)
   const lineageSchema = toolCatalog?.tools.find((tool) => tool.name === 'get_lineage')?.inputSchema
-  // The stdio DataHub server can serialize tool work internally. Keeping the
-  // four reads for one asset sequential prevents a catalog fan-out from
-  // multiplying into 4 × N simultaneous MCP calls and timing out every read.
-  const entity = await readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force })
-  const schema = await readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force })
-  const upstream = await readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, true), force })
-  const downstream = await readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, false), force })
+  // Two bounded waves keep catalog exploration responsive without restoring
+  // the former 4 × N burst that overwhelmed the stdio MCP server.
+  const [entity, schema] = await Promise.all([
+    readCachedTool({ client, available, urn, name: 'get_entities', arguments: { urns: [urn] }, force }),
+    readCachedTool({ client, available, urn, name: 'list_schema_fields', arguments: { urn }, force }),
+  ])
+  const [upstream, downstream] = await Promise.all([
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, true), force }),
+    readCachedTool({ client, available, urn, name: 'get_lineage', arguments: resolveLineageArguments(lineageSchema, urn, false), force }),
+  ])
   const evidence = [entity.evidence, schema.evidence, upstream.evidence, downstream.evidence]
   const successful = evidence.filter((item) => item.status === 'ok').sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))[0]
   const asset = parseAssetContext({

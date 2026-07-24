@@ -300,6 +300,20 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           const inspection = await inspectDataHubAsset(sourceUrn, Boolean(forcedMonitorAudit), source.data.connectorId).catch(() => undefined)
           if (inspection?.asset) profileCandidates.set(sourceUrn, inspection.asset)
         }
+        if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
+          setActivity('Catalog Explorer reading the next 4 datasets while the agent extends the diagram…')
+          let candidates = catalog.assetsFor(catalogExplorer.id)
+          if (!candidates.length) candidates = await searchDataHubAssets('*')
+          const explored = await catalog.explore({
+            assets: candidates,
+            explorer: catalogExplorer,
+            query: catalogExplorer.data.exploration?.query ?? '*',
+            isCurrent: () => agentRunId.current === runId,
+          })
+          catalogProgress = explored.progress
+          evidenceEntries.push(...explored.evidence)
+          datahubEvidence.push(...explored.summaries)
+        }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
         if (catalogExplorer) catalog.updateProgress(catalogExplorer, {
@@ -309,6 +323,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           inspected: 0,
           failed: 0,
           incidents: 0,
+          governanceGaps: 0,
           concurrency: 4,
           state: 'discovering',
           checkpointAt: new Date().toISOString(),
