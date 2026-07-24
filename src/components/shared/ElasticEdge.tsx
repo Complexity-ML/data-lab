@@ -118,7 +118,67 @@ function routedCablePath(options: ElasticRouteOptions, routeY: number) {
   ].join(' ')
 }
 
+function verticalReturnCablePath(
+  options: ElasticRouteOptions,
+  sourceObstacle?: ElasticObstacle,
+  targetObstacle?: ElasticObstacle,
+) {
+  const { sourceX, sourceY, targetX, targetY } = options
+  const verticalDirection = targetY >= sourceY ? -1 : 1
+  const sourceBoundaryY = verticalDirection < 0
+    ? (sourceObstacle?.y ?? sourceY) - obstacleClearance
+    : (sourceObstacle ? sourceObstacle.y + sourceObstacle.height : sourceY) + obstacleClearance
+  const laneX = Math.min(
+    sourceObstacle?.x ?? sourceX,
+    targetObstacle?.x ?? targetX,
+    sourceX,
+    targetX,
+  ) - obstacleClearance
+  const leadX = sourceX + endpointLead
+  const targetLeadX = targetX - endpointLead
+  const curve = 18
+  const turnY = sourceBoundaryY
+  const approachDirection = targetY >= turnY ? 1 : -1
+
+  // A right-side source handle and a left-side target handle cannot be joined
+  // monotonically when both handles share the same X. Leave the source card,
+  // clear it vertically, use a lane to the left of both cards, then approach
+  // the target from its expected side. This keeps manual vertical/diagonal
+  // placements visible instead of hiding the cable under either endpoint.
+  return [
+    `M ${sourceX} ${sourceY}`,
+    `L ${leadX} ${sourceY}`,
+    `C ${leadX + curve} ${sourceY}, ${leadX + curve} ${turnY}, ${leadX} ${turnY}`,
+    `L ${laneX + curve} ${turnY}`,
+    `C ${laneX} ${turnY}, ${laneX} ${turnY + curve * approachDirection}, ${laneX} ${turnY + curve * approachDirection}`,
+    `L ${laneX} ${targetY - curve * approachDirection}`,
+    `C ${laneX} ${targetY}, ${laneX + curve} ${targetY}, ${laneX + curve} ${targetY}`,
+    `L ${targetLeadX} ${targetY}`,
+    `L ${targetX} ${targetY}`,
+  ].join(' ')
+}
+
 export function routeElasticCable(options: ElasticRouteOptions): ElasticRoute {
+  const sourceObstacle = options.obstacles?.find((obstacle) => obstacle.id === options.sourceId)
+  const targetObstacle = options.obstacles?.find((obstacle) => obstacle.id === options.targetId)
+  const nearVerticalReturn = !options.feedback
+    && Math.abs(options.targetX - options.sourceX) < 96
+    && Math.abs(options.targetY - options.sourceY) > 96
+  if (nearVerticalReturn) {
+    const laneX = Math.min(
+      sourceObstacle?.x ?? options.sourceX,
+      targetObstacle?.x ?? options.targetX,
+      options.sourceX,
+      options.targetX,
+    ) - obstacleClearance
+    return {
+      path: verticalReturnCablePath(options, sourceObstacle, targetObstacle),
+      labelX: laneX,
+      labelY: (options.sourceY + options.targetY) / 2,
+      routedAroundObstacle: true,
+    }
+  }
+
   const obstacles = (options.obstacles ?? []).filter((obstacle) => (
     obstacle.id !== options.sourceId
     && obstacle.id !== options.targetId

@@ -85,6 +85,27 @@ describe('pipeline XY layout', () => {
     expect(route.path.match(/ C /g)).toHaveLength(1)
   })
 
+  it('keeps a visible cable when vertically separated endpoint handles share the same X', () => {
+    const route = routeElasticCable({
+      sourceId: 'source',
+      sourceX: 503,
+      sourceY: 633,
+      targetId: 'profile',
+      targetX: 503,
+      targetY: 311,
+      obstacles: [
+        { id: 'source', x: 115, y: 475, width: 388, height: 316 },
+        { id: 'profile', x: 503, y: 123, width: 381, height: 378 },
+      ],
+    })
+
+    expect(route.routedAroundObstacle).toBe(true)
+    expect(route.labelX).toBeLessThan(115)
+    expect(route.path).toMatch(/^M 503 633 /)
+    expect(route.path).toMatch(/L 503 311$/)
+    expect(route.path.match(/ C /g)).toHaveLength(3)
+  })
+
   it('routes feedback below the tallest card in the iteration', () => {
     const route = routeElasticCable({
       feedback: true,

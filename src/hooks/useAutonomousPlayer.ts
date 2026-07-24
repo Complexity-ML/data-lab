@@ -25,7 +25,7 @@ import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective
 import { errorMessage, notifyError, notifyToast } from '../domain/toasts'
 import { findEquivalentVersion, graphsEquivalent, type PipelineVersion } from '../domain/versioning'
 import { atomicTransactionBlockers, validatePipeline, type ValidationIssue } from '../validation'
-import { repairSensitiveOutputPaths } from '../validation/proposal-repair'
+import { repairMonitorWorkBranches, repairSensitiveOutputPaths } from '../validation/proposal-repair'
 import { parseWorkerPolicy } from '../domain/worker-policy'
 import { disconnectedAiStatus, disconnectedChatGPTStatus } from './useAiConnections'
 import { useCatalogExplorer } from './useCatalogExplorer'
@@ -692,6 +692,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         ensureHostReviewCheckpoint(nextProposal, nodes, edges, {
           anchorId: monitored?.monitor.monitorId ?? routedSources[0]?.id ?? nextProposal.addedNodes.find((node) => node.data.kind === 'source')?.id,
           reason,
+          risk: hostRisk,
         })
       }
       // The risk gate can add a new terminal review outcome. Run deterministic
@@ -706,6 +707,16 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         detail: {
           repairedOutputs: safetyRepair.repairedOutputs,
           reason: 'sensitive-output-protection',
+        },
+      })
+      const monitorRepair = repairMonitorWorkBranches(nextProposal, nodes, edges)
+      if (monitorRepair.repairedMonitors.length) recordDiagnostic({
+        category: 'revision',
+        action: 'proposal.monitor-work-repair',
+        status: 'warning',
+        detail: {
+          repairedMonitors: monitorRepair.repairedMonitors,
+          reason: 'missing-bounded-iteration-target',
         },
       })
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
