@@ -36,7 +36,7 @@ import { useLanguage } from './i18n'
 import { summarizeIncidentEvents, type IncidentEvent, type IncidentEventInput } from './domain/incidents'
 import { incidentDiagramNodeIds } from './domain/incident-diagram'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from './domain/source-routing'
-import { defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
+import { dataHubDiscoveryQuery, defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
 import { defaultAutonomyPolicy, normalizeAutonomyPolicy, policyForcesProposalReview, type AutonomyPolicy } from './domain/autonomy-policy'
 import { classifyConnectivityFailure } from './domain/connectivity'
 
@@ -403,9 +403,10 @@ export default function App() {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
         let candidates: DataHubAssetSummary[] = []
         let discoveryError: unknown
-        try { candidates = await searchDataHubAssets(agentRequest) }
+        const discoveryQuery = dataHubDiscoveryQuery(agentRequest)
+        try { candidates = await searchDataHubAssets(discoveryQuery) }
         catch (error) { discoveryError = error }
-        if (!candidates.length) {
+        if (!candidates.length && discoveryQuery !== '*') {
           try { candidates = await searchDataHubAssets('*') }
           catch (error) { discoveryError = error }
         }
