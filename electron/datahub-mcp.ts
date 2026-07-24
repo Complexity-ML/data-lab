@@ -507,6 +507,16 @@ async function readEntityBatch(urns: string[], force: boolean) {
       })
     }
   } catch (error) {
+    if (missing.length > 1) {
+      const recovered = await mapWithConcurrency(missing, 2, async (urn) => {
+        const single = await readEntityBatch([urn], force)
+        return [urn, single.get(urn)] as const
+      })
+      for (const [urn, read] of recovered) {
+        if (read) reads.set(urn, read)
+      }
+      return reads
+    }
     for (const urn of missing) reads.set(urn, {
       result: undefined,
       evidence: { name: 'get_entities', status: 'error', summary: `${error instanceof Error ? error.message : 'Unknown MCP error'} (${urn})`, capturedAt, expiresAt: capturedAt, cached: false, stale: true },
