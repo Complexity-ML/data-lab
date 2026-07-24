@@ -534,6 +534,14 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8, incidents: 1 })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 8 },
+      { ...base, inspected: 12, failed: 4, state: 'inspecting' },
+    )).toBe(true)
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 12, failed: 4 },
+      { ...base, inspected: 12, failed: 3, state: 'inspecting' },
+    )).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'paused', pauseReason: 'connector_unavailable', failed: 4 })).toBe(false)
   })

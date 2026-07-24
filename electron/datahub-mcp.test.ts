@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, callToolWithSdkTimeout, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -158,6 +158,17 @@ describe('DataHub MCP connection settings', () => {
     expect(resolveCatalogEntityTimeoutMs({})).toBe(8_000)
     expect(resolveCatalogEntityTimeoutMs({ DATAHUB_CATALOG_ENTITY_TIMEOUT_MS: '12000' })).toBe(12_000)
     expect(resolveCatalogEntityTimeoutMs({ DATAHUB_CATALOG_ENTITY_TIMEOUT_MS: '1000' })).toBe(5_000)
+  })
+
+  it('uses the MCP SDK timeout so expired tool calls are cancelled internally', async () => {
+    const callTool = vi.fn(async () => ({ content: [] }))
+    await callToolWithSdkTimeout({ callTool } as never, { name: 'get_entities', arguments: { urns: ['urn:test'] } }, 8_000, 'catalog summary')
+
+    expect(callTool).toHaveBeenCalledWith(
+      { name: 'get_entities', arguments: { urns: ['urn:test'] } },
+      undefined,
+      { timeout: 8_000, maxTotalTimeout: 8_000 },
+    )
   })
 
   it('persists endpoint metadata and an encrypted token without exposing the credential', async () => {

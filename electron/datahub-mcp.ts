@@ -250,6 +250,26 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: s
   }
 }
 
+export async function callToolWithSdkTimeout(
+  client: Pick<Client, 'callTool'>,
+  params: Parameters<Client['callTool']>[0],
+  timeoutMs: number,
+  label: string,
+) {
+  try {
+    return await client.callTool(params, undefined, {
+      timeout: timeoutMs,
+      maxTotalTimeout: timeoutMs,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/timed?\s*out|timeout/i.test(message)) {
+      throw new Error(`${label} timed out after ${timeoutMs / 1_000}s`)
+    }
+    throw error
+  }
+}
+
 async function connectClient(): Promise<Client> {
   if (activeClient) return activeClient
   if (connectionPromise) return connectionPromise
@@ -428,7 +448,7 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
   }
   try {
     const result = assertBoundedMcpPayload(await runBoundedMcpRead(
-      () => withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name),
+      () => callToolWithSdkTimeout(client, { name, arguments: options.arguments }, 20_000, name),
     ), `${name} response`)
     const status = result.isError ? 'error' as const : 'ok' as const
     const expiresAt = now + resolveEvidenceTtlMs()[name]
@@ -494,8 +514,9 @@ async function readEntityBatch(urns: string[], force: boolean) {
     const entityCapturedAt = new Date(capturedAtMs).toISOString()
     try {
       const result = assertBoundedMcpPayload(await runBoundedMcpRead(
-        () => withTimeout(
-          client.callTool({ name: 'get_entities', arguments: { urns: [urn] } }),
+        () => callToolWithSdkTimeout(
+          client,
+          { name: 'get_entities', arguments: { urns: [urn] } },
           resolveCatalogEntityTimeoutMs(),
           'get_entities catalog summary',
         ),
@@ -687,8 +708,9 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
     const available = await discoverReadableToolNames(client)
     if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
     const page = Math.floor(offset / pageSize) + 1
-    const result = assertBoundedMcpPayload(await runBoundedMcpRead(() => withTimeout(
-      client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }),
+    const result = assertBoundedMcpPayload(await runBoundedMcpRead(() => callToolWithSdkTimeout(
+      client,
+      { name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } },
       20_000,
       `search page ${page} attempt ${attempt}`,
     )), 'search response')
@@ -779,7 +801,7 @@ export async function writeDataHubDecision(payload: unknown): Promise<{ written:
   const listed = await discoverTools(client, 'DataHub MCP mutation discovery')
   if (!hasExplicitDataHubWritebackTool(listed)) throw new Error('The explicitly enabled save_document mutation tool is unavailable')
   const content = `## DATA LAB approved decision\n\n**Revision:** ${revisionId}\n\n**Author:** ${author}\n\n## Rationale\n\n${rationale}`
-  const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }), 20_000, 'save_document'), 'save_document response')
+  const result = assertBoundedMcpPayload(await callToolWithSdkTimeout(client, { name: 'save_document', arguments: { document_type: 'Decision', title: `DATA LAB · ${title}`, content, topics: ['data-lab', 'approved-revision'], related_assets: relatedAssets } }, 20_000, 'save_document'), 'save_document response')
   if (result.isError) throw new Error(summarizeResult(result))
   return { written: true, tool: 'save_document', summary: summarizeResult(result) }
 }

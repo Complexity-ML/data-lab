@@ -57,6 +57,9 @@ export function mergeCatalogProgress(
   const datasets = [...byUrn.values()]
   const latest = Date.parse(right.checkpointAt) >= Date.parse(left.checkpointAt) ? right : left
   const total = Math.max(left.total, right.total, datasets.length)
+  const retryLimit = latest.connectorRetryLimit ?? defaultCatalogRetryLimit
+  const retryableUnavailable = datasets.filter((checkpoint) =>
+    checkpoint.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < retryLimit).length
   return {
     ...latest,
     total,
@@ -66,8 +69,8 @@ export function mergeCatalogProgress(
     incidents: datasets.filter(hasDataIncident).length,
     governanceGaps: datasets.filter(hasGovernanceGap).length,
     connectorRetryCount: latest.connectorRetryCount ?? 0,
-    connectorRetryLimit: latest.connectorRetryLimit ?? defaultCatalogRetryLimit,
-    remaining: Math.max(0, total - datasets.length),
+    connectorRetryLimit: retryLimit,
+    remaining: Math.max(0, total - datasets.length) + retryableUnavailable,
     datasets,
   }
 }
@@ -116,6 +119,7 @@ export function shouldCallAgentForCatalog(
 ) {
   if (current.state === 'failed' || current.pauseReason === 'connector_unavailable' || current.pauseReason === 'retry_exhausted') return false
   if (current.state === 'complete') return true
+  if (current.total > 0 && current.inspected >= current.total && (previous?.inspected ?? 0) < current.total) return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
 }
