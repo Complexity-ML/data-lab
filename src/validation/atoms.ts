@@ -1,4 +1,5 @@
 import type { CardKind, PipelineNode } from '../domain/pipeline'
+import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import type { ValidationAtom, ValidationContext, ValidationIssue } from './types'
 
@@ -407,19 +408,24 @@ export const sensitiveDataAtom: ValidationAtom = {
     const sensitiveSources = nodes.filter((node) => node.data.kind === 'source' && (node.data.datahubTags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)) || node.data.schema.some((field) => field.tags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag)))))
     const unsafeOutputs = new Map<string, string>()
     for (const source of sensitiveSources) {
-      const queue = [{ id: source.id, protected: false }]
+      const sourceRef = source.data.datahubUrn ?? source.data.assetRef
+      const queue = [{ id: source.id, protected: false, metadataOnly: false }]
       const visited = new Set<string>()
       while (queue.length) {
         const current = queue.shift()!
         const node = byId.get(current.id)
         if (!node) continue
         const protectedPath = current.protected || (node.data.kind === 'transform' && /mask|hash|sha(?:-?\d+)?|tokeni[sz]e|redact|encrypt/i.test(`${node.data.label} ${node.data.rule ?? ''}`))
-        const stateKey = `${node.id}:${protectedPath}`
+        const metadataOnlyPath = current.metadataOnly || (node.data.kind === 'profile'
+          && Boolean(sourceRef)
+          && isHostVerifiedMetadataOnlyProfile(node.data.profile)
+          && node.data.profile.sourceUrn === sourceRef)
+        const stateKey = `${node.id}:${protectedPath}:${metadataOnlyPath}`
         if (visited.has(stateKey)) continue
         visited.add(stateKey)
         const governedRestrictedSink = node.data.kind === 'output' && /quarantine|secure|vault|restricted|steward|hold/i.test(`${node.data.label} ${node.data.description} ${node.data.assetRef ?? node.data.datahubUrn ?? ''}`)
-        if (node.data.kind === 'output' && !protectedPath && !governedRestrictedSink) unsafeOutputs.set(node.id, source.id)
-        for (const target of outgoing.get(node.id) ?? []) queue.push({ id: target, protected: protectedPath })
+        if (node.data.kind === 'output' && !protectedPath && !metadataOnlyPath && !governedRestrictedSink) unsafeOutputs.set(node.id, source.id)
+        for (const target of outgoing.get(node.id) ?? []) queue.push({ id: target, protected: protectedPath, metadataOnly: metadataOnlyPath })
       }
     }
     return [...unsafeOutputs].map(([outputId, sourceId]) => issue(this.id, { id: `sensitive-unprotected-${sourceId}-${outputId}`, severity: 'error', nodeId: outputId, title: 'Sensitive data reaches an output unprotected', detail: `${byId.get(sourceId)?.data.label ?? sourceId} reaches ${byId.get(outputId)?.data.label ?? outputId} without a masking, hashing, tokenization, redaction or encryption transform on that path.` }))

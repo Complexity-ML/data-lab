@@ -3,6 +3,13 @@ import type { AgentProposal, DataProfileSnapshot, PipelineNode, PipelineNodeData
 
 const maximumProfiledFields = 32
 const maximumAnomalies = 8
+const profileKeys = new Set([
+  'sourceUrn', 'capturedAt', 'expiresAt', 'stale', 'platform', 'environment', 'quality',
+  'fieldCount', 'profiledFields', 'sensitiveFieldCount', 'upstreamCount', 'downstreamCount',
+  'anomalies', 'tokenEstimate', 'storage',
+])
+const profileFieldKeys = new Set(['name', 'type', 'tags', 'nullRate', 'distinctCount'])
+const storageProofKeys = new Set(['kind', 'version', 'rawRowsStored', 'hostVerified'])
 
 function boundedText(value: string, limit = 160) {
   return value.trim().slice(0, limit)
@@ -10,6 +17,35 @@ function boundedText(value: string, limit = 160) {
 
 function estimateTokens(value: unknown) {
   return Math.max(1, Math.ceil(JSON.stringify(value).length / 4))
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>) {
+  return Object.keys(value).every((key) => allowed.has(key))
+}
+
+export function isHostVerifiedMetadataOnlyProfile(value: unknown): value is DataProfileSnapshot {
+  const profile = record(value)
+  const storage = record(profile?.storage)
+  if (!profile || !storage || !hasOnlyKeys(profile, profileKeys) || !hasOnlyKeys(storage, storageProofKeys)) return false
+  if (storage.kind !== 'bounded-metadata' || storage.version !== 1 || storage.rawRowsStored !== false || storage.hostVerified !== true) return false
+  if (typeof profile.sourceUrn !== 'string' || typeof profile.capturedAt !== 'string' || typeof profile.expiresAt !== 'string') return false
+  if (typeof profile.stale !== 'boolean' || typeof profile.platform !== 'string' || typeof profile.environment !== 'string') return false
+  if (!['healthy', 'failing', 'unavailable'].includes(String(profile.quality))) return false
+  if (![profile.fieldCount, profile.sensitiveFieldCount, profile.upstreamCount, profile.downstreamCount, profile.tokenEstimate].every((count) => Number.isInteger(count) && Number(count) >= 0)) return false
+  if (!Array.isArray(profile.profiledFields) || profile.profiledFields.length > maximumProfiledFields) return false
+  if (!profile.profiledFields.every((field) => {
+    const entry = record(field)
+    if (!entry || !hasOnlyKeys(entry, profileFieldKeys)) return false
+    if (typeof entry.name !== 'string' || !['string', 'number', 'boolean', 'timestamp'].includes(String(entry.type))) return false
+    if (entry.tags !== undefined && (!Array.isArray(entry.tags) || entry.tags.length > 8 || !entry.tags.every((tag) => typeof tag === 'string'))) return false
+    if (entry.nullRate !== undefined && (typeof entry.nullRate !== 'number' || entry.nullRate < 0 || entry.nullRate > 1)) return false
+    return entry.distinctCount === undefined || (Number.isInteger(entry.distinctCount) && Number(entry.distinctCount) >= 0)
+  })) return false
+  return Array.isArray(profile.anomalies) && profile.anomalies.length <= maximumAnomalies && profile.anomalies.every((anomaly) => typeof anomaly === 'string')
 }
 
 export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfileSnapshot {
@@ -42,6 +78,7 @@ export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfi
     upstreamCount: asset.upstream.length,
     downstreamCount: asset.downstream.length,
     anomalies,
+    storage: { kind: 'bounded-metadata' as const, version: 1 as const, rawRowsStored: false as const, hostVerified: true },
   }
   return { ...profileWithoutEstimate, tokenEstimate: estimateTokens(profileWithoutEstimate) }
 }
@@ -56,7 +93,8 @@ export function canReuseDataProfile(profile: DataProfileSnapshot, forcedMonitorA
 }
 
 export function summarizeDataProfile(profile: DataProfileSnapshot) {
-  return `${profile.fieldCount} fields · ${profile.sensitiveFieldCount} sensitive · ${profile.quality} · ${profile.stale ? 'stale' : 'fresh'} · ${profile.upstreamCount} upstream · ${profile.downstreamCount} downstream · ~${profile.tokenEstimate} tokens`
+  const storage = isHostVerifiedMetadataOnlyProfile(profile) ? 'metadata-only' : 'unverified storage'
+  return `${profile.fieldCount} fields · ${profile.sensitiveFieldCount} sensitive · ${profile.quality} · ${profile.stale ? 'stale' : 'fresh'} · ${profile.upstreamCount} upstream · ${profile.downstreamCount} downstream · ${storage} · ~${profile.tokenEstimate} tokens`
 }
 
 export function dataProfileEvidence(profile: DataProfileSnapshot): { summaries: string[]; evidence: DataHubEvidence[] } {

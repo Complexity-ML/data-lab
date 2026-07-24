@@ -17,6 +17,13 @@ export interface DataProfileField extends SchemaField {
   distinctCount?: number
 }
 
+export interface DataProfileStorageProof {
+  kind: 'bounded-metadata'
+  version: 1
+  rawRowsStored: false
+  hostVerified: boolean
+}
+
 export interface DataProfileSnapshot {
   sourceUrn: string
   capturedAt: string
@@ -32,6 +39,7 @@ export interface DataProfileSnapshot {
   downstreamCount: number
   anomalies: string[]
   tokenEstimate: number
+  storage: DataProfileStorageProof
 }
 
 export interface CatalogExplorationProgress {

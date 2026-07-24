@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
+import { createDataProfileSnapshot } from '../domain/data-profile'
+import type { DataHubAssetSummary } from '../domain/datahub'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from '../domain/pipeline'
 import { validatePipeline, validationAtoms } from '.'
+
+const sensitiveAsset: DataHubAssetSummary = {
+  urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers,PROD)',
+  name: 'customers',
+  platform: 'snowflake',
+  environment: 'PROD',
+  description: 'Customers',
+  owners: ['Data Governance'],
+  domain: 'Growth',
+  tags: ['PII'],
+  qualityStatus: 'healthy',
+  upstream: [],
+  downstream: [],
+  fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+  freshness: { capturedAt: '2026-07-24T10:00:00.000Z', expiresAt: '2099-07-24T11:00:00.000Z', stale: false },
+}
 
 describe('atomic pipeline validation', () => {
   it('exposes small independently addressable validators', () => {
@@ -85,6 +103,53 @@ describe('atomic pipeline validation', () => {
     ])
     expect(findings.some((finding) => finding.id.endsWith('-safe'))).toBe(false)
     expect(findings).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'sensitive-unprotected-source-unsafe', severity: 'error' })]))
+  })
+
+  it('allows a sensitive source to publish only host-verified bounded metadata', () => {
+    const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, schema: sensitiveAsset.fields, datahubUrn: sensitiveAsset.urn } }
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: createDataProfileSnapshot(sensitiveAsset) } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const findings = validatePipeline([source, profile, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-output', source: profile.id, target: output.id },
+    ])
+    expect(findings.some((finding) => finding.id === 'sensitive-unprotected-source-output')).toBe(false)
+  })
+
+  it('does not trust a metadata-only label or an unverified profile proof', () => {
+    const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, schema: sensitiveAsset.fields, datahubUrn: sensitiveAsset.urn } }
+    const snapshot = createDataProfileSnapshot(sensitiveAsset)
+    const profile = {
+      ...newCard('profile', 1),
+      id: 'profile',
+      data: {
+        ...newCard('profile', 1).data,
+        description: 'Metadata-only profile with no raw rows.',
+        profile: { ...snapshot, storage: { ...snapshot.storage, hostVerified: false } },
+      },
+    }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const findings = validatePipeline([source, profile, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-output', source: profile.id, target: output.id },
+    ])
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'sensitive-unprotected-source-output', severity: 'error' }),
+    ]))
+  })
+
+  it('does not reuse a valid metadata proof from another dataset', () => {
+    const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, schema: sensitiveAsset.fields, datahubUrn: sensitiveAsset.urn } }
+    const otherProfile = createDataProfileSnapshot({ ...sensitiveAsset, urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.other,PROD)' })
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: otherProfile } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const findings = validatePipeline([source, profile, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-output', source: profile.id, target: output.id },
+    ])
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'sensitive-unprotected-source-output', severity: 'error' }),
+    ]))
   })
 
   it('validates the Human Review card contract independently', () => {

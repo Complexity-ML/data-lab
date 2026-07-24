@@ -33,11 +33,16 @@ function cleanFields(value: unknown): SchemaField[] {
   })
 }
 
-function cleanProfile(value: unknown): DataProfileSnapshot | undefined {
+function cleanProfile(value: unknown, trustHostProof: boolean): DataProfileSnapshot | undefined {
   if (!value || typeof value !== 'object') return undefined
   const source = value as Record<string, unknown>
   if (typeof source.sourceUrn !== 'string' || !source.sourceUrn.startsWith('urn:li:') || typeof source.capturedAt !== 'string' || typeof source.expiresAt !== 'string') return undefined
   const quality = ['healthy', 'failing', 'unavailable'].includes(String(source.quality)) ? source.quality as DataProfileSnapshot['quality'] : 'unavailable'
+  const storage = source.storage && typeof source.storage === 'object' && !Array.isArray(source.storage) ? source.storage as Record<string, unknown> : {}
+  const verifiedBoundedStorage = storage.kind === 'bounded-metadata'
+    && storage.version === 1
+    && storage.rawRowsStored === false
+    && storage.hostVerified === true
   const profiledFields = cleanFields(source.profiledFields).slice(0, 32).map((field, index) => {
     const raw = Array.isArray(source.profiledFields) ? source.profiledFields[index] as Record<string, unknown> : undefined
     return { ...field, nullRate: typeof raw?.nullRate === 'number' && raw.nullRate >= 0 && raw.nullRate <= 1 ? raw.nullRate : undefined, distinctCount: Number.isInteger(raw?.distinctCount) && Number(raw?.distinctCount) >= 0 ? Number(raw?.distinctCount) : undefined }
@@ -50,6 +55,7 @@ function cleanProfile(value: unknown): DataProfileSnapshot | undefined {
     upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.upstreamCount) ? Number(source.upstreamCount) : 0)), downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.downstreamCount) ? Number(source.downstreamCount) : 0)),
     anomalies: Array.isArray(source.anomalies) ? source.anomalies.filter((item): item is string => typeof item === 'string').map((item) => redactExportText(item).slice(0, 240)).slice(0, 8) : [],
     tokenEstimate: Math.max(1, Math.min(100_000, Number.isInteger(source.tokenEstimate) ? Number(source.tokenEstimate) : 1)),
+    storage: { kind: 'bounded-metadata', version: 1, rawRowsStored: false, hostVerified: trustHostProof && verifiedBoundedStorage },
   }
 }
 
@@ -96,7 +102,7 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
   }
 }
 
-function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
+function cleanNodeData(data: Record<string, unknown>, trustHostProof: boolean): PipelineNodeData {
   const kind = kinds.has(data.kind as CardKind) ? data.kind as CardKind : 'analysis'
   const quality = ['healthy', 'failing', 'unavailable'].includes(String(data.datahubQuality)) ? data.datahubQuality as PipelineNodeData['datahubQuality'] : undefined
   return {
@@ -116,7 +122,7 @@ function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
     datahubDomain: typeof data.datahubDomain === 'string' ? data.datahubDomain.slice(0, 160) : undefined,
     datahubTags: Array.isArray(data.datahubTags) ? data.datahubTags.filter((tag): tag is string => typeof tag === 'string').slice(0, 100) : undefined,
     datahubQuality: quality,
-    profile: cleanProfile(data.profile),
+    profile: cleanProfile(data.profile, trustHostProof),
     exploration: cleanExploration(data.exploration),
     patchScope: kind === 'patch' ? 'graph-only' : undefined,
     monitorMode: kind === 'monitor' ? 'event-loop' : undefined,
@@ -128,7 +134,7 @@ function cleanNodeData(data: Record<string, unknown>): PipelineNodeData {
   }
 }
 
-function cleanNodes(value: unknown): PipelineNode[] {
+function cleanNodes(value: unknown, trustHostProof: boolean): PipelineNode[] {
   if (!Array.isArray(value) || value.length > 2_000) throw new Error('Pipeline cards must be an array of at most 2,000 items')
   const ids = new Set<string>()
   return value.map((item, index) => {
@@ -140,7 +146,7 @@ function cleanNodes(value: unknown): PipelineNode[] {
     const position = source.position && typeof source.position === 'object' ? source.position as Record<string, unknown> : {}
     if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) throw new Error(`Card ${id} has an invalid XY position`)
     if (!source.data || typeof source.data !== 'object' || !kinds.has((source.data as Record<string, unknown>).kind as CardKind)) throw new Error(`Card ${id} has an unsupported kind`)
-    return { id, type: 'pipeline', position: { x: Number(position.x), y: Number(position.y) }, data: cleanNodeData(source.data as Record<string, unknown>) }
+    return { id, type: 'pipeline', position: { x: Number(position.x), y: Number(position.y) }, data: cleanNodeData(source.data as Record<string, unknown>, trustHostProof) }
   })
 }
 
@@ -161,8 +167,8 @@ function cleanEdges(value: unknown, nodeIds: Set<string>): Edge[] {
   })
 }
 
-function cleanGraph(nodes: unknown, edges: unknown) {
-  const clean = cleanNodes(nodes)
+function cleanGraph(nodes: unknown, edges: unknown, trustHostProof: boolean) {
+  const clean = cleanNodes(nodes, trustHostProof)
   return { nodes: clean, edges: cleanEdges(edges, new Set(clean.map((node) => node.id))) }
 }
 
@@ -177,17 +183,17 @@ function cleanEvidence(value: unknown): DataHubEvidence[] | undefined {
   })
 }
 
-function cleanVersion(value: unknown, index: number): PipelineVersion {
+function cleanVersion(value: unknown, index: number, trustHostProof: boolean): PipelineVersion {
   if (!value || typeof value !== 'object') throw new Error(`Version ${index + 1} is invalid`)
   const source = value as Record<string, unknown>
-  const graph = cleanGraph(source.nodes, source.edges)
+  const graph = cleanGraph(source.nodes, source.edges, trustHostProof)
   if (typeof source.id !== 'string' || typeof source.label !== 'string' || typeof source.createdAt !== 'string') throw new Error(`Version ${index + 1} metadata is invalid`)
   return { id: source.id.slice(0, 180), label: redactExportText(source.label).slice(0, 180), createdAt: source.createdAt, origin: ['initial', 'agent', 'manual'].includes(String(source.origin)) ? source.origin as PipelineVersion['origin'] : 'manual', nodes: graph.nodes, edges: graph.edges, blockingIssues: Number.isInteger(source.blockingIssues) ? Number(source.blockingIssues) : 0, status: ['committed', 'pending-review', 'rejected'].includes(String(source.status)) ? source.status as PipelineVersion['status'] : 'committed', description: typeof source.description === 'string' ? redactExportText(source.description).slice(0, 4_000) : undefined, evidence: cleanEvidence(source.evidence) }
 }
 
 export function createPipelineExport(projectTitle: string, nodes: PipelineNode[], edges: Edge[], versions: PipelineVersion[]): PipelineExport {
-  const graph = cleanGraph(nodes, edges)
-  return { schema: pipelineExportSchema, schemaVersion: pipelineExportVersion, exportedAt: new Date().toISOString(), projectTitle: redactExportText(projectTitle).slice(0, 180), graph, versions: versions.slice(-20).map((version, index) => cleanVersion(version, index)) }
+  const graph = cleanGraph(nodes, edges, true)
+  return { schema: pipelineExportSchema, schemaVersion: pipelineExportVersion, exportedAt: new Date().toISOString(), projectTitle: redactExportText(projectTitle).slice(0, 180), graph, versions: versions.slice(-20).map((version, index) => cleanVersion(version, index, true)) }
 }
 
 export function parsePipelineExport(serialized: string): PipelineExport {
@@ -200,7 +206,7 @@ export function parsePipelineExport(serialized: string): PipelineExport {
   if (source.schemaVersion !== pipelineExportVersion) throw new Error(`Unsupported DATA LAB schema version ${String(source.schemaVersion)}. This app supports version ${pipelineExportVersion}.`)
   if (!source.graph || typeof source.graph !== 'object') throw new Error('Import is missing its graph')
   const graphSource = source.graph as Record<string, unknown>
-  const graph = cleanGraph(graphSource.nodes, graphSource.edges)
-  const versions = Array.isArray(source.versions) ? source.versions.map(cleanVersion) : []
+  const graph = cleanGraph(graphSource.nodes, graphSource.edges, false)
+  const versions = Array.isArray(source.versions) ? source.versions.map((version, index) => cleanVersion(version, index, false)) : []
   return { schema: pipelineExportSchema, schemaVersion: pipelineExportVersion, exportedAt: typeof source.exportedAt === 'string' ? source.exportedAt : new Date().toISOString(), projectTitle: typeof source.projectTitle === 'string' ? source.projectTitle.slice(0, 180) : 'Imported pipeline', graph, versions }
 }

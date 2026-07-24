@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { customerActivationEdges, customerActivationNodes } from './pipeline'
+import { validatePipeline } from '../validation'
+import { createDataProfileSnapshot } from './data-profile'
+import type { DataHubAssetSummary } from './datahub'
+import { customerActivationEdges, customerActivationNodes, newCard } from './pipeline'
 import { createPipelineExport, parsePipelineExport } from './pipeline-io'
 
 describe('versioned pipeline JSON exchange', () => {
@@ -21,5 +24,29 @@ describe('versioned pipeline JSON exchange', () => {
     const value = createPipelineExport('Broken', [], [], [])
     value.graph.edges.push({ id: 'dangling', source: 'missing', target: 'also-missing' })
     expect(() => parsePipelineExport(JSON.stringify(value))).toThrow('references a missing card')
+  })
+
+  it('does not trust an exported host proof after crossing the import boundary', () => {
+    const asset: DataHubAssetSummary = {
+      urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers,PROD)',
+      name: 'customers', platform: 'snowflake', environment: 'PROD', description: '', owners: ['Data Governance'], domain: '', tags: ['PII'], qualityStatus: 'healthy', upstream: [], downstream: [],
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+      freshness: { capturedAt: '2026-07-24T10:00:00.000Z', expiresAt: '2099-07-24T11:00:00.000Z', stale: false },
+    }
+    const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, owner: 'Data Governance', schema: asset.fields, datahubTags: ['PII'] } }
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: createDataProfileSnapshot(asset) } }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const edges = [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-output', source: profile.id, target: output.id },
+    ]
+    const exported = createPipelineExport('Metadata boundary', [source, profile, output], edges, [])
+    expect(exported.graph.nodes[1].data.profile?.storage.hostVerified).toBe(true)
+
+    const imported = parsePipelineExport(JSON.stringify(exported))
+    expect(imported.graph.nodes[1].data.profile?.storage.hostVerified).toBe(false)
+    expect(validatePipeline(imported.graph.nodes, imported.graph.edges)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'sensitive-unprotected-source-output', severity: 'error' }),
+    ]))
   })
 })
