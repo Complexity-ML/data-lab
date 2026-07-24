@@ -18,7 +18,7 @@ export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
 }
 
 export function shouldOpenCatalogConnectivityIncident(progress: CatalogExplorationProgress) {
-  return progress.state === 'failed' && progress.failed > 0
+  return (progress.state === 'failed' || progress.pauseReason === 'connector_unavailable') && progress.failed > 0
 }
 
 export function isInspectionUnavailable(inspection: CatalogInspection) {
@@ -29,18 +29,34 @@ export function isInspectionUnavailable(inspection: CatalogInspection) {
 export async function inspectWithBoundedRetry(
   urn: string,
   inspect: (urn: string, force?: boolean) => Promise<CatalogInspection>,
+  options: { retryUnavailable?: boolean } = {},
 ) {
   const first = await inspect(urn, false)
-  if (!isInspectionUnavailable(first)) return first
+  if (!isInspectionUnavailable(first) || options.retryUnavailable === false) return first
   return inspect(urn, true)
 }
 
+const clampConcurrency = (value: number) => Math.max(1, Math.min(8, Math.floor(value)))
+
+export function resolveAdaptiveCatalogConcurrency(
+  previous?: CatalogExplorationProgress,
+  initialConcurrency = 4,
+) {
+  if (!previous) return clampConcurrency(initialConcurrency)
+  const current = clampConcurrency(previous.concurrency || initialConcurrency)
+  const failed = previous.batchFailed ?? 0
+  if (previous.pauseReason === 'connector_unavailable' || failed > 0) return Math.max(1, Math.floor(current / 2))
+  if (!previous.batchDurationMs) return current
+  if (previous.batchDurationMs <= 8_000) return Math.min(8, current + 2)
+  if (previous.batchDurationMs >= 15_000) return Math.max(1, current - 1)
+  return current
+}
 export function shouldCallAgentForCatalog(
   previous: CatalogExplorationProgress | undefined,
   current: CatalogExplorationProgress,
   profileRisk = false,
 ) {
-  if (current.state === 'failed') return false
+  if (current.state === 'failed' || current.pauseReason === 'connector_unavailable') return false
   if (current.state === 'complete') return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
@@ -109,7 +125,7 @@ export async function inspectCatalogInParallel(
   } = {},
 ) {
   const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? 4)))
-  const batchSize = Math.max(1, Math.min(32, Math.floor(options.batchSize ?? options.maxInspections ?? (assets.length || 1))))
+  const configuredBatchSize = Math.max(1, Math.min(32, Math.floor(options.batchSize ?? options.maxInspections ?? (assets.length || 1))))
   const inspections: CatalogInspection[] = []
   const previous = new Map((options.previous ?? []).map((checkpoint) => [checkpoint.urn, checkpoint]))
   const reusable = assets.flatMap((asset) => {
@@ -118,12 +134,14 @@ export async function inspectCatalogInParallel(
   })
   const checkpoints: CatalogDatasetCheckpoint[] = [...reusable]
   const pending = assets.filter((asset) => !reusable.some((checkpoint) => checkpoint.urn === asset.urn))
-  const inspectionBudget = Math.max(1, Math.min(batchSize, Math.floor(options.maxInspections ?? batchSize), pending.length || 1))
+  const inspectionBudget = Math.max(1, Math.min(configuredBatchSize, Math.floor(options.maxInspections ?? configuredBatchSize), pending.length || 1))
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
+  let batchDurationMs = 0
+  let batchFailed = 0
 
-  const emit = (state: CatalogExplorationProgress['state']) => {
+  const emit = (state: CatalogExplorationProgress['state'], pauseReason?: CatalogExplorationProgress['pauseReason']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
     // Collection failures and governance gaps are not evidence that the
     // underlying dataset is unhealthy.
@@ -138,12 +156,15 @@ export async function inspectCatalogInParallel(
       incidents,
       governanceGaps,
       concurrency,
-      batchSize,
+      batchSize: configuredBatchSize,
+      batchDurationMs,
+      batchFailed,
       remaining: Math.max(0, assets.length - checkpoints.length),
       mode: options.mode ?? 'catalog',
       cacheMode: options.cacheMode ?? 'prefer',
       phase: state === 'complete' || state === 'paused' || state === 'failed' ? 'checkpoint' : 'inspect',
       state,
+      pauseReason,
       checkpointAt: new Date().toISOString(),
       datasets: orderedCheckpoints(),
     }, [...inspections])
@@ -153,6 +174,7 @@ export async function inspectCatalogInParallel(
   let connectorUnavailable = false
   for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += concurrency) {
     const batch = scheduled.slice(offset, offset + concurrency)
+    const batchStartedAt = Date.now()
     const batchCheckpoints = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
@@ -175,6 +197,8 @@ export async function inspectCatalogInParallel(
         }
       }
     }))
+    batchDurationMs = Math.max(0, Date.now() - batchStartedAt)
+    batchFailed = batchCheckpoints.filter((checkpoint) => checkpoint.status === 'unavailable').length
     checkpoints.push(...batchCheckpoints)
     emit('inspecting')
 
@@ -184,14 +208,20 @@ export async function inspectCatalogInParallel(
     }
   }
   const hasMore = scheduled.length < pending.length
-  const state: CatalogExplorationProgress['state'] = options.isCancelled?.()
+  const cancelled = options.isCancelled?.() === true
+  const state: CatalogExplorationProgress['state'] = cancelled
     ? 'paused'
     : connectorUnavailable
-      ? 'failed'
+      ? 'paused'
       : hasMore
         ? 'inspecting'
         : 'complete'
-  emit(state)
+  const pauseReason: CatalogExplorationProgress['pauseReason'] = cancelled
+    ? 'cancelled'
+    : connectorUnavailable
+      ? 'connector_unavailable'
+      : undefined
+  emit(state, pauseReason)
   return { inspections, progress: {
     query: options.query ?? '*',
     total: assets.length,
@@ -201,12 +231,15 @@ export async function inspectCatalogInParallel(
     incidents: checkpoints.filter(hasDataIncident).length,
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,
     concurrency,
-    batchSize,
+    batchSize: configuredBatchSize,
+    batchDurationMs,
+    batchFailed,
     remaining: Math.max(0, assets.length - checkpoints.length),
     mode: options.mode ?? 'catalog',
     cacheMode: options.cacheMode ?? 'prefer',
     phase: 'checkpoint',
     state,
+    pauseReason,
     checkpointAt: new Date().toISOString(),
     datasets: orderedCheckpoints(),
   } satisfies CatalogExplorationProgress }

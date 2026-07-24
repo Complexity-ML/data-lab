@@ -309,7 +309,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         }
         if (!monitored && catalogExplorer && catalogExplorer.data.exploration?.state !== 'complete' && connectionMode === 'connected') {
           const batchLabel = explorerPolicy?.scope === 'dataset' ? 'the focused dataset' : `the next ${explorerPolicy?.batchSize ?? 8} datasets`
-          setActivity(`Catalog Explorer reading ${batchLabel} with ${explorerPolicy?.scope === 'dataset' ? 1 : explorerPolicy?.concurrency ?? 4} bounded worker(s)…`)
+          setActivity(`Catalog Explorer reading ${batchLabel} with adaptive bounded workers (1–8)…`)
           const previousProgress = catalogExplorer.data.exploration
           let candidates = catalog.assetsFor(catalogExplorer.id)
           if (!candidates.length && explorerPolicy?.scope !== 'dataset') candidates = await searchDataHubAssets('*')
@@ -444,7 +444,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         datahubEvidence = ['No bounded DataHub source matched the prompt. Treat evidence as incomplete and do not modify an unrelated source branch.']
       }
 
-      if (catalogProgress?.state === 'failed' && expectedPlayerSessionId !== undefined) {
+      if ((catalogProgress?.state === 'failed' || catalogProgress?.pauseReason === 'connector_unavailable') && expectedPlayerSessionId !== undefined) {
         queueAutonomousStep('Retry the versioned Catalog Explorer checkpoint after the connector becomes available. Do not call the model until fresh catalog evidence is collected.', expectedPlayerSessionId, 30_000)
         setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total} · connector retry in 30 seconds · model not called`)
         return

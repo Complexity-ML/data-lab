@@ -52,11 +52,14 @@ export interface CatalogExplorationProgress {
   governanceGaps: number
   concurrency: number
   batchSize?: number
+  batchDurationMs?: number
+  batchFailed?: number
   remaining?: number
   mode?: 'dataset' | 'catalog'
   cacheMode?: 'prefer' | 'refresh'
   phase?: 'discover' | 'inspect' | 'checkpoint'
   state: 'idle' | 'discovering' | 'inspecting' | 'complete' | 'paused' | 'failed'
+  pauseReason?: 'cancelled' | 'connector_unavailable'
   checkpointAt: string
   datasets: CatalogDatasetCheckpoint[]
 }

@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { hasDataIncident, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, resolveAdaptiveCatalogConcurrency, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -17,8 +17,9 @@ export function useCatalogExplorer(options: {
   const catalogAssets = useRef(new Map<string, DataHubAssetSummary[]>())
   const updateProgress = useCallback((explorer: PipelineNode, progress: CatalogExplorationProgress, isCurrent: () => boolean) => {
     if (!isCurrent()) return
+    const connectorPaused = progress.pauseReason === 'connector_unavailable'
     const scopeLabel = progress.mode === 'dataset' ? 'Focused dataset audit' : 'Connected-catalog audit'
-    const phase = progress.state === 'failed' ? `${scopeLabel} paused` : progress.state === 'complete' ? `${scopeLabel} complete` : `${scopeLabel} running`
+    const phase = progress.state === 'failed' || connectorPaused ? `${scopeLabel} paused for connector recovery` : progress.state === 'complete' ? `${scopeLabel} complete` : `${scopeLabel} running`
     setNodes((current) => current.map((node) => node.id === explorer.id ? {
       ...node,
       data: {
@@ -26,12 +27,12 @@ export function useCatalogExplorer(options: {
         exploration: progress,
         description: `${phase} · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? Math.max(0, progress.total - progress.inspected)} queued · ${progress.concurrency} worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s) · ${progress.failed} connector read(s) unavailable.`,
         status: progress.state === 'failed' || progress.failed > 0 ? 'warning' : progress.state === 'complete' ? 'healthy' : 'draft',
-        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'stopped' : progress.state === 'failed' ? 'failed' : 'running',
+        runState: progress.state === 'complete' ? 'completed' : progress.state === 'paused' ? 'waiting' : progress.state === 'failed' ? 'failed' : 'running',
       },
     } : node))
-    setActivity(progress.state === 'failed'
-      ? `Catalog Explorer paused · catalog connection unavailable after ${progress.inspected}/${progress.total || '?'} inspections`
-      : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? 0} queued · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s)`)
+    setActivity(progress.state === 'failed' || connectorPaused
+      ? `Catalog Explorer checkpoint saved · connector unavailable after ${progress.inspected}/${progress.total || '?'} inspections · retry scheduled`
+      : `Catalog Explorer · ${progress.inspected}/${progress.total || '?'} inspected · ${progress.remaining ?? 0} queued · ${progress.concurrency} adaptive worker(s) · ${progress.incidents} data incident(s) · ${progress.governanceGaps} governance gap(s)`)
   }, [setActivity, setNodes])
 
   const explore = useCallback(async (input: {
@@ -63,6 +64,10 @@ export function useCatalogExplorer(options: {
     const assets = focusedAsset ? [focusedAsset] : input.assets
     catalogAssets.current.set(input.explorer.id, assets)
     const previousProgress = input.explorer.data.exploration
+    const configuredConcurrency = policy.scope === 'dataset' ? 1 : policy.concurrency
+    const concurrency = policy.scope === 'dataset'
+      ? 1
+      : resolveAdaptiveCatalogConcurrency(previousProgress, configuredConcurrency)
     updateProgress(input.explorer, {
       query: input.query,
       total: assets.length,
@@ -71,7 +76,7 @@ export function useCatalogExplorer(options: {
       failed: previousProgress?.failed ?? 0,
       incidents: previousProgress?.incidents ?? 0,
       governanceGaps: previousProgress?.governanceGaps ?? 0,
-      concurrency: policy.scope === 'dataset' ? 1 : policy.concurrency,
+      concurrency,
       batchSize: policy.scope === 'dataset' ? 1 : policy.batchSize,
       remaining: Math.max(0, assets.length - (previousProgress?.inspected ?? 0)),
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
@@ -83,9 +88,12 @@ export function useCatalogExplorer(options: {
     }, input.isCurrent)
 
     const explored = await inspectCatalogInParallel(assets, async (urn) => {
+      // A failed catalog read is retried from the versioned checkpoint. Repeating
+      // the whole four-tool inspection immediately can double a 20-second MCP
+      // timeout and amplify an already overloaded connector.
       const inspection = policy.cacheMode === 'refresh'
         ? await inspectAsset(urn, true)
-        : await inspectWithBoundedRetry(urn, inspectAsset)
+        : await inspectWithBoundedRetry(urn, inspectAsset, { retryUnavailable: policy.scope === 'dataset' })
       return {
         asset: inspection.asset,
         evidence: inspection.evidence.map((read) => ({
@@ -100,7 +108,7 @@ export function useCatalogExplorer(options: {
         })),
       }
     }, {
-      concurrency: policy.scope === 'dataset' ? 1 : policy.concurrency,
+      concurrency,
       batchSize: policy.scope === 'dataset' ? 1 : policy.batchSize,
       cacheMode: policy.cacheMode,
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
@@ -203,7 +211,7 @@ export function useCatalogExplorer(options: {
       evidence,
       progress: explored.progress,
       summaries: [
-        `Catalog Explorer checkpoint ${explored.progress.inspected}/${explored.progress.total}; ${explored.progress.incidents} data incidents, ${explored.progress.governanceGaps} governance gaps and ${explored.progress.failed} unavailable reads. Continue from the versioned checkpoint in the next atomic iteration.`,
+        `Catalog Explorer checkpoint ${explored.progress.inspected}/${explored.progress.total}; ${explored.progress.incidents} data incidents, ${explored.progress.governanceGaps} governance gaps and ${explored.progress.failed} unavailable reads. Last batch used ${explored.progress.concurrency} workers in ${explored.progress.batchDurationMs ?? 0}ms. Continue from the versioned checkpoint in the next atomic iteration.`,
         ...explored.inspections.slice(0, 4).map((inspection) => {
           const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)!
           return `${dataset.name} · ${dataset.status} · fields=${dataset.fieldCount} · owners=${dataset.ownerCount} · upstream=${dataset.upstreamCount} · downstream=${dataset.downstreamCount} · issues=${dataset.issues.join(', ') || 'none'}`

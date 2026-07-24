@@ -66,6 +66,7 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     ? source.state as CatalogExplorationProgress['state']
     : 'idle'
   const bounded = (field: string, maximum = 100_000) => Math.max(0, Math.min(maximum, Number.isInteger(source[field]) ? Number(source[field]) : 0))
+  const legacyConnectorPause = state === 'failed' && bounded('total') > 0 && bounded('inspected') > 0 && bounded('failed') > 0
   const datasets = Array.isArray(source.datasets) ? source.datasets.slice(0, 2_000).flatMap((value) => {
     if (!value || typeof value !== 'object') return []
     const item = value as Record<string, unknown>
@@ -97,11 +98,16 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     governanceGaps: bounded('governanceGaps'),
     concurrency: Math.max(1, Math.min(16, bounded('concurrency', 16) || 4)),
     batchSize: Math.max(1, Math.min(32, bounded('batchSize', 32) || 8)),
+    batchDurationMs: bounded('batchDurationMs', 300_000) || undefined,
+    batchFailed: bounded('batchFailed', 32),
     remaining: bounded('remaining'),
     mode: source.mode === 'dataset' ? 'dataset' : 'catalog',
     cacheMode: source.cacheMode === 'refresh' ? 'refresh' : 'prefer',
     phase: ['discover', 'inspect', 'checkpoint'].includes(String(source.phase)) ? source.phase as CatalogExplorationProgress['phase'] : 'checkpoint',
-    state,
+    state: legacyConnectorPause ? 'paused' : state,
+    pauseReason: source.pauseReason === 'cancelled' || source.pauseReason === 'connector_unavailable'
+      ? source.pauseReason
+      : legacyConnectorPause ? 'connector_unavailable' : undefined,
     checkpointAt: typeof source.checkpointAt === 'string' ? source.checkpointAt : new Date(0).toISOString(),
     datasets,
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { checkpointForInspection, inspectCatalogInParallel, inspectWithBoundedRetry, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -91,7 +91,7 @@ describe('Catalog Explorer', () => {
     })
   })
 
-  it('opens the connector circuit after a complete unavailable batch', async () => {
+  it('pauses the connector circuit after a complete unavailable batch and preserves the checkpoint', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     const inspect = vi.fn(async () => { throw new Error('MCP unavailable') })
 
@@ -103,7 +103,8 @@ describe('Catalog Explorer', () => {
       inspected: 4,
       failed: 4,
       incidents: 0,
-      state: 'failed',
+      state: 'paused',
+      pauseReason: 'connector_unavailable',
     })
   })
 
@@ -145,7 +146,49 @@ describe('Catalog Explorer', () => {
     expect(unavailableInspect).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the connector circuit after a later unavailable batch', async () => {
+  it('defers unavailable catalog retries to the next versioned checkpoint', async () => {
+    const value = asset(1)
+    const unavailable = {
+      asset: value,
+      evidence: [{
+        ...inspection(value).evidence[0]!,
+        status: 'error' as const,
+        stale: true,
+      }],
+    }
+    const inspect = vi.fn(async () => unavailable)
+
+    expect(await inspectWithBoundedRetry(value.urn, inspect, { retryUnavailable: false })).toEqual(unavailable)
+    expect(inspect).toHaveBeenCalledTimes(1)
+  })
+
+  it('adapts workers between one and eight from batch latency and failures', () => {
+    const base = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 4,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      batchSize: 4,
+      batchDurationMs: 4_000,
+      batchFailed: 0,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(resolveAdaptiveCatalogConcurrency()).toBe(4)
+    expect(resolveAdaptiveCatalogConcurrency(base)).toBe(6)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 7 })).toBe(8)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchDurationMs: 20_000 })).toBe(3)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchFailed: 1 })).toBe(2)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(1)
+  })
+
+  it('pauses the connector circuit after a later unavailable batch', async () => {
     const assets = Array.from({ length: 12 }, (_, index) => asset(index))
     let calls = 0
     const inspect = vi.fn(async (urn: string) => {
@@ -162,7 +205,8 @@ describe('Catalog Explorer', () => {
       inspected: 8,
       failed: 4,
       incidents: 0,
-      state: 'failed',
+      state: 'paused',
+      pauseReason: 'connector_unavailable',
     })
   })
 
@@ -220,6 +264,28 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 8 }, true)).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, inspected: 12, state: 'complete' })).toBe(true)
     expect(shouldCallAgentForCatalog(base, { ...base, state: 'failed', failed: 4 })).toBe(false)
+    expect(shouldCallAgentForCatalog(base, { ...base, state: 'paused', pauseReason: 'connector_unavailable', failed: 4 })).toBe(false)
+  })
+
+  it('opens a connector incident only after the catalog circuit actually fails', () => {
+    const base = {
+      query: '*',
+      total: 67,
+      discovered: 67,
+      inspected: 4,
+      failed: 2,
+      incidents: 0,
+      governanceGaps: 2,
+      concurrency: 4,
+      state: 'inspecting' as const,
+      checkpointAt: capturedAt,
+      datasets: [],
+    }
+
+    expect(shouldOpenCatalogConnectivityIncident(base)).toBe(false)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'failed' })).toBe(true)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(true)
+    expect(shouldOpenCatalogConnectivityIncident({ ...base, state: 'paused', pauseReason: 'cancelled' })).toBe(false)
   })
 
   it('opens a connector incident only after the catalog circuit actually fails', () => {
