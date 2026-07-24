@@ -247,6 +247,32 @@ export function findOpenPipelinePosition(nodes: PipelineNode[]): Position {
 }
 
 /**
+ * Returns the complete business components touched by an incremental agent
+ * transaction. Feedback links participate in component membership but are
+ * ignored later when topology ranks are calculated.
+ */
+export function connectedLayoutNodeIds(nodes: PipelineNode[], edges: Edge[], seedIds: Iterable<string>): Set<string> {
+  const existing = new Set(nodes.map((node) => node.id))
+  const neighbours = new Map(nodes.map((node) => [node.id, new Set<string>()]))
+  for (const edge of edges) {
+    if (!existing.has(edge.source) || !existing.has(edge.target)) continue
+    neighbours.get(edge.source)?.add(edge.target)
+    neighbours.get(edge.target)?.add(edge.source)
+  }
+  const selected = new Set([...seedIds].filter((id) => existing.has(id)))
+  const queue = [...selected]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const neighbour of neighbours.get(current) ?? []) {
+      if (selected.has(neighbour)) continue
+      selected.add(neighbour)
+      queue.push(neighbour)
+    }
+  }
+  return selected
+}
+
+/**
  * Topology-aware XY placement adapted from LABO AI for left-to-right lineage.
  * Pass nodeIds to arrange only agent-created cards while preserving user work.
  */

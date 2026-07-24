@@ -450,11 +450,13 @@ describe('visual pipeline workspace regressions', () => {
     expect(actionsSticker.querySelector('em')).toBeNull()
     await user.click(actionsSticker)
     expect(screen.getByRole('button', { name: 'Close agent actions' }).closest('#data-lab-left-panel')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Agent actions content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Open card library' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open live logs' }))
     expect(screen.getByRole('button', { name: 'Close live logs' }).closest('#data-lab-left-panel')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Live activity content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByText('Simple session timeline · newest first')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
@@ -465,6 +467,25 @@ describe('visual pipeline workspace regressions', () => {
     const inspectorSticker = screen.getByRole('button', { name: 'Open inspector' })
     expect(inspectorSticker.children[0]?.textContent).toBe('Inspector')
     expect(inspectorSticker.children[1]?.tagName.toLowerCase()).toBe('svg')
+  })
+
+  it('returns from a risk card inspector to the preserved Risks panel', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByTitle('Click to add or drag Risk Assessment onto the canvas'))
+    await user.click(screen.getByRole('button', { name: 'Open impact and risks' }))
+    await user.click(screen.getByRole('tab', { name: 'General' }))
+    const riskScroller = screen.getByRole('region', { name: 'Impact and risks content' })
+    Object.defineProperty(riskScroller, 'scrollTop', { configurable: true, value: 96, writable: true })
+    riskScroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+    await user.click(screen.getByRole('button', { name: 'Inspect New Risk Assessment' }))
+
+    expect(screen.getByRole('button', { name: 'Back to Risks' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Back to Risks' }))
+    expect(screen.getByRole('heading', { name: 'Impact & Risks' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('region', { name: 'Impact and risks content' }).scrollTop).toBe(96)
   })
 
   it('shows one Reports badge per unresolved incident rather than per event', async () => {

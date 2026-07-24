@@ -10,8 +10,9 @@ import type { AtomicPipelineRun } from './domain/atomic-execution'
 import { isAgentActionActivity } from './domain/activity'
 import { recordDiagnostic } from './domain/diagnostics'
 import { layoutPipeline } from './domain/layout'
-import { initialEdges, initialNodes, type AgentProposal, type PipelineNode } from './domain/pipeline'
+import { initialEdges, initialNodes, pruneOrphanedCards, type AgentProposal, type PipelineNode } from './domain/pipeline'
 import { collectRiskImpactOverview, type RiskImpactItem } from './domain/risk-impact'
+import type { RiskDomain } from './domain/risk-assessment'
 import { useLanguage } from './i18n'
 import { useAiConnections } from './hooks/useAiConnections'
 import { useAppTheme } from './hooks/useAppTheme'
@@ -58,12 +59,16 @@ export default function App() {
   const [leftOperationsPanel, setLeftOperationsPanel] = useState<'actions' | 'logs'>()
   const [reportsOpen, setReportsOpen] = useState(false)
   const [risksOpen, setRisksOpen] = useState(false)
+  const [riskDomain, setRiskDomain] = useState<'all' | RiskDomain>('all')
+  const [inspectorReturn, setInspectorReturn] = useState<'risks'>()
   const [nativeFullscreen, setNativeFullscreen] = useState(false)
   const [projectTitle, setProjectTitle] = useState('Untitled pipeline')
   const [activity, setActivity] = useState('Empty workspace · add a card or load an example from Settings')
   const [actionHistory, setActionHistory] = useState<AgentActionLog[]>([])
   const activeAtomicRun = useRef<AtomicPipelineRun | undefined>(undefined)
   const agentRunId = useRef(0)
+  const previousPlayerState = useRef<'stopped' | 'paused' | 'running'>('stopped')
+  const riskScrollPosition = useRef(0)
   const resumePlayerAfterReview = useRef(false)
   const resolveAtomicReview = useAtomicReviewResolver(activeAtomicRun)
 
@@ -245,6 +250,12 @@ export default function App() {
     return window.dataLab.onWindowStateChanged((state) => setNativeFullscreen(state.fullscreen))
   }, [])
   useEffect(() => {
+    const started = player.playerState === 'running' && previousPlayerState.current !== 'running'
+    previousPlayerState.current = player.playerState
+    if (!started) return
+    setNodes((current) => pruneOrphanedCards(current, edges))
+  }, [edges, player.playerState, setNodes])
+  useEffect(() => {
     if (!window.dataLab) return
     return window.dataLab.onHumanReviewOpened(({ versionId }) => {
       setRequestedVersionId(versionId)
@@ -424,22 +435,22 @@ export default function App() {
         onNodeContextMenu={(event, node) => { event.preventDefault(); setSelectedId(node.id); setContextMenu({ nodeId: node.id, label: node.data.label, x: event.clientX, y: event.clientY }) }}
         onNodesChange={onNodesChange}
         onOpenActions={() => { setLibraryOpen(false); setLeftOperationsPanel('actions') }}
-        onOpenInspector={() => { setReportsOpen(false); setRisksOpen(false); setInspectorOpen(true) }}
+        onOpenInspector={() => { setReportsOpen(false); setRisksOpen(false); setInspectorReturn(undefined); setInspectorOpen(true) }}
         onOpenLibrary={() => { setLeftOperationsPanel(undefined); setLibraryOpen(true) }}
         onOpenLogs={() => { setLibraryOpen(false); setLeftOperationsPanel('logs') }}
-        onOpenReports={() => { setInspectorOpen(false); setRisksOpen(false); setReportsOpen(true) }}
-        onOpenRisks={() => { setInspectorOpen(false); setReportsOpen(false); setRisksOpen(true) }}
+        onOpenReports={() => { setInspectorOpen(false); setRisksOpen(false); setInspectorReturn(undefined); setReportsOpen(true) }}
+        onOpenRisks={() => { setInspectorOpen(false); setReportsOpen(false); setInspectorReturn(undefined); setRisksOpen(true) }}
         onPaneClick={() => setContextMenu(undefined)}
         onSelectNode={setSelectedId}
         theme={theme}
       />
 
       {risksOpen
-        ? <aside aria-label="Impact and risks" className="inspector-panel operations-panel" id="data-lab-risks"><RiskImpactView correctionBusy={player.agentRunning} onClose={() => setRisksOpen(false)} onProposeCorrection={proposeRiskCorrection} onSelectCard={(nodeId) => { setSelectedId(nodeId); setRisksOpen(false); setInspectorOpen(true) }} overview={riskOverview} /></aside>
+        ? <aside aria-label="Impact and risks" className="inspector-panel operations-panel" id="data-lab-risks"><RiskImpactView correctionBusy={player.agentRunning} domain={riskDomain} onClose={() => setRisksOpen(false)} onDomainChange={setRiskDomain} onProposeCorrection={proposeRiskCorrection} onSelectCard={(nodeId) => { setSelectedId(nodeId); setRisksOpen(false); setInspectorReturn('risks'); setInspectorOpen(true) }} overview={riskOverview} scrollPosition={riskScrollPosition} /></aside>
         : reportsOpen
-          ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
+          ? <aside aria-label="Incident reports" className="inspector-panel operations-panel" id="data-lab-reports"><IncidentReportsView events={incidents.events} incidents={incidents.summaries} onClose={() => setReportsOpen(false)} onOpenProposal={() => setProposalReviewOpen(true)} onSelectCard={(nodeId) => { setSelectedId(nodeId); setReportsOpen(false); setInspectorReturn(undefined); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} /></aside>
         : <aside aria-hidden={!inspectorOpen} aria-label="Card inspector" className={`inspector-panel ${inspectorOpen ? '' : 'is-closed'}`} id="data-lab-inspector" inert={!inspectorOpen} tabIndex={-1}>
-          <CardInspectorView dataHubConnected={dataHub.catalogConnectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBindDataHubSource={pipeline.bindDataHubSource} onClose={() => setInspectorOpen(false)} onFocusDiagram={pipeline.focusIncidentDiagram} onInspectDataHubAsset={dataHub.inspectAsset} onOpenDataHubSettings={() => { setSettingsSection('connections'); setSettingsOpen(true) }} onSearchDataHub={dataHub.searchAssets} onSelectNode={setSelectedId} onUpdate={pipeline.updateSelected} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => (node.data.assetRef ?? node.data.datahubUrn) ? [[node.data.assetRef ?? node.data.datahubUrn!, { nodeId: node.id, label: node.data.label }]] : []))} />
+          <CardInspectorView dataHubConnected={dataHub.catalogConnectionMode === 'connected'} errorCount={errors.length} issues={issues} onAgentRework={reworkSelectedWithAgent} onBack={inspectorReturn === 'risks' ? () => { setInspectorOpen(false); setInspectorReturn(undefined); setRisksOpen(true) } : undefined} onBindDataHubSource={pipeline.bindDataHubSource} onClose={() => { setInspectorReturn(undefined); setInspectorOpen(false) }} onFocusDiagram={pipeline.focusIncidentDiagram} onInspectDataHubAsset={dataHub.inspectAsset} onOpenDataHubSettings={() => { setSettingsSection('connections'); setSettingsOpen(true) }} onSearchDataHub={dataHub.searchAssets} onSelectNode={setSelectedId} onUpdate={pipeline.updateSelected} returnLabel={inspectorReturn === 'risks' ? 'Risks' : undefined} selected={selected} workbenchAssets={Object.fromEntries(nodes.flatMap((node) => (node.data.assetRef ?? node.data.datahubUrn) ? [[node.data.assetRef ?? node.data.datahubUrn!, { nodeId: node.id, label: node.data.label }]] : []))} />
         </aside>}
     </section>
 

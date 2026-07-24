@@ -48,30 +48,31 @@ export function ElasticRoutingProvider({ children, nodes }: { children: ReactNod
 }
 
 export function elasticHorizontalPath(sourceX: number, sourceY: number, targetX: number, targetY: number) {
-  const direction = targetX >= sourceX ? 1 : -1
-  const lead = endpointLead * direction
   const distanceX = Math.abs(targetX - sourceX)
   // Horizontal adaptation of LABO AI's elastic cable: tension follows the
   // primary axis only, so a tall branch does not produce a huge sideways arc.
-  const tension = Math.max(34, distanceX * 0.42)
-  const sourceControl = sourceX + tension * direction
-  const targetControl = targetX - tension * direction
-  return `M ${sourceX} ${sourceY} L ${sourceX + lead} ${sourceY} C ${sourceControl} ${sourceY}, ${targetControl} ${targetY}, ${targetX - lead} ${targetY} L ${targetX} ${targetY}`
+  // Handles keep their semantic orientation even after manual repositioning:
+  // always leave a right-side source to the right and approach a left-side
+  // target from the left. Backward and vertical links therefore form a small
+  // elastic S instead of escaping into a giant square lane.
+  const tension = Math.max(42, Math.min(180, distanceX * 0.42))
+  const sourceLeadX = sourceX + endpointLead
+  const targetLeadX = targetX - endpointLead
+  return `M ${sourceX} ${sourceY} L ${sourceLeadX} ${sourceY} C ${sourceX + tension} ${sourceY}, ${targetX - tension} ${targetY}, ${targetLeadX} ${targetY} L ${targetX} ${targetY}`
 }
 
-export function elasticFeedbackPath(sourceX: number, sourceY: number, targetX: number, targetY: number) {
+export function elasticFeedbackPath(sourceX: number, sourceY: number, targetX: number, targetY: number, forcedRouteY?: number) {
   const lead = endpointLead
   // Handles sit near the vertical center of cards that can reach 192 px tall.
   // Clear the half-height plus a visible margin before turning the loop.
-  const routeY = Math.max(sourceY, targetY) + feedbackClearance
+  const routeY = forcedRouteY ?? Math.max(sourceY, targetY) + feedbackClearance
   const midpointX = (sourceX + targetX) / 2
   return `M ${sourceX} ${sourceY} L ${sourceX + lead} ${sourceY} C ${sourceX + 72} ${sourceY}, ${sourceX + 72} ${routeY}, ${midpointX} ${routeY} C ${targetX - 72} ${routeY}, ${targetX - 72} ${targetY}, ${targetX - lead} ${targetY} L ${targetX} ${targetY}`
 }
 
 function intersectsCableCorridor(obstacle: ElasticObstacle, options: ElasticRouteOptions) {
-  const direction = options.targetX >= options.sourceX ? 1 : -1
-  const lead = endpointLead * direction
-  const tension = Math.max(34, Math.abs(options.targetX - options.sourceX) * 0.42)
+  const lead = endpointLead
+  const tension = Math.max(42, Math.min(180, Math.abs(options.targetX - options.sourceX) * 0.42))
   const points = [
     { x: options.sourceX, y: options.sourceY },
     ...Array.from({ length: 31 }, (_, index) => {
@@ -79,8 +80,8 @@ function intersectsCableCorridor(obstacle: ElasticObstacle, options: ElasticRout
       const inverse = 1 - t
       return {
         x: inverse ** 3 * (options.sourceX + lead)
-          + 3 * inverse ** 2 * t * (options.sourceX + tension * direction)
-          + 3 * inverse * t ** 2 * (options.targetX - tension * direction)
+          + 3 * inverse ** 2 * t * (options.sourceX + tension)
+          + 3 * inverse * t ** 2 * (options.targetX - tension)
           + t ** 3 * (options.targetX - lead),
         y: inverse ** 3 * options.sourceY
           + 3 * inverse ** 2 * t * options.sourceY
@@ -118,67 +119,7 @@ function routedCablePath(options: ElasticRouteOptions, routeY: number) {
   ].join(' ')
 }
 
-function verticalReturnCablePath(
-  options: ElasticRouteOptions,
-  sourceObstacle?: ElasticObstacle,
-  targetObstacle?: ElasticObstacle,
-) {
-  const { sourceX, sourceY, targetX, targetY } = options
-  const verticalDirection = targetY >= sourceY ? -1 : 1
-  const sourceBoundaryY = verticalDirection < 0
-    ? (sourceObstacle?.y ?? sourceY) - obstacleClearance
-    : (sourceObstacle ? sourceObstacle.y + sourceObstacle.height : sourceY) + obstacleClearance
-  const laneX = Math.min(
-    sourceObstacle?.x ?? sourceX,
-    targetObstacle?.x ?? targetX,
-    sourceX,
-    targetX,
-  ) - obstacleClearance
-  const leadX = sourceX + endpointLead
-  const targetLeadX = targetX - endpointLead
-  const curve = 18
-  const turnY = sourceBoundaryY
-  const approachDirection = targetY >= turnY ? 1 : -1
-
-  // A right-side source handle and a left-side target handle cannot be joined
-  // monotonically when both handles share the same X. Leave the source card,
-  // clear it vertically, use a lane to the left of both cards, then approach
-  // the target from its expected side. This keeps manual vertical/diagonal
-  // placements visible instead of hiding the cable under either endpoint.
-  return [
-    `M ${sourceX} ${sourceY}`,
-    `L ${leadX} ${sourceY}`,
-    `C ${leadX + curve} ${sourceY}, ${leadX + curve} ${turnY}, ${leadX} ${turnY}`,
-    `L ${laneX + curve} ${turnY}`,
-    `C ${laneX} ${turnY}, ${laneX} ${turnY + curve * approachDirection}, ${laneX} ${turnY + curve * approachDirection}`,
-    `L ${laneX} ${targetY - curve * approachDirection}`,
-    `C ${laneX} ${targetY}, ${laneX + curve} ${targetY}, ${laneX + curve} ${targetY}`,
-    `L ${targetLeadX} ${targetY}`,
-    `L ${targetX} ${targetY}`,
-  ].join(' ')
-}
-
 export function routeElasticCable(options: ElasticRouteOptions): ElasticRoute {
-  const sourceObstacle = options.obstacles?.find((obstacle) => obstacle.id === options.sourceId)
-  const targetObstacle = options.obstacles?.find((obstacle) => obstacle.id === options.targetId)
-  const nearVerticalReturn = !options.feedback
-    && Math.abs(options.targetX - options.sourceX) < 96
-    && Math.abs(options.targetY - options.sourceY) > 96
-  if (nearVerticalReturn) {
-    const laneX = Math.min(
-      sourceObstacle?.x ?? options.sourceX,
-      targetObstacle?.x ?? options.targetX,
-      options.sourceX,
-      options.targetX,
-    ) - obstacleClearance
-    return {
-      path: verticalReturnCablePath(options, sourceObstacle, targetObstacle),
-      labelX: laneX,
-      labelY: (options.sourceY + options.targetY) / 2,
-      routedAroundObstacle: true,
-    }
-  }
-
   const obstacles = (options.obstacles ?? []).filter((obstacle) => (
     obstacle.id !== options.sourceId
     && obstacle.id !== options.targetId
@@ -222,7 +163,9 @@ export function routeElasticCable(options: ElasticRouteOptions): ElasticRoute {
       ? above
       : below
   return {
-    path: routedCablePath(options, routeY),
+    path: options.feedback
+      ? elasticFeedbackPath(options.sourceX, options.sourceY, options.targetX, options.targetY, routeY)
+      : routedCablePath(options, routeY),
     labelX: midpointX,
     labelY: routeY,
     routedAroundObstacle: true,

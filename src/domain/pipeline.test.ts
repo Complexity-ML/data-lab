@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { validatePipeline } from '../validation'
 import { governanceProposalFixture } from '../test/fixtures/agent-proposals'
-import { applyProposal, customerActivationEdges, customerActivationNodes, initialEdges as blankEdges, initialNodes as blankNodes } from './pipeline'
+import { applyProposal, customerActivationEdges, customerActivationNodes, initialEdges as blankEdges, initialNodes as blankNodes, newCard, pruneOrphanedCards } from './pipeline'
 
 const initialNodes = customerActivationNodes
 const initialEdges = customerActivationEdges
@@ -40,5 +40,19 @@ describe('pipeline validation', () => {
     expect(proposal.addedNodes).toEqual([])
     expect(proposal.removedEdgeIds).toEqual([])
     expect(proposal.updatedNodes[0].patch.kind).toBe('review')
+  })
+
+  it('removes a disconnected duplicate while preserving starter sidecars and unique drafts', () => {
+    const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, datahubUrn: 'urn:orders' } }
+    const connectedProfile = { ...newCard('profile', 1), id: 'profile-connected', data: { ...newCard('profile', 1).data, datahubUrn: 'urn:orders' } }
+    const duplicateProfile = { ...newCard('profile', 2), id: 'profile-orphan', data: { ...newCard('profile', 2).data, datahubUrn: 'urn:orders' } }
+    const uniqueDraft = { ...newCard('review', 3), id: 'unique-draft' }
+    const control = { ...newCard('control', 4), id: 'control' }
+    const next = pruneOrphanedCards(
+      [control, source, connectedProfile, duplicateProfile, uniqueDraft],
+      [{ id: 'source-profile', source: source.id, target: connectedProfile.id }],
+    )
+
+    expect(next.map((node) => node.id)).toEqual(['control', 'source', 'profile-connected', 'unique-draft'])
   })
 })

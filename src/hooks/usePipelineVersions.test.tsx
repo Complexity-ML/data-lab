@@ -99,7 +99,7 @@ describe('agent proposal approval', () => {
     expect(result.current.versions.at(-1)?.nodes.find((node) => node.id === review.id)?.data.runState).toBe('completed')
   })
 
-  it('preserves existing XY positions while placing newly approved cards in open space', () => {
+  it('reflows the complete touched branch into stable topology without overlaps', () => {
     const existing = { ...source, position: { x: 620, y: 340 }, measured: { width: 232, height: 360 } }
     const addedReview = { ...review, id: 'new-review', position: { x: 620, y: 340 } }
     const output: PipelineNode = {
@@ -121,9 +121,13 @@ describe('agent proposal approval', () => {
     act(() => { result.current.recordPendingReview(incremental) })
     act(() => { result.current.approveProposal() })
 
-    expect(result.current.nodes.find((node) => node.id === existing.id)?.position).toEqual(existing.position)
-    expect(result.current.nodes.find((node) => node.id === addedReview.id)?.position).not.toEqual(existing.position)
-    expect(result.current.nodes.find((node) => node.id === output.id)?.position).not.toEqual(existing.position)
+    const sourcePosition = result.current.nodes.find((node) => node.id === existing.id)!.position
+    const reviewPosition = result.current.nodes.find((node) => node.id === addedReview.id)!.position
+    const outputPosition = result.current.nodes.find((node) => node.id === output.id)!.position
+    expect(sourcePosition).not.toEqual(existing.position)
+    expect(sourcePosition.x).toBeLessThan(reviewPosition.x)
+    expect(reviewPosition.x).toBeLessThan(outputPosition.x)
+    expect(new Set(result.current.nodes.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(3)
   })
 
   it('discards an atomically invalid implementation while preserving it in history for agent repair', () => {

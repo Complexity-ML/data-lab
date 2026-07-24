@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { elasticFeedbackPath, elasticHorizontalPath, routeElasticCable } from '../components/shared/ElasticEdge'
-import { layoutPipeline } from './layout'
+import { connectedLayoutNodeIds, layoutPipeline } from './layout'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from './pipeline'
 
 describe('pipeline XY layout', () => {
@@ -85,7 +85,7 @@ describe('pipeline XY layout', () => {
     expect(route.path.match(/ C /g)).toHaveLength(1)
   })
 
-  it('keeps a visible cable when vertically separated endpoint handles share the same X', () => {
+  it('keeps a compact elastic cable when vertically separated endpoint handles share the same X', () => {
     const route = routeElasticCable({
       sourceId: 'source',
       sourceX: 503,
@@ -99,11 +99,11 @@ describe('pipeline XY layout', () => {
       ],
     })
 
-    expect(route.routedAroundObstacle).toBe(true)
-    expect(route.labelX).toBeLessThan(115)
+    expect(route.routedAroundObstacle).toBe(false)
+    expect(route.labelX).toBe(503)
     expect(route.path).toMatch(/^M 503 633 /)
     expect(route.path).toMatch(/L 503 311$/)
-    expect(route.path.match(/ C /g)).toHaveLength(3)
+    expect(route.path.match(/ C /g)).toHaveLength(1)
   })
 
   it('routes feedback below the tallest card in the iteration', () => {
@@ -269,5 +269,30 @@ describe('pipeline XY layout', () => {
     expect(arranged.find((node) => node.id === output.id)!.position).toEqual(output.position)
     expect(placedTransform.position.x).toBeGreaterThan(source.position.x + 232)
     expect(placedTransform.position.x + 232).toBeLessThan(output.position.x)
+  })
+
+  it('reflows the complete touched business component after an agent correction', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const profile = { ...newCard('profile', 1), id: 'profile' }
+    const risk = { ...newCard('risk', 2), id: 'risk' }
+    const review = { ...newCard('review', 3), id: 'review' }
+    const output = { ...newCard('output', 4), id: 'output' }
+    const detached = { ...newCard('analysis', 5), id: 'detached' }
+    const edges = [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-risk', source: profile.id, target: risk.id },
+      { id: 'risk-review', source: risk.id, target: review.id },
+      { id: 'review-output', source: review.id, target: output.id },
+    ]
+    const touched = connectedLayoutNodeIds([source, profile, risk, review, output, detached], edges, [risk.id])
+
+    expect([...touched]).toEqual(expect.arrayContaining(['source', 'profile', 'risk', 'review', 'output']))
+    expect(touched.has(detached.id)).toBe(false)
+    const arranged = layoutPipeline([source, profile, risk, review, output, detached], edges, touched)
+    const byId = new Map(arranged.map((node) => [node.id, node.position.x]))
+    expect(byId.get('source')!).toBeLessThan(byId.get('profile')!)
+    expect(byId.get('profile')!).toBeLessThan(byId.get('risk')!)
+    expect(byId.get('risk')!).toBeLessThan(byId.get('review')!)
+    expect(byId.get('review')!).toBeLessThan(byId.get('output')!)
   })
 })

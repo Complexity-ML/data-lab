@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Focus, PanelRightClose, Sparkles } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, Focus, PanelRightClose, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
@@ -22,13 +22,15 @@ interface CardInspectorViewProps {
   onOpenDataHubSettings(): void
   onSearchDataHub(query: string): Promise<DataHubAssetSummary[]>
   onAgentRework(): void
+  onBack?(): void
   onClose(): void
   onFocusDiagram(nodeId: string): void
   onSelectNode(nodeId: string): void
   onUpdate(patch: Partial<PipelineNode['data']>): void
+  returnLabel?: string
 }
 
-export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBindDataHubSource, onClose, onFocusDiagram, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, selected, workbenchAssets }: CardInspectorViewProps) {
+export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgentRework, onBack, onBindDataHubSource, onClose, onFocusDiagram, onInspectDataHubAsset, onOpenDataHubSettings, onSearchDataHub, onSelectNode, onUpdate, returnLabel, selected, workbenchAssets }: CardInspectorViewProps) {
   const [lineageExpanded, setLineageExpanded] = useState(false)
   useEffect(() => setLineageExpanded(false), [selected?.id])
   const role = selected ? cardRoleContracts[selected.data.kind] : undefined
@@ -36,7 +38,10 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
   const visibleLineage = lineage.slice(0, lineageExpanded ? 30 : 12)
   const risk = selected?.data.kind === 'risk' ? parseRiskAssessmentRule(selected.data.rule) : undefined
   return <>
-    <PanelHeader action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
+    <PanelHeader action={<div className="panel-heading-actions">
+      {onBack && <button aria-label={`Back to ${returnLabel ?? 'previous panel'}`} className="panel-back" onClick={onBack} title={`Back to ${returnLabel ?? 'previous panel'}`} type="button"><ArrowLeft size={14} /><span>{returnLabel}</span></button>}
+      <button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>
+    </div>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
     <PanelScrollArea className="inspector-panel-content" label="Inspector content">
       {selected ? <div className="inspector-form">
       <section className="card-agent-workspace"><div><Sparkles size={15} /><span><strong>Agent workspace</strong><small>Analyze and rework this card from connected evidence.</small></span></div><button onClick={onAgentRework} type="button">Ask agent to rework</button></section>

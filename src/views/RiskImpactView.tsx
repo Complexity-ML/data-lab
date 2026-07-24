@@ -1,5 +1,5 @@
 import { AlertTriangle, ChartNetwork, CheckCircle2, LoaderCircle, PanelRightClose, ShieldAlert, Wrench } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, type MutableRefObject } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { RiskImpactOverview } from '../domain/risk-impact'
@@ -9,10 +9,13 @@ import { riskDomains, type RiskDomain } from '../domain/risk-assessment'
 
 interface RiskImpactViewProps {
   correctionBusy: boolean
+  domain: 'all' | RiskDomain
   onClose(): void
+  onDomainChange(domain: 'all' | RiskDomain): void
   onProposeCorrection(item: RiskImpactItem): void
   onSelectCard(nodeId: string): void
   overview: RiskImpactOverview
+  scrollPosition: MutableRefObject<number>
 }
 
 const labels: Record<'all' | RiskDomain, string> = {
@@ -27,12 +30,11 @@ const labels: Record<'all' | RiskDomain, string> = {
   reliability: 'Reliability',
 }
 
-export function RiskImpactView({ correctionBusy, onClose, onProposeCorrection, onSelectCard, overview }: RiskImpactViewProps) {
-  const [domain, setDomain] = useState<'all' | RiskDomain>('all')
+export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange, onProposeCorrection, onSelectCard, overview, scrollPosition }: RiskImpactViewProps) {
   const items = useMemo(() => riskItemsForDomain(overview, domain), [domain, overview])
   return <>
     <PanelHeader action={<button aria-label="Close impact and risks" className="panel-toggle" onClick={onClose} title="Close impact and risks" type="button"><PanelRightClose size={16} /></button>} eyebrow="RISK" title="Impact & Risks" />
-    <PanelScrollArea className="risk-panel-content" label="Impact and risks content">
+    <PanelScrollArea className="risk-panel-content" label="Impact and risks content" scrollPosition={scrollPosition}>
       <section className="risk-overview">
         <div><strong>{overview.actionable}</strong><small>Actionable</small></div>
         <div><strong>{overview.critical}</strong><small>Critical</small></div>
@@ -45,7 +47,7 @@ export function RiskImpactView({ correctionBusy, onClose, onProposeCorrection, o
           aria-selected={domain === value}
           className={domain === value ? 'is-active' : ''}
           key={value}
-          onClick={() => setDomain(value)}
+          onClick={() => onDomainChange(value)}
           role="tab"
           type="button"
         >{labels[value]}</button>)}

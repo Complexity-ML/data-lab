@@ -1,6 +1,6 @@
 import type { Edge } from '@xyflow/react'
 import { useState, type Dispatch, type SetStateAction } from 'react'
-import { layoutPipeline } from '../domain/layout'
+import { connectedLayoutNodeIds, layoutPipeline } from '../domain/layout'
 import { applyProposal, loadPipelinePreset, type AgentProposal, type PipelineNode, type PipelinePresetId } from '../domain/pipeline'
 import { appendPipelineVersion, commitPendingVersion, createPipelineVersion, rejectPendingVersion, restorePipelineVersion, type PipelineVersion } from '../domain/versioning'
 import { atomicTransactionBlockers, validatePipeline } from '../validation'
@@ -25,9 +25,17 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [pendingVersionId, setPendingVersionId] = useState<string>()
 
-  const layoutAddedCards = (nextNodes: PipelineNode[], nextEdges: Edge[], addedNodeIds: Iterable<string>) => {
-    const ids = [...addedNodeIds]
-    return ids.length > 0 ? layoutPipeline(nextNodes, nextEdges, ids) : nextNodes
+  const layoutProposalGraph = (nextNodes: PipelineNode[], nextEdges: Edge[], nextProposal: AgentProposal) => {
+    const touched = new Set([
+      ...nextProposal.addedNodes.map((node) => node.id),
+      ...nextProposal.updatedNodes.map((node) => node.nodeId),
+      ...nextProposal.addedEdges.flatMap((edge) => [edge.source, edge.target]),
+      ...edges
+        .filter((edge) => nextProposal.removedEdgeIds.includes(edge.id))
+        .flatMap((edge) => [edge.source, edge.target]),
+    ])
+    if (touched.size === 0) return nextNodes
+    return layoutPipeline(nextNodes, nextEdges, connectedLayoutNodeIds(nextNodes, nextEdges, touched))
   }
 
   const recordPendingReview = (nextProposal: AgentProposal) => {
@@ -53,7 +61,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
       recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'error', detail: { blockerIds: blocking.map((issue) => issue.id) } })
       return undefined
     }
-    const layouted = layoutAddedCards(next.nodes, next.edges, nextProposal.addedNodes.map((node) => node.id))
+    const layouted = layoutProposalGraph(next.nodes, next.edges, nextProposal)
     const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
     const version = createPipelineVersion(committedNodes, next.edges, nextProposal.title, 'agent', nextIssues)
     version.blockingIssues = 0
@@ -90,7 +98,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
       })
       return false
     }
-    const layouted = layoutAddedCards(next.nodes, next.edges, proposal.addedNodes.map((node) => node.id))
+    const layouted = layoutProposalGraph(next.nodes, next.edges, proposal)
     const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
     const version = createPipelineVersion(committedNodes, next.edges, proposal.title, 'agent', nextIssues)
     // A safe incremental graph transaction may still have pipeline-readiness
@@ -138,7 +146,10 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     const blocking = atomicTransactionBlockers(versionIssues)
     if (blocking.length > 0) { setActivity(`Review cannot be approved · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed`); return false }
     const activeNodeIds = new Set(nodes.map((node) => node.id))
-    const layouted = layoutAddedCards(version.nodes, version.edges, version.nodes.filter((node) => !activeNodeIds.has(node.id)).map((node) => node.id))
+    const addedNodeIds = version.nodes.filter((node) => !activeNodeIds.has(node.id)).map((node) => node.id)
+    const layouted = addedNodeIds.length > 0
+      ? layoutPipeline(version.nodes, version.edges, connectedLayoutNodeIds(version.nodes, version.edges, addedNodeIds))
+      : version.nodes
     const committedNodes = resolveApprovedExecution?.(layouted, version.edges) ?? layouted
     setNodes(committedNodes)
     setEdges(version.edges)
