@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { posix, win32 } from 'node:path'
 import { parseAssetContext, parseSearchResults, parseSearchTotal, readStructuredToolResult, sanitizeEvidenceSummary, type DataHubAssetSummary } from './datahub-context.js'
+import { BoundedTaskPool, dataHubMcpReadLimit } from './mcp-read-limiter.js'
 import { loadAppSetting, saveAppSetting } from './workspace-db.js'
 import { secureStorageCapability } from './secure-storage.js'
 export type { DataHubAssetSummary } from './datahub-context.js'
@@ -62,6 +63,10 @@ const contextCache = new Map<string, { result: unknown; capturedAt: number; expi
 const knownReadTools = new Set(['search', 'get_entities', 'list_schema_fields', 'get_lineage'])
 const maxMcpResultBytes = 2_000_000
 const maxMcpCatalogBytes = 512_000
+const mcpReadPools = {
+  http: new BoundedTaskPool(dataHubMcpReadLimit('http')),
+  stdio: new BoundedTaskPool(dataHubMcpReadLimit('stdio')),
+}
 const defaultEvidenceTtlMs: Record<DataHubMcpRead['name'], number> = {
   get_entities: 5 * 60_000,
   list_schema_fields: 2 * 60_000,
@@ -397,6 +402,10 @@ function summarizeResult(result: unknown): string {
   return sanitized.length > 320 ? `${sanitized.slice(0, 317)}…` : sanitized
 }
 
+function runBoundedMcpRead<T>(task: () => Promise<T>) {
+  return mcpReadPools[activeMode ?? 'stdio'].run(task)
+}
+
 async function readCachedTool(options: { client: Client; available: Set<string>; urn: string; name: DataHubMcpRead['name']; arguments: Record<string, unknown>; force?: boolean }) {
   const { client, available, name, urn } = options
   const now = Date.now()
@@ -412,7 +421,9 @@ async function readCachedTool(options: { client: Client; available: Set<string>;
     evidence: { name, status: 'unavailable' as const, summary: 'Tool is not exposed by this MCP server.', capturedAt, expiresAt: capturedAt, cached: false, stale: true },
   }
   try {
-    const result = assertBoundedMcpPayload(await withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name), `${name} response`)
+    const result = assertBoundedMcpPayload(await runBoundedMcpRead(
+      () => withTimeout(client.callTool({ name, arguments: options.arguments }), 20_000, name),
+    ), `${name} response`)
     const status = result.isError ? 'error' as const : 'ok' as const
     const expiresAt = now + resolveEvidenceTtlMs()[name]
     if (status === 'ok') contextCache.set(cacheKey, { result, capturedAt: now, expiresAt })
@@ -510,11 +521,11 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
     const available = await discoverReadableToolNames(client)
     if (!available.has('search')) throw new Error('The connected DataHub MCP server does not expose search')
     const page = Math.floor(offset / pageSize) + 1
-    const result = assertBoundedMcpPayload(await withTimeout(
+    const result = assertBoundedMcpPayload(await runBoundedMcpRead(() => withTimeout(
       client.callTool({ name: 'search', arguments: { query: structuredQuery, filter: 'entity_type = dataset', num_results: pageSize, offset } }),
       20_000,
       `search page ${page} attempt ${attempt}`,
-    ), 'search response')
+    )), 'search response')
     if (result.isError) throw new Error(summarizeResult(result))
     const payload = readStructuredToolResult(result)
     return { matches: parseSearchResults(payload), total: parseSearchTotal(payload) }

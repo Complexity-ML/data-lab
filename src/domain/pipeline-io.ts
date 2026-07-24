@@ -100,6 +100,8 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     batchSize: Math.max(1, Math.min(32, bounded('batchSize', 32) || 8)),
     batchDurationMs: bounded('batchDurationMs', 300_000) || undefined,
     batchFailed: bounded('batchFailed', 32),
+    batchProcessed: bounded('batchProcessed', 32),
+    batchCached: bounded('batchCached', 32),
     remaining: bounded('remaining'),
     mode: source.mode === 'dataset' ? 'dataset' : 'catalog',
     cacheMode: source.cacheMode === 'refresh' ? 'refresh' : 'prefer',

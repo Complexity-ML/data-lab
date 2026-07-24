@@ -175,6 +175,8 @@ describe('Catalog Explorer', () => {
       batchSize: 4,
       batchDurationMs: 4_000,
       batchFailed: 0,
+      batchProcessed: 4,
+      batchCached: 0,
       state: 'inspecting' as const,
       checkpointAt: capturedAt,
       datasets: [],
@@ -185,7 +187,21 @@ describe('Catalog Explorer', () => {
     expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 7 })).toBe(8)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, batchDurationMs: 20_000 })).toBe(3)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, batchFailed: 1 })).toBe(2)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchCached: 4 })).toBe(4)
+    expect(resolveAdaptiveCatalogConcurrency({ ...base, batchCached: 2 })).toBe(4)
     expect(resolveAdaptiveCatalogConcurrency({ ...base, concurrency: 1, state: 'paused', pauseReason: 'connector_unavailable' })).toBe(1)
+  })
+
+  it('records whether the latest adaptive batch was served from cache', async () => {
+    const assets = Array.from({ length: 3 }, (_, index) => asset(index))
+    const inspect = async (urn: string) => {
+      const value = inspection(assets.find((candidate) => candidate.urn === urn)!)
+      return { ...value, evidence: value.evidence.map((read) => ({ ...read, cached: true })) }
+    }
+
+    const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
+
+    expect(result.progress).toMatchObject({ batchProcessed: 3, batchCached: 3, batchFailed: 0 })
   })
 
   it('pauses the connector circuit after a later unavailable batch', async () => {

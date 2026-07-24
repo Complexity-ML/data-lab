@@ -63,6 +63,8 @@ describe('versioned pipeline JSON exchange', () => {
       batchSize: 4,
       batchDurationMs: 7_500,
       batchFailed: 1,
+      batchProcessed: 4,
+      batchCached: 2,
       state: 'failed',
       checkpointAt: '2026-07-24T12:43:27.235Z',
       datasets: [],
@@ -75,6 +77,8 @@ describe('versioned pipeline JSON exchange', () => {
       batchSize: 4,
       batchDurationMs: 7_500,
       batchFailed: 1,
+      batchProcessed: 4,
+      batchCached: 2,
       inspected: 8,
       failed: 5,
     })
