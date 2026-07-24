@@ -38,6 +38,7 @@ import { incidentDiagramNodeIds } from './domain/incident-diagram'
 import { asksForSeparateWorkspace, selectDataSources, workspaceNameFromObjective, type SourceSelection } from './domain/source-routing'
 import { defaultBlankObjective, resolveAgentObjective } from './domain/agent-objective'
 import { defaultAutonomyPolicy, normalizeAutonomyPolicy, policyForcesProposalReview, type AutonomyPolicy } from './domain/autonomy-policy'
+import { classifyConnectivityFailure } from './domain/connectivity'
 
 const SettingsModal = lazy(() => import('./components/shared/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 const autonomyPolicyStorageKey = 'data-lab-autonomy-policy'
@@ -358,16 +359,17 @@ export default function App() {
             audit = forcedMonitorAudit ?? await window.dataLab.auditDataHubWithMcp(sourceUrn)
           } catch (error) {
             const detail = errorMessage(error, 'DataHub audit failed')
+            const connectivity = classifyConnectivityFailure(error, `DataHub · ${source.data.label}`)
             datahubEvidence.push(`${source.data.label} (${sourceUrn}) · audit error · ${detail}`)
             await logIncident({
               incidentKey: monitored?.incidentKey ?? `datahub-evidence:${sourceUrn}`,
               transition: 'opened',
               severity: 'critical',
-              title: `DataHub evidence · ${source.data.label}`,
-              detail,
-              sourceSystem: 'DataHub',
+              title: connectivity?.title ?? `DataHub evidence · ${source.data.label}`,
+              detail: connectivity?.detail ?? detail,
+              sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
               sourceRef: sourceUrn,
-              fingerprint: 'audit-transport-error',
+              fingerprint: connectivity?.fingerprint ?? 'audit-transport-error',
               cardId: source.id,
               branchId: monitored?.monitor.monitorId ?? source.id,
             })
@@ -378,15 +380,18 @@ export default function App() {
           datahubEvidence.push(...audit.reads.map((read) => `${source.data.label} · ${read.name} · ${read.status} · ${read.summary}`))
           evidenceEntries.push(...audit.reads.map((read) => ({ tool: read.name, urn: sourceUrn, capturedAt: read.capturedAt, expiresAt: read.expiresAt, status: read.status, summary: read.summary, cached: read.cached, stale: read.stale })))
           const failedReads = audit.reads.filter((read) => read.status !== 'ok' || read.stale)
+          const connectivity = failedReads.length === audit.reads.length
+            ? classifyConnectivityFailure(failedReads.map((read) => read.summary).join(' | '), `DataHub · ${source.data.label}`)
+            : undefined
           await logIncident({
             incidentKey: monitored?.incidentKey ?? `datahub-evidence:${sourceUrn}`,
             transition: failedReads.length ? 'opened' : 'recovered',
             severity: failedReads.length === audit.reads.length ? 'critical' : failedReads.length ? 'warning' : 'info',
-            title: `DataHub evidence · ${source.data.label}`,
-            detail: failedReads.length ? `${failedReads.length}/${audit.reads.length} metadata reads failed or became stale: ${failedReads.map((read) => read.name).join(', ')}.` : 'All required DataHub metadata reads returned to normal.',
-            sourceSystem: 'DataHub',
+            title: connectivity?.title ?? `DataHub evidence · ${source.data.label}`,
+            detail: connectivity?.detail ?? (failedReads.length ? `${failedReads.length}/${audit.reads.length} metadata reads failed or became stale: ${failedReads.map((read) => read.name).join(', ')}.` : 'All required DataHub metadata reads returned to normal.'),
+            sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
             sourceRef: sourceUrn,
-            fingerprint: audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
+            fingerprint: connectivity?.fingerprint ?? audit.reads.map((read) => `${read.name}:${read.status}:${read.stale}`).join('|'),
             cardId: source.id,
             branchId: monitored?.monitor.monitorId ?? source.id,
           })
@@ -396,8 +401,14 @@ export default function App() {
         }
       } else if ((!hasDataSource || unboundSource) && connectionMode === 'connected') {
         setActivity(`${unboundSource ? 'Unbound source' : 'Blank canvas'} · agent is discovering a starting dataset through DataHub MCP…`)
-        let candidates = await searchDataHubAssets(agentRequest).catch(() => [])
-        if (!candidates.length) candidates = await searchDataHubAssets('customer').catch(() => [])
+        let candidates: DataHubAssetSummary[] = []
+        let discoveryError: unknown
+        try { candidates = await searchDataHubAssets(agentRequest) }
+        catch (error) { discoveryError = error }
+        if (!candidates.length) {
+          try { candidates = await searchDataHubAssets('*') }
+          catch (error) { discoveryError = error }
+        }
         blankCandidate = candidates[0]
         if (blankCandidate) {
           const inspection = await inspectDataHubAsset(blankCandidate.urn)
@@ -410,22 +421,40 @@ export default function App() {
             `Governance: owners=${inspection.asset.owners.join(', ') || 'missing'}; tags=${inspection.asset.tags.join(', ') || 'none'}; quality=${inspection.asset.qualityStatus}; upstream=${inspection.asset.upstream.length}; downstream=${inspection.asset.downstream.length}`,
             ...inspection.evidence.map((read) => `${read.name} · ${read.status} · ${read.summary}`),
           ]
+          if (incidentSummaries.some((incident) => incident.incidentKey === 'source-discovery:datahub' && incident.status !== 'resolved')) {
+            await logIncident({
+              incidentKey: 'source-discovery:datahub',
+              transition: 'recovered',
+              severity: 'info',
+              title: 'DataHub source discovery recovered',
+              detail: `The catalog returned ${inspection.asset.name}; autonomous source selection can continue.`,
+              sourceSystem: 'DataHub',
+              sourceRef: inspection.asset.urn,
+              fingerprint: `source-discovery-recovered:${inspection.asset.urn}`,
+              cardId: unboundSource?.id,
+              branchId: unboundSource?.id,
+            })
+          }
         } else {
+          const connectivity = discoveryError ? classifyConnectivityFailure(discoveryError, 'DataHub source discovery') : undefined
+          const failed = discoveryError !== undefined
           await logIncident({
             incidentKey: 'source-discovery:datahub',
             transition: 'opened',
-            severity: 'warning',
-            title: 'DataHub source discovery unavailable',
-            detail: 'DataHub MCP is connected, but no governed starting dataset matched the autonomous objective. The player will retry without calling the model again.',
-            sourceSystem: 'DataHub',
-            sourceRef: 'mcp',
-            fingerprint: 'no-governed-source-candidate',
+            severity: connectivity ? 'critical' : 'warning',
+            title: connectivity?.title ?? (failed ? 'DataHub source discovery failed' : 'No governed DataHub source matched'),
+            detail: connectivity?.detail ?? (failed
+              ? `The DataHub catalog search failed: ${errorMessage(discoveryError, 'Unknown search error')}. This is a collection-reliability incident; dataset health was not evaluated.`
+              : 'The DataHub catalog search completed, but no governed starting dataset matched the autonomous objective. The player will retry without calling the model again.'),
+            sourceSystem: connectivity?.sourceSystem ?? 'DataHub',
+            sourceRef: 'mcp-search',
+            fingerprint: connectivity?.fingerprint ?? (failed ? `source-discovery-error:${errorMessage(discoveryError)}` : 'no-governed-source-candidate'),
             cardId: unboundSource?.id,
             branchId: unboundSource?.id,
           })
           if (unboundSource && expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId) {
             queueAutonomousStep('Retry governed DataHub source discovery for the existing unbound Data Source. Do not propose another placeholder or duplicate graph.', expectedPlayerSessionId, 30_000)
-            setActivity('Incident reported · no governed DataHub source matched · autonomous retry in 30 seconds')
+            setActivity(`Incident reported · ${connectivity?.title ?? (failed ? 'DataHub source discovery failed' : 'no governed DataHub source matched')} · autonomous retry in 30 seconds`)
           }
           if (unboundSource) return
           datahubEvidence = ['No governed DataHub source matched the objective. The graph has no Data Source yet. Add one explicit unbound Data Source and one Human Review binding checkpoint without inventing schema, ownership or lineage.']
@@ -478,6 +507,18 @@ export default function App() {
         versions,
       })
       const response = activeAiSource === 'chatgpt' ? await window.dataLab.runChatGPTProposal(requestPayload) : await window.dataLab.runAiProposal(requestPayload)
+      const providerConnectivityKey = `connectivity:provider:${activeAiSource}`
+      if (incidentSummaries.some((incident) => incident.incidentKey === providerConnectivityKey && incident.status !== 'resolved')) {
+        await logIncident({
+          incidentKey: providerConnectivityKey,
+          transition: 'recovered',
+          severity: 'info',
+          title: `${active.label} connection restored`,
+          detail: `${active.label} answered a bounded agent request successfully.`,
+          sourceSystem: 'DATA LAB connectivity',
+          fingerprint: 'connectivity:recovered',
+        })
+      }
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'success', detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length } })
       if (agentRunId.current !== runId) return
       const nextProposal = materializeAiProposal(response, nodes, edges)
@@ -611,6 +652,16 @@ export default function App() {
     } catch (error) {
       notifyError(error, 'Agent run failed')
       recordDiagnostic({ category: 'provider', action: 'pipeline.proposal', status: 'error', detail: { source: activeAiSource, message: errorMessage(error) } })
+      const connectivity = classifyConnectivityFailure(error, active.label)
+      if (connectivity) await logIncident({
+        incidentKey: `connectivity:provider:${activeAiSource}`,
+        transition: incidentSummaries.some((incident) => incident.incidentKey === `connectivity:provider:${activeAiSource}` && incident.status !== 'resolved') ? 'worsened' : 'opened',
+        severity: connectivity.kind === 'authentication' ? 'warning' : 'critical',
+        title: connectivity.title,
+        detail: connectivity.detail,
+        sourceSystem: connectivity.sourceSystem,
+        fingerprint: connectivity.fingerprint,
+      })
       if (agentRunId.current !== runId) return
       setActivity(`Agent run failed · ${errorMessage(error, 'Unknown provider error')} · graph unchanged`)
     } finally { if (agentRunId.current === runId) setAgentRunning(false) }

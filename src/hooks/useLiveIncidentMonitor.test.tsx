@@ -56,4 +56,32 @@ describe('live incident monitor lifecycle', () => {
 
     expect(onTrigger).not.toHaveBeenCalled()
   })
+
+  it('reports an unreachable network as connector reliability instead of a dataset anomaly', async () => {
+    const source = {
+      ...newCard('source', 0),
+      id: 'source',
+      data: { ...newCard('source', 0).data, label: 'Customers', datahubUrn: audit.urn },
+    }
+    const monitor = { ...newCard('monitor', 1), id: 'monitor' }
+    const onIncident = vi.fn(async () => undefined)
+
+    renderHook(() => useLiveIncidentMonitor({
+      active: true,
+      agentBlocked: false,
+      nodes: [source, monitor],
+      edges: [{ id: 'source-monitor', source: source.id, target: monitor.id }],
+      audit: vi.fn(async () => { throw new Error('connect ENETUNREACH datahub.internal') }),
+      onIncident,
+      onTrigger: vi.fn(async () => undefined),
+    }))
+
+    await waitFor(() => expect(onIncident).toHaveBeenCalledTimes(1))
+    expect(onIncident).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.stringContaining('No network'),
+      sourceSystem: 'DATA LAB connectivity',
+      fingerprint: 'connectivity:offline',
+      detail: expect.stringContaining('Dataset health was not evaluated'),
+    }))
+  })
 })
