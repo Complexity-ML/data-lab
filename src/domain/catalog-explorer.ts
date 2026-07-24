@@ -33,6 +33,9 @@ export function resetCatalogRetryState(progress: CatalogExplorationProgress): Ca
     connectorFailureFingerprint: undefined,
     nextRetryAt: undefined,
     checkpointAt: new Date().toISOString(),
+    datasets: progress.datasets.map((checkpoint) => checkpoint.status === 'unavailable'
+      ? { ...checkpoint, attemptCount: 0 }
+      : checkpoint),
   }
 }
 
@@ -115,7 +118,6 @@ export function shouldCallAgentForCatalog(
   if (current.state === 'complete') return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
-    || current.failed > (previous?.failed ?? 0)
 }
 
 function fingerprint(value: string) {
@@ -207,21 +209,35 @@ export async function inspectCatalogInParallel(
     const checkpoint = previous.get(asset.urn)
     return checkpoint && checkpoint.status !== 'unavailable' && Date.parse(checkpoint.expiresAt) <= Date.now()
   })
-  const retryable = assets.filter((asset) => previous.get(asset.urn)?.status === 'unavailable')
+  // Dataset read failures are local collection gaps. Give each unavailable
+  // dataset its own durable retry budget, after all never-inspected assets have
+  // had a turn, instead of opening a connector-wide circuit.
+  const datasetRetryLimit = Math.max(1, Math.min(10, Math.floor(options.retryLimit ?? defaultCatalogRetryLimit)))
+  const retryable = assets.filter((asset) => {
+    const checkpoint = previous.get(asset.urn)
+    return checkpoint?.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
+  })
   const pending = [...uninspected, ...expired, ...retryable]
   const inspectionBudget = Math.max(1, Math.min(configuredBatchSize, Math.floor(options.maxInspections ?? configuredBatchSize), pending.length || 1))
   const scheduled = pending.slice(0, inspectionBudget)
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
+  const remainingWork = () => assets.filter((asset) => {
+    const checkpoint = checkpoints.find((candidate) => candidate.urn === asset.urn)
+    if (!checkpoint) return true
+    return checkpoint.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
+  }).length
   let batchDurationMs = 0
   let batchFailed = 0
   let batchProcessed = 0
   let batchCached = 0
   let connectorRecoveryStreak = options.previousProgress?.connectorRecoveryStreak ?? 0
-  const connectorRetryLimit = Math.max(1, Math.min(10, Math.floor(options.retryLimit ?? options.previousProgress?.connectorRetryLimit ?? defaultCatalogRetryLimit)))
-  let connectorRetryCount = options.previousProgress?.connectorRetryCount ?? 0
-  let connectorFailureFingerprint = options.previousProgress?.connectorFailureFingerprint
-  let nextRetryAt = options.previousProgress?.nextRetryAt
+  const connectorRetryLimit = datasetRetryLimit
+  // Reaching this function means catalog discovery returned assets. Dataset
+  // timeouts must not inherit or extend a connector-wide retry circuit.
+  const connectorRetryCount = 0
+  const connectorFailureFingerprint = undefined
+  const nextRetryAt = undefined
   let effectiveConcurrency = requestedConcurrency
 
   const upsertCheckpoint = (checkpoint: CatalogDatasetCheckpoint) => {
@@ -255,7 +271,7 @@ export async function inspectCatalogInParallel(
       connectorRetryLimit,
       connectorFailureFingerprint,
       nextRetryAt,
-      remaining: Math.max(0, assets.length - checkpoints.length),
+      remaining: remainingWork(),
       mode: options.mode ?? 'catalog',
       cacheMode: options.cacheMode ?? 'prefer',
       phase: state === 'complete' || state === 'paused' || state === 'failed' ? 'checkpoint' : 'inspect',
@@ -266,34 +282,7 @@ export async function inspectCatalogInParallel(
     }, [...inspections])
   }
 
-  if (options.previousProgress?.pauseReason === 'retry_exhausted' || connectorRetryCount >= connectorRetryLimit) {
-    emit('paused', 'retry_exhausted')
-    return { inspections, progress: {
-      ...options.previousProgress,
-      query: options.query ?? options.previousProgress?.query ?? '*',
-      total: assets.length,
-      discovered: assets.length,
-      inspected: checkpoints.length,
-      failed: checkpoints.filter((item) => item.status === 'unavailable').length,
-      incidents: checkpoints.filter(hasDataIncident).length,
-      governanceGaps: checkpoints.filter(hasGovernanceGap).length,
-      concurrency: 1,
-      connectorRetryCount,
-      connectorRetryLimit,
-      connectorFailureFingerprint,
-      nextRetryAt,
-      remaining: Math.max(0, assets.length - checkpoints.length),
-      phase: 'checkpoint',
-      state: 'paused',
-      pauseReason: 'retry_exhausted',
-      checkpointAt: new Date().toISOString(),
-      datasets: orderedCheckpoints(),
-    } satisfies CatalogExplorationProgress }
-  }
-
   emit('inspecting')
-  let connectorUnavailable = false
-  let consecutiveUnavailable = 0
   const runStartedAt = Date.now()
   const inspectBatch = async (batch: DataHubAssetSummary[]) => {
     const results = await Promise.all(batch.map(async (asset) => {
@@ -335,55 +324,21 @@ export async function inspectCatalogInParallel(
   }
 
   for (let offset = 0; offset < scheduled.length && !options.isCancelled?.(); offset += requestedConcurrency) {
-    const batchCheckpoints = await inspectBatch(scheduled.slice(offset, offset + requestedConcurrency))
-    // A single slow or malformed entity is partial catalog evidence, not proof
-    // that the whole connector is offline. A complete concurrent batch (or two
-    // consecutive singleton probes) is enough to open the circuit.
-    if (batchCheckpoints.length > 0 && batchCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
-      consecutiveUnavailable += batchCheckpoints.length
-      connectorUnavailable = batchCheckpoints.length > 1 || consecutiveUnavailable >= 2
-      if (connectorUnavailable) {
-        effectiveConcurrency = 1
-        break
-      }
-    } else {
-      consecutiveUnavailable = 0
-    }
+    await inspectBatch(scheduled.slice(offset, offset + requestedConcurrency))
   }
-  if (connectorUnavailable) connectorRecoveryStreak = 0
-  if (!connectorUnavailable && batchProcessed > 0 && batchFailed === 0) {
-    connectorRetryCount = 0
-    connectorFailureFingerprint = undefined
-    nextRetryAt = undefined
-    connectorRecoveryStreak = options.previousProgress?.pauseReason === 'connector_unavailable'
-      ? 1
-      : Math.min(100, (options.previousProgress?.connectorRecoveryStreak ?? 0) + 1)
-  } else if (batchFailed > 0) {
-    connectorRecoveryStreak = 0
-    if (connectorUnavailable) {
-      connectorRetryCount += 1
-      connectorFailureFingerprint = fingerprint(checkpoints
-        .filter((checkpoint) => checkpoint.status === 'unavailable')
-        .map((checkpoint) => `${checkpoint.urn}:${checkpoint.fingerprint}`)
-        .sort()
-        .join('|'))
-      nextRetryAt = new Date(Date.now() + Math.max(1_000, options.retryCooldownMs ?? defaultCatalogRetryCooldownMs)).toISOString()
-    }
-  }
-  const hasMore = scheduled.length < pending.length
+  connectorRecoveryStreak = batchProcessed > 0 && batchFailed === 0
+    ? Math.min(100, (options.previousProgress?.connectorRecoveryStreak ?? 0) + 1)
+    : 0
+  const hasMore = scheduled.length < pending.length || remainingWork() > 0
   const cancelled = options.isCancelled?.() === true
   const state: CatalogExplorationProgress['state'] = cancelled
     ? 'paused'
-    : connectorUnavailable
-      ? 'paused'
-      : hasMore
-        ? 'inspecting'
-        : 'complete'
+    : hasMore
+      ? 'inspecting'
+      : 'complete'
   const pauseReason: CatalogExplorationProgress['pauseReason'] = cancelled
     ? 'cancelled'
-    : connectorUnavailable
-      ? connectorRetryCount >= connectorRetryLimit ? 'retry_exhausted' : 'connector_unavailable'
-      : undefined
+    : undefined
   emit(state, pauseReason)
   return { inspections, progress: {
     query: options.query ?? '*',
@@ -404,7 +359,7 @@ export async function inspectCatalogInParallel(
     connectorRetryLimit,
     connectorFailureFingerprint,
     nextRetryAt,
-    remaining: Math.max(0, assets.length - checkpoints.length),
+    remaining: remainingWork(),
     mode: options.mode ?? 'catalog',
     cacheMode: options.cacheMode ?? 'prefer',
     phase: 'checkpoint',
