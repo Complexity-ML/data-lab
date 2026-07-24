@@ -402,7 +402,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
               branchId: unboundSource?.id,
             })
           }
-        } else {
+        } else if (!continueCatalogWithoutModel) {
           if (catalogExplorer && discoveryError) catalogProgress = catalog.markDiscoveryFailed(catalogExplorer, discoveryQuery, () => agentRunId.current === runId)
           const connectivity = discoveryError ? classifyConnectivityFailure(discoveryError, 'DataHub source discovery') : undefined
           const failed = discoveryError !== undefined
@@ -468,8 +468,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         return
       }
       const newProfileRisk = [...profileCandidates.values()].some((asset) => asset.qualityStatus === 'failing')
-      if (continueCatalogWithoutModel && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress!, newProfileRisk) && expectedPlayerSessionId !== undefined) {
-        queueAutonomousStep('Continue the next local Catalog Explorer batch from its versioned checkpoint. Call the model only when a new data incident is found or the catalog audit completes.', expectedPlayerSessionId, 120)
+      if (continueCatalogWithoutModel && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress!, newProfileRisk)) {
+        if (expectedPlayerSessionId !== undefined) {
+          queueAutonomousStep('Continue the next local Catalog Explorer batch from its versioned checkpoint. Call the model only when a new data incident is found or the catalog audit completes.', expectedPlayerSessionId, 120)
+        }
         setActivity(`Catalog checkpoint ${catalogProgress!.inspected}/${catalogProgress!.total} · no new data incident · continuing locally without model tokens`)
         return
       }

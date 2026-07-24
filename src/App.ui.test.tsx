@@ -262,6 +262,10 @@ describe('visual pipeline workspace regressions', () => {
 
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
     expect(inspectedBeforeProposal).toEqual(new Set(assets.map((asset) => asset.urn)))
+    expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      incidentKey: 'source-discovery:datahub',
+      transition: 'opened',
+    }))
   })
 
   it('pauses future autonomous iterations and Stop cancels the active provider channels', async () => {
