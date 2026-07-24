@@ -15,7 +15,6 @@ const layoutStartX = 72
 const layoutStartY = 72
 const horizontalStep = Math.ceil((cardWidth + horizontalGap) / gridSpacing) * gridSpacing
 const verticalStep = Math.ceil((cardHeight + verticalGap) / gridSpacing) * gridSpacing
-const controlLaneHeight = Math.ceil((cardHeight + componentGap) / gridSpacing) * gridSpacing
 
 type Position = { x: number; y: number }
 type OccupiedBox = Position & { width: number; height: number }
@@ -128,13 +127,25 @@ function orderLayers(nodes: PipelineNode[], edges: Edge[], layers: string[][]): 
   return ordered
 }
 
-function separatedLayer(ids: string[], desired: Map<string, number>): Map<string, number> {
+function nodeDimensions(node: PipelineNode) {
+  return {
+    width: Math.max(cardWidth, node.measured?.width ?? node.width ?? cardWidth),
+    height: Math.max(cardHeight, node.measured?.height ?? node.height ?? cardHeight),
+  }
+}
+
+function separatedLayer(ids: string[], desired: Map<string, number>, byId: Map<string, PipelineNode>): Map<string, number> {
   const result = new Map<string, number>()
-  let previous = Number.NEGATIVE_INFINITY
+  let previousId: string | undefined
   for (const id of ids) {
-    const y = Math.max(desired.get(id) ?? 0, previous + verticalStep)
+    const previousHeight = previousId ? nodeDimensions(byId.get(previousId)!).height : 0
+    const currentHeight = nodeDimensions(byId.get(id)!).height
+    const minimum = previousId
+      ? (result.get(previousId) ?? 0) + previousHeight / 2 + verticalGap + currentHeight / 2
+      : Number.NEGATIVE_INFINITY
+    const y = Math.max(desired.get(id) ?? 0, minimum)
     result.set(id, y)
-    previous = y
+    previousId = id
   }
   const shift = mean([...result.values()]) - mean(ids.map((id) => desired.get(id) ?? 0))
   for (const [id, y] of result) result.set(id, y - shift)
@@ -143,6 +154,7 @@ function separatedLayer(ids: string[], desired: Map<string, number>): Map<string
 
 function layoutComponent(nodes: PipelineNode[], edges: Edge[]): { positions: Map<string, Position>; width: number; height: number } {
   const layers = orderLayers(nodes, edges, topologyLayers(nodes, edges))
+  const byId = new Map(nodes.map((node) => [node.id, node]))
   const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]))
   for (const edge of edges) {
@@ -150,7 +162,16 @@ function layoutComponent(nodes: PipelineNode[], edges: Edge[]): { positions: Map
     outgoing.get(edge.source)?.push(edge.target)
   }
   const y = new Map<string, number>()
-  layers.forEach((layer) => layer.forEach((id, index) => y.set(id, (index - (layer.length - 1) / 2) * verticalStep)))
+  layers.forEach((layer) => {
+    let cursor = 0
+    for (const id of layer) {
+      const height = nodeDimensions(byId.get(id)!).height
+      y.set(id, cursor + height / 2)
+      cursor += height + verticalGap
+    }
+    const centerShift = mean(layer.map((id) => y.get(id) ?? 0))
+    layer.forEach((id) => y.set(id, (y.get(id) ?? 0) - centerShift))
+  })
 
   const align = (layer: string[], neighbours: Map<string, string[]>) => {
     const desired = new Map<string, number>()
@@ -160,29 +181,40 @@ function layoutComponent(nodes: PipelineNode[], edges: Edge[]): { positions: Map
       desired.set(id, (neighbourY.length > 0 ? mean(neighbourY) : y.get(id) ?? 0) + branchOffset)
     }
     const ordered = [...layer].sort((left, right) => (desired.get(left) ?? 0) - (desired.get(right) ?? 0))
-    for (const [id, position] of separatedLayer(ordered, desired)) y.set(id, position)
+    for (const [id, position] of separatedLayer(ordered, desired, byId)) y.set(id, position)
   }
   for (let pass = 0; pass < 6; pass += 1) {
     for (let level = 1; level < layers.length; level += 1) align(layers[level]!, incoming)
     for (let level = layers.length - 2; level >= 0; level -= 1) align(layers[level]!, outgoing)
   }
 
-  const minY = Math.min(0, ...y.values())
-  const maxY = Math.max(0, ...y.values())
+  const minY = Math.min(0, ...nodes.map((node) => (y.get(node.id) ?? 0) - nodeDimensions(node).height / 2))
+  const maxY = Math.max(0, ...nodes.map((node) => (y.get(node.id) ?? 0) + nodeDimensions(node).height / 2))
+  const layerX: number[] = []
+  let cursorX = 0
+  layers.forEach((layer, level) => {
+    layerX[level] = cursorX
+    cursorX += Math.max(...layer.map((id) => nodeDimensions(byId.get(id)!).width)) + horizontalGap
+  })
   const positions = new Map<string, Position>()
-  layers.forEach((layer, level) => layer.forEach((id) => positions.set(id, { x: level * horizontalStep, y: (y.get(id) ?? 0) - minY })))
+  layers.forEach((layer, level) => layer.forEach((id) => {
+    const node = byId.get(id)!
+    positions.set(id, {
+      x: layerX[level]!,
+      y: (y.get(id) ?? 0) - nodeDimensions(node).height / 2 - minY,
+    })
+  }))
   return {
     positions,
-    width: Math.max(cardWidth, (layers.length - 1) * horizontalStep + cardWidth),
-    height: Math.max(cardHeight, maxY - minY + cardHeight),
+    width: Math.max(cardWidth, cursorX - horizontalGap),
+    height: Math.max(cardHeight, maxY - minY),
   }
 }
 
 function nodeBox(node: PipelineNode, position = node.position): OccupiedBox {
   return {
     ...position,
-    width: Math.max(cardWidth, node.measured?.width ?? node.width ?? cardWidth),
-    height: Math.max(cardHeight, node.measured?.height ?? node.height ?? cardHeight),
+    ...nodeDimensions(node),
   }
 }
 
@@ -231,13 +263,17 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
   try {
     // Controller and Catalog Explorer are host-owned system policies, not
     // lineage atoms. Keep them in a reserved lane so topology never overlaps.
-    for (const [index, card] of systemCards.entries()) {
-      let placed = { x: snap(layoutStartX + index * horizontalStep), y: snap(layoutStartY) }
+    let systemCursorX = layoutStartX
+    let systemBottom = layoutStartY
+    for (const card of systemCards) {
+      let placed = { x: snap(systemCursorX), y: snap(layoutStartY) }
       while (collides(nodeBox(card, placed), occupied)) placed = { ...placed, y: placed.y + verticalStep }
       positions.set(card.id, placed)
       occupied.push(nodeBox(card, placed))
+      systemCursorX = placed.x + nodeDimensions(card).width + horizontalGap
+      systemBottom = Math.max(systemBottom, placed.y + nodeDimensions(card).height)
     }
-    if (systemCards.length > 0) fullCursorY += controlLaneHeight
+    if (systemCards.length > 0) fullCursorY = snap(systemBottom + componentGap)
 
     const components = connectedComponents(nodes, iterationEdges, lineageArranged)
     for (const componentIds of components) {
@@ -249,12 +285,27 @@ export function layoutPipeline(nodes: PipelineNode[], edges: Edge[], nodeIds?: I
         .filter((edge) => !arranged.has(edge.source) && ids.has(edge.target))
         .map((edge) => nodes.find((node) => node.id === edge.source))
         .filter((node): node is PipelineNode => Boolean(node))
-      let baseX = external.length === 0 ? layoutStartX : incomingAnchors.length ? Math.max(...incomingAnchors.map((node) => node.position.x)) + horizontalStep : Math.max(layoutStartX, ...external.map((node) => node.position.x + horizontalStep))
-      let baseY = external.length === 0 ? fullCursorY : incomingAnchors.length ? mean(incomingAnchors.map((node) => node.position.y)) : layoutStartY
+      const outgoingAnchors = iterationEdges
+        .filter((edge) => ids.has(edge.source) && !arranged.has(edge.target))
+        .map((edge) => nodes.find((node) => node.id === edge.target))
+        .filter((node): node is PipelineNode => Boolean(node))
+      const incomingBoundary = incomingAnchors.length
+        ? Math.max(...incomingAnchors.map((node) => node.position.x + nodeDimensions(node).width + horizontalGap))
+        : undefined
+      const outgoingBoundary = outgoingAnchors.length
+        ? Math.min(...outgoingAnchors.map((node) => node.position.x - local.width - horizontalGap))
+        : undefined
+      let baseX = external.length === 0
+        ? layoutStartX
+        : incomingBoundary !== undefined && outgoingBoundary !== undefined && incomingBoundary <= outgoingBoundary
+          ? (incomingBoundary + outgoingBoundary) / 2
+          : incomingBoundary ?? outgoingBoundary ?? Math.max(layoutStartX, ...external.map((node) => node.position.x + nodeDimensions(node).width + horizontalGap))
+      const anchorCenters = [...incomingAnchors, ...outgoingAnchors].map((node) => node.position.y + nodeDimensions(node).height / 2)
+      let baseY = external.length === 0 ? fullCursorY : anchorCenters.length ? mean(anchorCenters) - local.height / 2 : layoutStartY
       baseX = snap(baseX)
       baseY = snap(baseY)
       if (external.length > 0) {
-        const offsets = [0, ...Array.from({ length: 16 }, (_, index) => [index + 1, -(index + 1)]).flat()]
+        const offsets = [0, ...Array.from({ length: 40 }, (_, index) => [index + 1, -(index + 1)]).flat()]
         const clear = offsets.find((step) => [...local.positions].every(([id, position]) => {
           const node = localNodes.find((candidate) => candidate.id === id)!
           return !collides(nodeBox(node, { x: position.x + baseX, y: position.y + baseY + step * verticalStep }), occupied)

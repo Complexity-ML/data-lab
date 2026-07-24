@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { elasticFeedbackPath, elasticHorizontalPath } from '../components/shared/ElasticEdge'
+import { elasticFeedbackPath, elasticHorizontalPath, routeElasticCable } from '../components/shared/ElasticEdge'
 import { layoutPipeline } from './layout'
 import { customerActivationEdges as initialEdges, customerActivationNodes as initialNodes, newCard } from './pipeline'
 
@@ -51,6 +51,39 @@ describe('pipeline XY layout', () => {
     expect(path).toContain('452')
     expect(path).toMatch(/^M 900 180 L 918 180/)
     expect(path).toMatch(/L 420 320$/)
+  })
+
+  it('routes an elastic cable around a card in its direct corridor', () => {
+    const route = routeElasticCable({
+      sourceId: 'source',
+      sourceX: 300,
+      sourceY: 260,
+      targetId: 'target',
+      targetX: 900,
+      targetY: 260,
+      obstacles: [{ id: 'middle', x: 520, y: 160, width: 232, height: 240 }],
+    })
+
+    expect(route.routedAroundObstacle).toBe(true)
+    expect(route.labelY).toBeLessThan(160)
+    expect(route.path.match(/ C /g)).toHaveLength(2)
+    expect(route.path).toContain(` ${route.labelY}`)
+  })
+
+  it('routes feedback below the tallest card in the iteration', () => {
+    const route = routeElasticCable({
+      feedback: true,
+      sourceId: 'output',
+      sourceX: 1_100,
+      sourceY: 300,
+      targetId: 'monitor',
+      targetX: 420,
+      targetY: 360,
+      obstacles: [{ id: 'risk', x: 680, y: 180, width: 232, height: 420 }],
+    })
+
+    expect(route.labelY).toBeGreaterThan(600)
+    expect(route.path.match(/ C /g)).toHaveLength(2)
   })
 
   it('preserves pinned manual card positions while arranging the surrounding graph', () => {
@@ -127,5 +160,43 @@ describe('pipeline XY layout', () => {
     expect(placedReview.position.x).toBeGreaterThan(existing.position.x + existing.measured.width)
     expect(placedOutput.position.x).toBeGreaterThan(placedReview.position.x)
     expect(new Set(arranged.map((node) => `${node.position.x}:${node.position.y}`)).size).toBe(3)
+  })
+
+  it('separates variable-height cards that share a topology layer', () => {
+    const tallSource = { ...newCard('source', 0), id: 'tall-source', measured: { width: 232, height: 420 } }
+    const shortSource = { ...newCard('source', 1), id: 'short-source', measured: { width: 232, height: 280 } }
+    const output = { ...newCard('output', 2), id: 'shared-output' }
+    const arranged = layoutPipeline(
+      [tallSource, shortSource, output],
+      [
+        { id: 'tall-output', source: tallSource.id, target: output.id },
+        { id: 'short-output', source: shortSource.id, target: output.id },
+      ],
+    )
+    const sources = arranged
+      .filter((node) => node.data.kind === 'source')
+      .sort((left, right) => left.position.y - right.position.y)
+
+    expect(sources[0]!.position.y + (sources[0]!.measured?.height ?? 240)).toBeLessThanOrEqual(sources[1]!.position.y - 60)
+  })
+
+  it('places a new middle card between preserved upstream and downstream cards', () => {
+    const source = { ...newCard('source', 0), id: 'source', position: { x: 96, y: 240 } }
+    const transform = { ...newCard('transform', 1), id: 'transform', position: { x: 96, y: 240 } }
+    const output = { ...newCard('output', 2), id: 'output', position: { x: 1_104, y: 240 } }
+    const arranged = layoutPipeline(
+      [source, transform, output],
+      [
+        { id: 'source-transform', source: source.id, target: transform.id },
+        { id: 'transform-output', source: transform.id, target: output.id },
+      ],
+      [transform.id],
+    )
+    const placedTransform = arranged.find((node) => node.id === transform.id)!
+
+    expect(arranged.find((node) => node.id === source.id)!.position).toEqual(source.position)
+    expect(arranged.find((node) => node.id === output.id)!.position).toEqual(output.position)
+    expect(placedTransform.position.x).toBeGreaterThan(source.position.x + 232)
+    expect(placedTransform.position.x + 232).toBeLessThan(output.position.x)
   })
 })

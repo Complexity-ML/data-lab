@@ -2,7 +2,7 @@ import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow
 import { FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, ScrollText, ShieldAlert, Trash2 } from 'lucide-react'
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
-import { ElasticEdge } from '../components/shared/ElasticEdge'
+import { ElasticEdge, ElasticRoutingProvider } from '../components/shared/ElasticEdge'
 import { canConnectCardKinds } from '../domain/card-compatibility'
 import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { graphPerformanceTargets } from '../domain/performance'
@@ -68,6 +68,7 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       {!reportsOpen && <button aria-label="Open incident reports" className={`reports-open${reportCount ? ' has-reports' : ''}`} onClick={onOpenReports} title={`${reportCount} incident report${reportCount === 1 ? '' : 's'} requiring attention`} type="button"><span>Reports</span><FileWarning size={16} />{reportCount > 0 && <em aria-label={`${reportCount} reports requiring attention`}>{reportCount > 99 ? '99+' : reportCount}</em>}</button>}
     </div>
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
+    <ElasticRoutingProvider nodes={nodes}>
     <ReactFlow
       nodes={nodes}
       edges={renderedEdges}
@@ -104,6 +105,7 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       {renderMiniMap && <MiniMap className="minimap" maskColor={theme === 'dark' ? 'rgba(15,23,42,.72)' : 'rgba(248,250,252,.72)'} nodeColor={(node) => miniMapColors[(node.data as PipelineNode['data']).kind]} pannable zoomable />}
       <Controls className="flow-controls" showInteractive={false} />
     </ReactFlow>
+    </ElasticRoutingProvider>
     {contextMenu && <div className="card-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
       <div><small>CARD</small><strong>{contextMenu.label}</strong></div>
       <button className="context-edit" onClick={() => onEditCard(contextMenu.nodeId, contextMenu.label)} role="menuitem" type="button"><Pencil size={14} /><span><strong>Edit card</strong><small>Open metadata and rules</small></span></button>
