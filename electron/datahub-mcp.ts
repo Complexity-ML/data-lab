@@ -530,7 +530,21 @@ const catalogEntitiesQuery = `query DataLabCatalogEntities($urns: [String!]!) {
         }
       }
       tags { tags { tag { urn name properties { name } } } }
-      schemaMetadata { fields { fieldPath nativeDataType } }
+      schemaMetadata {
+        fields {
+          fieldPath
+          nativeDataType
+          tags { tags { tag { urn name properties { name } } } }
+          glossaryTerms { terms { term { urn properties { name } } } }
+        }
+      }
+      editableSchemaMetadata {
+        editableSchemaFieldInfo {
+          fieldPath
+          tags { tags { tag { urn name properties { name } } } }
+          glossaryTerms { terms { term { urn properties { name } } } }
+        }
+      }
       health { type status message }
     }
   }
@@ -818,7 +832,21 @@ const deepDatasetQuery = `query DataLabDeepDataset($urn: String!) {
       tags { tags { tag { urn name properties { name } } } }
       glossaryTerms { terms { term { urn properties { name } } } }
       domain { domain { urn properties { name } } }
-      schemaMetadata { fields { fieldPath nativeDataType } }
+      schemaMetadata {
+        fields {
+          fieldPath
+          nativeDataType
+          tags { tags { tag { urn name properties { name } } } }
+          glossaryTerms { terms { term { urn properties { name } } } }
+        }
+      }
+      editableSchemaMetadata {
+        editableSchemaFieldInfo {
+          fieldPath
+          tags { tags { tag { urn name properties { name } } } }
+          glossaryTerms { terms { term { urn properties { name } } } }
+        }
+      }
       health { type status message }
       upstream: lineage(input: { direction: UPSTREAM, start: 0, count: 30 }) {
         relationships {
@@ -986,7 +1014,7 @@ export async function searchDataHubAssets(query: string): Promise<DataHubAssetSu
     const offsets = Array.from({ length: Math.max(0, Math.ceil(total / pageSize) - 1) }, (_, index) => (index + 1) * pageSize)
     const remaining = await mapWithConcurrency(offsets, 3, searchPage)
     const seen = new Set<string>()
-    return [firstPayload, ...remaining.map((page) => page.search ?? {})].flatMap((page) => parseSearchResults(page)).flatMap((match) => {
+    return [firstPayload, ...remaining.map((page) => page.search ?? {})].flatMap((page) => parseSearchResults(page, pageSize)).flatMap((match) => {
       if (seen.has(match.urn)) return []
       seen.add(match.urn)
       return [parseAssetContext({ urn: match.urn, name: match.name })]

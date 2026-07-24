@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { assertBoundedMcpPayload, buildDataHubSearchQuery, callToolWithSdkTimeout, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, inspectDataHubAsset, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, writeDataHubDecision } from './datahub-mcp.js'
+import { assertBoundedMcpPayload, buildDataHubSearchQuery, callToolWithSdkTimeout, getDataHubMcpConfigurationStatus, hasExplicitDataHubWritebackTool, inspectDataHubAsset, mapWithRetryConcurrency, normalizeDataHubMcpStartupError, parseDataHubDecisionRequest, resolveCatalogEntityTimeoutMs, resolveCatalogSearchTotal, resolveDataHubMcpCommand, resolveEvidenceTtlMs, resolveLineageArguments, resolveReadableToolNames, saveDataHubMcpSettings, searchDataHubAssets, writeDataHubDecision } from './datahub-mcp.js'
 import { closeWorkspaceDatabase } from './workspace-db.js'
 
 let directory: string
@@ -203,7 +203,7 @@ describe('DataHub MCP connection settings', () => {
   it('reads deep local dataset evidence through one GraphQL request without opening MCP stdio', async () => {
     const urn = 'urn:li:dataset:(urn:li:dataPlatform:dbt,orders,PROD)'
     await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', catalogReadRoute: 'gms' })
-    const fetchMock = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
       data: {
         entity: {
           urn,
@@ -213,7 +213,20 @@ describe('DataHub MCP connection settings', () => {
           properties: { description: 'Governed orders' },
           ownership: { owners: [] },
           tags: { tags: [] },
-          schemaMetadata: { fields: [{ fieldPath: 'order_id', nativeDataType: 'VARCHAR' }] },
+          schemaMetadata: {
+            fields: [{
+              fieldPath: 'order_id',
+              nativeDataType: 'VARCHAR',
+              tags: { tags: [{ tag: { properties: { name: 'PII' } } }] },
+              glossaryTerms: { terms: [{ term: { properties: { name: 'Customer Identifier' } } }] },
+            }],
+          },
+          editableSchemaMetadata: {
+            editableSchemaFieldInfo: [{
+              fieldPath: 'order_id',
+              tags: { tags: [{ tag: { properties: { name: 'Restricted' } } }] },
+            }],
+          },
           health: [{ status: 'PASS' }],
           upstream: { relationships: [] },
           downstream: { relationships: [] },
@@ -227,7 +240,11 @@ describe('DataHub MCP connection settings', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe('http://localhost:8080/api/graphql')
     expect(inspection.asset).toMatchObject({ urn, name: 'orders', qualityStatus: 'healthy' })
-    expect(inspection.asset.fields).toEqual([{ name: 'order_id', type: 'string', tags: undefined }])
+    expect(inspection.asset.fields).toEqual([{ name: 'order_id', type: 'string', tags: ['PII', 'Customer Identifier', 'Restricted'] }])
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { query: string }
+    expect(requestBody.query).toContain('tags { tags')
+    expect(requestBody.query).toContain('glossaryTerms')
+    expect(requestBody.query).toContain('editableSchemaMetadata')
     expect(inspection.evidence.map((read) => read.capability)).toEqual(['entity.read', 'schema.read', 'lineage.read', 'lineage.read'])
     expect(inspection.evidence.every((read) => read.summary.includes('GraphQL'))).toBe(true)
   })
@@ -258,6 +275,34 @@ describe('DataHub MCP connection settings', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(inspections.map((inspection) => inspection.asset.name)).toEqual(['orders', 'customers'])
     expect(inspections.every((inspection) => inspection.evidence[0]?.capability === 'entity.read')).toBe(true)
+  })
+
+  it('preserves every bounded GraphQL search result instead of truncating pages at the MCP cap', async () => {
+    await saveDataHubMcpSettings({ transport: 'stdio', url: 'http://localhost:8080', catalogReadRoute: 'gms' })
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { variables: { input: { start: number; count: number } } }
+      const { start, count } = body.variables.input
+      const searchResults = Array.from({ length: Math.min(count, 500 - start) }, (_, index) => {
+        const position = start + index
+        return {
+          entity: {
+            urn: `urn:li:dataset:(urn:li:dataPlatform:dbt,dataset_${position},PROD)`,
+            type: 'DATASET',
+            properties: { name: `dataset_${position}` },
+          },
+        }
+      })
+      return new Response(JSON.stringify({
+        data: { search: { total: 500, searchResults } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const assets = await searchDataHubAssets('*')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(assets).toHaveLength(500)
+    expect(assets.at(-1)?.name).toBe('dataset_499')
   })
 
   it('does not silently fall back to MCP when the local GraphQL route fails', async () => {

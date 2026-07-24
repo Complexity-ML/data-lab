@@ -64,7 +64,7 @@ function datasetIdentity(urn: string) {
   return { platform: match?.[1] ?? 'unknown', environment: match?.[3] ?? 'unknown', name: qualifiedName.split('.').at(-1) ?? qualifiedName }
 }
 
-export function parseSearchResults(payload: unknown): { urn: string; name: string }[] {
+export function parseSearchResults(payload: unknown, maximumResults = 20): { urn: string; name: string }[] {
   const results = array(record(payload).searchResults)
   const seen = new Set<string>()
   return results.flatMap((item) => {
@@ -74,7 +74,7 @@ export function parseSearchResults(payload: unknown): { urn: string; name: strin
     seen.add(urn)
     const properties = record(entity.properties)
     return [{ urn, name: sanitizeCatalogText(properties.name, 240) || datasetIdentity(urn).name }]
-  }).slice(0, 20)
+  }).slice(0, Math.max(0, Math.min(maximumResults, 2_000)))
 }
 
 export function parseSearchTotal(payload: unknown): number {
@@ -128,6 +128,32 @@ function names(values: unknown[], resolver: (value: JsonRecord) => unknown): str
   return [...new Set(values.map((value) => sanitizeCatalogText(resolver(record(value)), 160)).filter(Boolean))]
 }
 
+function directClassificationNames(values: unknown[]): string[] {
+  return values.flatMap((value) => {
+    if (typeof value === 'string') return sanitizeCatalogText(value, 160) || []
+    const candidate = record(value)
+    const properties = record(candidate.properties)
+    return sanitizeCatalogText(properties.name ?? candidate.name ?? candidate.urn, 160) || []
+  })
+}
+
+function fieldClassificationNames(field: JsonRecord): string[] {
+  const globalTags = record(field.globalTags)
+  const tags = array(globalTags.tags).length ? globalTags : record(field.tags)
+  const glossaryTerms = record(field.glossaryTerms)
+  return [
+    ...directClassificationNames([...array(field.editedTags), ...array(field.editedGlossaryTerms)]),
+    ...names(array(tags.tags), (entry) => {
+      const tag = record(entry.tag)
+      return record(tag.properties).name ?? tag.name ?? tag.urn
+    }),
+    ...names(array(glossaryTerms.terms), (entry) => {
+      const term = record(entry.term)
+      return record(term.properties).name ?? term.name ?? term.urn
+    }),
+  ]
+}
+
 function findDatasetUrns(value: unknown, found = new Map<string, boolean>(), depth = 0): Map<string, boolean> {
   if (depth > 12 || !value || typeof value !== 'object') return found
   if (Array.isArray(value)) {
@@ -176,10 +202,21 @@ export function parseAssetContext(options: { urn: string; name?: string; entityP
     : array(entitySchema.fields).length
       ? array(entitySchema.fields)
       : array(legacyEntitySchema.fields)
+  const editableSchema = record(entity.editableSchemaMetadata)
+  const editableFieldsByPath = new Map(array(editableSchema.editableSchemaFieldInfo).flatMap((value) => {
+    const field = record(value)
+    const fieldPath = sanitizeCatalogText(field.fieldPath, 240)
+    return fieldPath ? [[fieldPath, field] as const] : []
+  }))
   const fields = schemaFields.map((value) => {
     const field = record(value)
-    const fieldTags = [...new Set([...array(field.editedTags), ...array(field.editedGlossaryTerms)].filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 160)))]
-    return { name: sanitizeCatalogText(field.fieldPath, 240), type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }
+    const fieldPath = sanitizeCatalogText(field.fieldPath, 240)
+    const editableField = editableFieldsByPath.get(fieldPath)
+    const fieldTags = [...new Set([
+      ...fieldClassificationNames(field),
+      ...(editableField ? fieldClassificationNames(editableField) : []),
+    ])]
+    return { name: fieldPath, type: normalizedType(field.nativeDataType), tags: fieldTags.length ? fieldTags : undefined }
   }).filter((field) => field.name).slice(0, 250)
   const capturedAt = options.capturedAt ?? new Date().toISOString()
   const expiresAt = options.expiresAt ?? new Date(Date.now() + 2 * 60_000).toISOString()
