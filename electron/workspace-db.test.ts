@@ -53,6 +53,29 @@ describe('SQLite workspace persistence', () => {
     expect(autosaveWorkspaceDraft(target, { nodes: [{ id: 'example' }] })).toEqual({ saved: false, reason: 'no-active-workspace' })
   })
 
+  it('does not persist or expose incidents for an unsaved blank workbench', () => {
+    const target = directory('blank-incidents')
+    expect(recordIncidentEvent(target, {
+      incidentKey: 'connector:blank',
+      transition: 'opened',
+      severity: 'warning',
+      title: 'Temporary connector warning',
+      detail: 'This unsaved workbench has no durable incident owner.',
+    })).toEqual({ recorded: false })
+    expect(listIncidentEvents(target)).toEqual([])
+
+    closeWorkspaceDatabase()
+    const legacy = new DatabaseSync(join(target, 'data-lab.sqlite'))
+    legacy.prepare(`
+      INSERT INTO incident_events (id, workspace_id, incident_key, transition, severity, title, detail, created_at)
+      VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+    `).run('legacy-blank-incident', 'legacy:blank', 'opened', 'warning', 'Legacy blank incident', 'Written by an older release.', new Date().toISOString())
+    legacy.close()
+
+    expect(listIncidentEvents(target)).toEqual([])
+    expect(clearIncidentEvents(target)).toEqual({ deleted: 0, workspaceId: undefined })
+  })
+
   it('persists catalog coverage for the unsaved workbench without saving its graph', () => {
     const target = directory('catalog-checkpoint')
     const progress = { inspected: 8, total: 67, datasets: [{ urn: 'urn:li:dataset:test-1' }] }

@@ -1,17 +1,21 @@
-import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, ScrollText } from 'lucide-react'
-import { PanelHeader } from '../components/shared/PanelHeader'
+import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, ScrollText, Trash2 } from 'lucide-react'
+import { PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { AgentActionLog } from './AgentActionsView'
 
 interface LiveActivityViewProps {
   busy: boolean
   entries: AgentActionLog[]
+  onClear(): void
   onClose(): void
 }
 
-export function LiveActivityView({ busy, entries, onClose }: LiveActivityViewProps) {
+export function LiveActivityView({ busy, entries, onClear, onClose }: LiveActivityViewProps) {
   return <>
-    <PanelHeader action={<button aria-label="Close live logs" className="panel-toggle" onClick={onClose} title="Close live logs" type="button"><PanelLeftClose size={16} /></button>} eyebrow="LIVE" title="Activity log" />
+    <PanelHeader action={<PanelHeaderActions>
+      <PanelHeaderButton disabled={!entries.length} label="Clear session log" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
+      <PanelHeaderButton label="Close live logs" onClick={onClose}><PanelLeftClose size={16} /></PanelHeaderButton>
+    </PanelHeaderActions>} eyebrow="LIVE" title="Activity log" />
     <PanelScrollArea className="live-log-content" label="Live activity content">
       <div className={`live-log-state ${busy ? 'is-busy' : ''}`}>
         {busy ? <LoaderCircle className="agent-context-wheel" size={17} /> : <ScrollText size={17} />}

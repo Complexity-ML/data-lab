@@ -406,9 +406,9 @@ export default function App() {
     <section className={`workspace${leftPanelOpen ? '' : ' library-collapsed'}${rightPanelOpen ? '' : ' inspector-collapsed'}`}>
       <div aria-hidden={!leftPanelOpen} className={`library-panel-shell ${leftPanelOpen ? '' : 'is-closed'}`} id="data-lab-left-panel" inert={!leftPanelOpen} tabIndex={-1}>
         {leftOperationsPanel === 'actions'
-          ? <aside aria-label="Agent actions" className="left-operations-panel operations-panel" id="data-lab-actions"><AgentActionsView busy={activityBusy} history={agentActionHistory} onClose={() => setLeftOperationsPanel(undefined)} playerState={player.playerState} /></aside>
+          ? <aside aria-label="Agent actions" className="left-operations-panel operations-panel" id="data-lab-actions"><AgentActionsView busy={activityBusy} history={agentActionHistory} onClear={() => setActionHistory([])} onClose={() => setLeftOperationsPanel(undefined)} playerState={player.playerState} /></aside>
           : leftOperationsPanel === 'logs'
-            ? <aside aria-label="Live activity log" className="left-operations-panel operations-panel" id="data-lab-live-logs"><LiveActivityView busy={activityBusy} entries={actionHistory} onClose={() => setLeftOperationsPanel(undefined)} /></aside>
+            ? <aside aria-label="Live activity log" className="left-operations-panel operations-panel" id="data-lab-live-logs"><LiveActivityView busy={activityBusy} entries={actionHistory} onClear={() => setActionHistory([])} onClose={() => setLeftOperationsPanel(undefined)} /></aside>
             : <CardLibraryView onAddCard={pipeline.addCard} onClose={() => setLibraryOpen(false)} />}
       </div>
 

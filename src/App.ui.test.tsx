@@ -121,6 +121,18 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
   return { api, autosaveWorkspace }
 }
 
+function savedEmptyWorkspaceState(id = 'incident-workspace') {
+  const timestamp = '2026-07-22T20:00:00.000Z'
+  const payload = { projectTitle: 'Incident workspace', nodes: [], edges: [], versions: [] }
+  const summary = { id, name: 'Incident workspace', archived: false, dirty: false, createdAt: timestamp, updatedAt: timestamp }
+  return {
+    activeWorkspace: { ...summary, payload },
+    activeWorkspaceId: id,
+    uncleanShutdown: false,
+    workspaces: [summary],
+  }
+}
+
 describe('visual pipeline workspace regressions', () => {
   it('opens a new install blank, with zero versions and no false successful run state', async () => {
     render(<App />)
@@ -296,7 +308,7 @@ describe('visual pipeline workspace regressions', () => {
 
   it('does not recover a provider incident when a stopped provider turn resolves late', async () => {
     const user = userEvent.setup()
-    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    const { api } = installElectronWorkspaceMock(savedEmptyWorkspaceState('provider-workspace'))
     api.listIncidentEvents = vi.fn(async () => [{
       id: 'provider-offline',
       incidentKey: 'connectivity:provider:chatgpt',
@@ -456,8 +468,12 @@ describe('visual pipeline workspace regressions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open live logs' }))
     expect(screen.getByRole('button', { name: 'Close live logs' }).closest('#data-lab-left-panel')).toBeTruthy()
-    expect(screen.getByRole('region', { name: 'Live activity content' }).classList.contains('panel-scroll-area')).toBe(true)
+    const liveLogScroller = screen.getByRole('region', { name: 'Live activity content' })
+    expect(liveLogScroller.classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByText('Simple session timeline · newest first')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Clear session log' }))
+    expect(screen.getByText('Play the graph or change a setting to start the live timeline.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Clear session log' }) as HTMLButtonElement).disabled).toBe(true)
 
     await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
     expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
@@ -489,7 +505,7 @@ describe('visual pipeline workspace regressions', () => {
   })
 
   it('shows one Reports badge per unresolved incident rather than per event', async () => {
-    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    const { api } = installElectronWorkspaceMock(savedEmptyWorkspaceState('reports-workspace'))
     api.listIncidentEvents = vi.fn(async () => [
       { id: 'incident-open', incidentKey: 'orders-drift', transition: 'opened' as const, severity: 'warning' as const, title: 'Orders drift', detail: 'Schema changed.', createdAt: '2026-07-23T20:00:00.000Z' },
       { id: 'incident-worse', incidentKey: 'orders-drift', transition: 'worsened' as const, severity: 'critical' as const, title: 'Orders drift', detail: 'More fields changed.', createdAt: '2026-07-23T20:01:00.000Z' },
@@ -535,7 +551,7 @@ describe('visual pipeline workspace regressions', () => {
 
   it('offers real local diagnostic controls without mixing in data incidents', async () => {
     const user = userEvent.setup()
-    const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
+    const { api } = installElectronWorkspaceMock(savedEmptyWorkspaceState('diagnostics-workspace'))
     api.exportDiagnostics = vi.fn(async () => ({
       schemaVersion: 1 as const,
       generatedAt: '2026-07-23T23:00:00.000Z',

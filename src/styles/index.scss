@@ -403,7 +403,7 @@ button { color: inherit; }
 .left-operations-panel { display: flex; overflow: hidden; height: 100%; min-width: 0; min-height: 0; flex-direction: column; padding: 20px 18px; background: var(--panel); }
 .inspector-panel { display: flex; overflow: hidden; height: 100%; flex-direction: column; padding: 20px 18px; border-left: 1px solid var(--line); }
 .inspector-panel.is-closed { overflow: hidden; padding: 0; border-left: 0; opacity: 0; pointer-events: none; }
-.panel-scroll-area { min-width: 0; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-right: 5px; outline: none; scrollbar-color: color-mix(in srgb, var(--accent) 46%, var(--line-strong)) transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
+.panel-scroll-area { display: block; width: 100%; height: 0; min-width: 0; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; margin-top: 10px; padding: 2px 8px 18px 0; outline: none; scrollbar-color: color-mix(in srgb, var(--accent) 46%, var(--line-strong)) transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
 .panel-scroll-area::-webkit-scrollbar { width: 7px; }
 .panel-scroll-area::-webkit-scrollbar-track { background: transparent; }
 .panel-scroll-area::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--accent) 38%, var(--line-strong)); background-clip: padding-box; }
@@ -412,10 +412,9 @@ button { color: inherit; }
 .panel-heading-actions { display: flex; align-items: center; gap: 6px; }
 .panel-back { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 8px; color: var(--muted); border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 7px; font-weight: 800; cursor: pointer; }
 .panel-back:hover, .panel-back:focus-visible { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); background: var(--accent-soft); }
-.library-panel-content, .inspector-panel-content { margin-top: 10px; }
 .library-panel-content .panel-intro, .inspector-panel-content .inspector-form { margin-top: 4px; }
 .operations-panel { overflow: hidden; }
-.live-log-content { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; padding: 2px 5px 18px 0; }
+.live-log-content { display: flex; flex-direction: column; gap: 12px; }
 .live-log-state { display: flex; align-items: center; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
 .live-log-state.is-busy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); }
 .live-log-state > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
@@ -427,7 +426,7 @@ button { color: inherit; }
 .live-log-list li > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .live-log-list strong { color: var(--text); font-size: 8px; line-height: 1.4; overflow-wrap: anywhere; }
 .live-log-list time { color: var(--faint); font: 6.5px ui-monospace, monospace; }
-.actions-panel-content, .reports-panel-content, .risk-panel-content { display: flex; flex-direction: column; gap: 13px; margin-top: 10px; padding: 2px 5px 18px 0; }
+.actions-panel-content, .reports-panel-content, .risk-panel-content { display: flex; flex-direction: column; gap: 13px; }
 .action-current { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .action-current > span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--muted); border-radius: 10px; background: var(--soft); }
 .action-current.is-busy { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); }

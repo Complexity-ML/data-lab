@@ -1,5 +1,5 @@
-import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, Pause, Play, Square } from 'lucide-react'
-import { PanelHeader } from '../components/shared/PanelHeader'
+import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, Pause, Play, Square, Trash2 } from 'lucide-react'
+import { PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { AgentPlayerState } from '../components/AppHeader'
 
@@ -12,14 +12,18 @@ export interface AgentActionLog {
 interface AgentActionsViewProps {
   busy: boolean
   history: AgentActionLog[]
+  onClear(): void
   onClose(): void
   playerState: AgentPlayerState
 }
 
-export function AgentActionsView({ busy, history, onClose, playerState }: AgentActionsViewProps) {
+export function AgentActionsView({ busy, history, onClear, onClose, playerState }: AgentActionsViewProps) {
   const StateIcon = playerState === 'running' ? Play : playerState === 'paused' ? Pause : Square
   return <>
-    <PanelHeader action={<button aria-label="Close agent actions" className="panel-toggle" onClick={onClose} title="Close agent actions" type="button"><PanelLeftClose size={16} /></button>} eyebrow="ACT" title="Agent actions" />
+    <PanelHeader action={<PanelHeaderActions>
+      <PanelHeaderButton disabled={!history.length} label="Clear action timeline" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
+      <PanelHeaderButton label="Close agent actions" onClick={onClose}><PanelLeftClose size={16} /></PanelHeaderButton>
+    </PanelHeaderActions>} eyebrow="ACT" title="Agent actions" />
     <PanelScrollArea className="actions-panel-content" label="Agent actions content">
       <section className={`action-current ${busy ? 'is-busy' : ''}`}>
         <span>{busy ? <LoaderCircle className="agent-context-wheel" size={18} /> : <StateIcon size={18} />}</span>

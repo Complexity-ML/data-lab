@@ -191,6 +191,9 @@ function db(userDataDirectory: string) {
   if (!incidentColumns.some((column) => column.name === 'source_system')) database.exec('ALTER TABLE incident_events ADD COLUMN source_system TEXT')
   if (!incidentColumns.some((column) => column.name === 'source_ref')) database.exec('ALTER TABLE incident_events ADD COLUMN source_ref TEXT')
   migrateLegacyWorkspace(database)
+  // Older releases persisted unsaved-workbench incidents with a NULL owner.
+  // They cannot be restored safely into any later workspace, so remove them.
+  database.prepare('DELETE FROM incident_events WHERE workspace_id IS NULL').run()
   return database
 }
 
@@ -487,10 +490,9 @@ function incidentFromRow(row: IncidentRow): IncidentEvent {
 export function listIncidentEvents(userDataDirectory: string, limit = 200): IncidentEvent[] {
   const target = db(userDataDirectory)
   const workspaceId = activeWorkspaceId(target)
+  if (!workspaceId) return []
   const boundedLimit = Math.max(1, Math.min(500, Math.round(limit)))
-  const rows = workspaceId
-    ? target.prepare('SELECT * FROM incident_events WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?').all(workspaceId, boundedLimit)
-    : target.prepare('SELECT * FROM incident_events WHERE workspace_id IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ?').all(boundedLimit)
+  const rows = target.prepare('SELECT * FROM incident_events WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?').all(workspaceId, boundedLimit)
   return (rows as unknown as IncidentRow[]).map(incidentFromRow)
 }
 
@@ -517,18 +519,21 @@ export function recordIncidentEvent(userDataDirectory: string, payload: unknown)
   const optional = (entry: unknown) => typeof entry === 'string' && entry.trim() ? entry.trim().slice(0, 180) : undefined
   const target = db(userDataDirectory)
   const workspaceId = activeWorkspaceId(target) ?? undefined
+  // An unsaved workbench has no durable owner. Keeping its incidents would make
+  // them reappear in unrelated blank sessions and break workspace isolation.
+  if (!workspaceId) return { recorded: false }
   const last = target.prepare(`
     SELECT * FROM incident_events
-    WHERE incident_key = ? AND ${workspaceId ? 'workspace_id = ?' : 'workspace_id IS NULL'}
+    WHERE incident_key = ? AND workspace_id = ?
     ORDER BY created_at DESC, rowid DESC LIMIT 1
-  `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as IncidentRow | undefined
+  `).get(incidentKey, workspaceId) as IncidentRow | undefined
   const latestHistoricalProvenance = (column: 'source_system' | 'source_ref') => {
     const row = target.prepare(`
       SELECT ${column} AS value FROM incident_events
-      WHERE incident_key = ? AND ${workspaceId ? 'workspace_id = ?' : 'workspace_id IS NULL'}
+      WHERE incident_key = ? AND workspace_id = ?
         AND ${column} IS NOT NULL AND TRIM(${column}) <> ''
       ORDER BY created_at DESC, rowid DESC LIMIT 1
-    `).get(...(workspaceId ? [incidentKey, workspaceId] : [incidentKey])) as { value?: string } | undefined
+    `).get(incidentKey, workspaceId) as { value?: string } | undefined
     return optional(row?.value)
   }
   const transition = value.transition as IncidentEventInput['transition']
