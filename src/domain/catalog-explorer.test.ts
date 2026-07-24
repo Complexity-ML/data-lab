@@ -66,10 +66,26 @@ describe('Catalog Explorer', () => {
       return inspection(assets.find((candidate) => candidate.urn === urn)!)
     }, { concurrency: 3 })
 
-    expect(result.progress).toMatchObject({ inspected: 5, failed: 1, incidents: 1, state: 'complete' })
+    expect(result.progress).toMatchObject({ inspected: 5, failed: 1, incidents: 0, state: 'complete' })
     expect(result.progress.datasets.find((dataset) => dataset.urn.endsWith('2'))).toMatchObject({
       status: 'unavailable',
       issues: ['inspection failed: connector timed out'],
+    })
+  })
+
+  it('opens the connector circuit after a complete unavailable batch', async () => {
+    const assets = Array.from({ length: 12 }, (_, index) => asset(index))
+    const inspect = vi.fn(async () => { throw new Error('MCP unavailable') })
+
+    const result = await inspectCatalogInParallel(assets, inspect, { concurrency: 4 })
+
+    expect(inspect).toHaveBeenCalledTimes(4)
+    expect(result.progress).toMatchObject({
+      total: 12,
+      inspected: 4,
+      failed: 4,
+      incidents: 0,
+      state: 'failed',
     })
   })
 
