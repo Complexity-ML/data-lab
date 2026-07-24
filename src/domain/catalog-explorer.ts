@@ -71,13 +71,14 @@ export async function inspectCatalogInParallel(
   })
   const checkpoints: CatalogDatasetCheckpoint[] = [...reusable]
   const pending = assets.filter((asset) => !reusable.some((checkpoint) => checkpoint.urn === asset.urn))
-  let cursor = 0
   const assetOrder = new Map(assets.map((asset, index) => [asset.urn, index]))
   const orderedCheckpoints = () => [...checkpoints].sort((left, right) => (assetOrder.get(left.urn) ?? 0) - (assetOrder.get(right.urn) ?? 0))
 
   const emit = (state: CatalogExplorationProgress['state']) => {
     const failed = checkpoints.filter((item) => item.status === 'unavailable').length
-    const incidents = checkpoints.filter((item) => item.status !== 'healthy').length
+    // Collection failures are connector reliability signals, not evidence that
+    // the underlying dataset is unhealthy.
+    const incidents = checkpoints.filter((item) => item.status === 'warning').length
     options.onCheckpoint?.({
       query: options.query ?? '*',
       total: assets.length,
@@ -93,21 +94,20 @@ export async function inspectCatalogInParallel(
   }
 
   emit('inspecting')
-  const workers = Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
-    while (cursor < pending.length && !options.isCancelled?.()) {
-      const index = cursor
-      cursor += 1
-      const asset = pending[index]!
+  let connectorUnavailable = false
+  for (let offset = 0; offset < pending.length && !options.isCancelled?.(); offset += concurrency) {
+    const batch = pending.slice(offset, offset + concurrency)
+    const batchCheckpoints = await Promise.all(batch.map(async (asset) => {
       try {
         const inspection = await inspect(asset.urn)
         inspections.push(inspection)
-        checkpoints.push(checkpointForInspection(inspection))
+        return checkpointForInspection(inspection)
       } catch (error) {
         const capturedAt = new Date().toISOString()
-        checkpoints.push({
+        return {
           urn: asset.urn,
           name: asset.name,
-          status: 'unavailable',
+          status: 'unavailable' as const,
           fieldCount: asset.fields.length,
           ownerCount: asset.owners.length,
           upstreamCount: asset.upstream.length,
@@ -116,22 +116,29 @@ export async function inspectCatalogInParallel(
           fingerprint: fingerprint(`${asset.urn}:inspection-failed`),
           capturedAt,
           expiresAt: capturedAt,
-        })
+        }
       }
-      if (checkpoints.length % concurrency === 0 || checkpoints.length === assets.length) emit('inspecting')
+    }))
+    checkpoints.push(...batchCheckpoints)
+    emit('inspecting')
+
+    const sessionCheckpoints = checkpoints.filter((checkpoint) => !reusable.some((item) => item.urn === checkpoint.urn))
+    if (sessionCheckpoints.length >= Math.min(concurrency, pending.length) && sessionCheckpoints.every((checkpoint) => checkpoint.status === 'unavailable')) {
+      connectorUnavailable = true
+      break
     }
-  })
-  await Promise.all(workers)
-  emit(options.isCancelled?.() ? 'paused' : 'complete')
+  }
+  const state: CatalogExplorationProgress['state'] = options.isCancelled?.() ? 'paused' : connectorUnavailable ? 'failed' : 'complete'
+  emit(state)
   return { inspections, progress: {
     query: options.query ?? '*',
     total: assets.length,
     discovered: assets.length,
     inspected: checkpoints.length,
     failed: checkpoints.filter((item) => item.status === 'unavailable').length,
-    incidents: checkpoints.filter((item) => item.status !== 'healthy').length,
+    incidents: checkpoints.filter((item) => item.status === 'warning').length,
     concurrency,
-    state: options.isCancelled?.() ? 'paused' as const : 'complete' as const,
+    state,
     checkpointAt: new Date().toISOString(),
     datasets: orderedCheckpoints(),
   } satisfies CatalogExplorationProgress }
