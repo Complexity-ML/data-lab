@@ -3,7 +3,7 @@ import { newCard } from './pipeline'
 import { collectRiskImpactOverview, riskItemsForDomain } from './risk-impact'
 
 describe('impact and risk overview', () => {
-  it('reports an uncovered Impact Analysis as an actionable coverage gap', () => {
+  it('reports an uncovered Impact Analysis as coverage without inflating confirmed risks', () => {
     const impact = {
       ...newCard('impact', 0),
       id: 'impact',
@@ -11,7 +11,7 @@ describe('impact and risk overview', () => {
     }
     const overview = collectRiskImpactOverview([impact], [])
 
-    expect(overview).toMatchObject({ actionable: 1, coverageGaps: 1 })
+    expect(overview).toMatchObject({ actionable: 0, needsVerification: 0, coverageGaps: 1 })
     expect(overview.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'coverage-gap', domain: 'ml', nodeId: 'impact' }),
     ]))
@@ -105,16 +105,18 @@ describe('impact and risk overview', () => {
 
     const overview = collectRiskImpactOverview([explorer], [])
 
-    expect(overview).toMatchObject({ actionable: 3, high: 1, coverageGaps: 2 })
+    expect(overview).toMatchObject({ actionable: 1, needsVerification: 1, high: 1, coverageGaps: 1 })
     expect(overview.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'risk', domain: 'data', sourceRef: 'urn:li:dataset:quality' }),
-      expect.objectContaining({ kind: 'coverage-gap', domain: 'privacy', sourceRef: 'urn:li:dataset:sensitive' }),
-      expect.objectContaining({ kind: 'coverage-gap', domain: 'governance', sourceRef: 'urn:li:dataset:governance' }),
+      expect.objectContaining({ kind: 'verification', domain: 'privacy', sourceRef: 'urn:li:dataset:sensitive' }),
+      expect.objectContaining({ kind: 'coverage-gap', domain: 'governance', affectedAssets: 1 }),
     ]))
-    expect(overview.items.find((item) => item.title.includes('missing_tags'))).toMatchObject({
+    const classificationCoverage = overview.items.find((item) => item.title === 'Classification coverage incomplete')
+    expect(classificationCoverage).toMatchObject({
       severity: 'medium',
       evidence: 'catalog_checkpoint:incomplete_governance',
     })
+    expect(classificationCoverage).not.toHaveProperty('sourceRef')
   })
 
   it('surfaces statistical profile anomalies independently from privacy coverage', () => {
@@ -179,7 +181,7 @@ describe('impact and risk overview', () => {
         evidence: 'dataset_profile:two_version_aggregate',
       }),
       expect.objectContaining({
-        kind: 'coverage-gap',
+        kind: 'verification',
         domain: 'privacy',
         sourceRef: 'urn:li:dataset:training',
       }),
@@ -192,5 +194,54 @@ describe('impact and risk overview', () => {
         evidence: 'dataset_profile:two_version_aggregate+lineage:versioned',
       }),
     ]))
+  })
+
+  it('groups repeated governance gaps instead of producing one risk per dataset', () => {
+    const explorer = {
+      ...newCard('explorer', 0),
+      id: 'explorer',
+      data: {
+        ...newCard('explorer', 0).data,
+        exploration: {
+          query: '*',
+          total: 3,
+          discovered: 3,
+          inspected: 3,
+          failed: 0,
+          incidents: 0,
+          governanceGaps: 3,
+          concurrency: 1,
+          state: 'complete' as const,
+          checkpointAt: '2026-07-24T20:00:00.000Z',
+          datasets: ['orders', 'customers', 'products'].map((name, index) => ({
+            urn: `urn:li:dataset:${name}`,
+            name,
+            status: 'warning' as const,
+            fieldCount: 3,
+            sensitiveSignalCount: 0,
+            qualityStatus: 'healthy' as const,
+            ownerCount: index === 0 ? 0 : 1,
+            upstreamCount: 0,
+            downstreamCount: 0,
+            issues: index === 0 ? ['owner missing', 'tags missing'] : ['tags missing'],
+            fingerprint: name,
+            capturedAt: '2026-07-24T20:00:00.000Z',
+            expiresAt: '2026-07-24T20:05:00.000Z',
+          })),
+        },
+      },
+    }
+
+    const overview = collectRiskImpactOverview([explorer], [])
+
+    expect(overview).toMatchObject({
+      actionable: 0,
+      needsVerification: 0,
+      coverageGaps: 2,
+    })
+    expect(overview.items.filter((item) => item.kind === 'coverage-gap')).toEqual([
+      expect.objectContaining({ title: 'Ownership coverage incomplete', affectedAssets: 1 }),
+      expect.objectContaining({ title: 'Classification coverage incomplete', affectedAssets: 3 }),
+    ])
   })
 })

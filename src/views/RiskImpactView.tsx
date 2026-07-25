@@ -36,9 +36,10 @@ export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange
     <PanelHeader action={<button aria-label="Close impact and risks" className="panel-toggle" onClick={onClose} title="Close impact and risks" type="button"><PanelRightClose size={16} /></button>} eyebrow="RISK" title="Impact & Risks" />
     <PanelScrollArea className="risk-panel-content" label="Impact and risks content" scrollPosition={scrollPosition}>
       <section className="risk-overview">
-        <div><strong>{overview.actionable}</strong><small>Actionable</small></div>
+        <div><strong>{overview.actionable}</strong><small>Confirmed</small></div>
         <div><strong>{overview.critical}</strong><small>Critical</small></div>
         <div><strong>{overview.high}</strong><small>High</small></div>
+        <div><strong>{overview.needsVerification}</strong><small>To verify</small></div>
         <div><strong>{overview.coverageGaps}</strong><small>Coverage gaps</small></div>
       </section>
 
@@ -56,7 +57,7 @@ export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange
       <div className="risk-panel-heading"><strong>{labels[domain]} analysis</strong><small>{items.length} signal{items.length === 1 ? '' : 's'}</small></div>
       {items.length ? <div className="risk-panel-list">{items.map((item) => <article className={`kind-${item.kind} severity-${item.severity}`} key={item.id}>
         <button aria-label={`Inspect ${item.title}`} className="risk-item-inspect" onClick={() => onSelectCard(item.nodeId)} type="button">
-          <span>{item.kind === 'impact' ? <ChartNetwork size={15} /> : item.kind === 'coverage-gap' ? <AlertTriangle size={15} /> : <ShieldAlert size={15} />}</span>
+          <span>{item.kind === 'impact' ? <ChartNetwork size={15} /> : item.kind === 'coverage-gap' || item.kind === 'verification' ? <AlertTriangle size={15} /> : <ShieldAlert size={15} />}</span>
           <div>
           <small>{labels[item.domain]} · {item.kind.replace('-', ' ')}</small>
           <strong>{item.title}</strong>
@@ -71,7 +72,7 @@ export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange
         </button>
         <button className="risk-correction-action" disabled={correctionBusy} onClick={() => onProposeCorrection(item)} type="button">
           {correctionBusy ? <LoaderCircle className="agent-context-wheel" size={13} /> : <Wrench size={13} />}
-          <span>{item.kind === 'risk' ? 'Propose correction' : item.kind === 'coverage-gap' ? 'Complete risk assessment' : 'Assess this impact'}</span>
+          <span>{item.kind === 'risk' ? 'Propose correction' : item.kind === 'verification' ? 'Verify exposure' : item.kind === 'coverage-gap' ? 'Review coverage group' : 'Assess this impact'}</span>
         </button>
       </article>)}</div> : <div className="risk-panel-clear"><CheckCircle2 size={18} /><span><strong>No matching risk</strong><small>This domain has no current Risk Assessment or uncovered Impact Analysis.</small></span></div>}
     </PanelScrollArea>

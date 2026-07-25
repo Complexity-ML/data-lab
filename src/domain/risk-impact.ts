@@ -2,7 +2,7 @@ import type { Edge } from '@xyflow/react'
 import type { CatalogDatasetCheckpoint, PipelineNode } from './pipeline'
 import { parseRiskAssessmentRule, riskDomainFromText, type RiskDomain, type RiskSeverity } from './risk-assessment'
 
-export type RiskImpactItemKind = 'risk' | 'impact' | 'coverage-gap'
+export type RiskImpactItemKind = 'risk' | 'impact' | 'verification' | 'coverage-gap'
 
 export interface RiskImpactItem {
   id: string
@@ -22,6 +22,7 @@ export interface RiskImpactItem {
 export interface RiskImpactOverview {
   items: RiskImpactItem[]
   actionable: number
+  needsVerification: number
   critical: number
   high: number
   coverageGaps: number
@@ -57,7 +58,7 @@ function riskCardCoversDataset(dataset: CatalogDatasetCheckpoint, nodes: Pipelin
 
 function catalogRiskItems(node: PipelineNode, nodes: PipelineNode[]): RiskImpactItem[] {
   const datasets = node.data.exploration?.datasets ?? []
-  return datasets.flatMap<RiskImpactItem>((dataset) => {
+  const items = datasets.flatMap<RiskImpactItem>((dataset) => {
     if (dataset.status === 'unavailable') return []
     const affectedAssets = Math.max(1, 1 + dataset.upstreamCount + dataset.downstreamCount)
     const items: RiskImpactItem[] = []
@@ -114,35 +115,51 @@ function catalogRiskItems(node: PipelineNode, nodes: PipelineNode[]): RiskImpact
       items.push({
         id: `catalog-sensitive-${dataset.urn}`,
         nodeId: node.id,
-        kind: 'coverage-gap',
+        kind: 'verification',
         domain: 'privacy',
-        severity: 'high',
-        title: `Sensitive-data risk coverage · ${dataset.name}`,
-        detail: `${dataset.sensitiveSignalCount} sensitive field or classification signal(s) require a scoped exposure and downstream-impact assessment.`,
+        severity: 'medium',
+        title: `Sensitive-data exposure to verify · ${dataset.name}`,
+        detail: `${dataset.sensitiveSignalCount} sensitive field or classification signal(s) are present, but downstream exposure has not been proven.`,
         action: 'Inspect only this dataset and add an evidence-backed privacy Risk Assessment when its lineage proves exposure.',
         evidence: 'catalog_checkpoint:fresh',
         affectedAssets,
         sourceRef: dataset.urn,
       })
     }
-    const governanceGaps = dataset.issues.filter((issue) => issue === 'owner missing' || issue === 'tags missing')
-    if (governanceGaps.length) {
-      items.push({
-        id: `catalog-governance-${dataset.urn}`,
-        nodeId: node.id,
-        kind: 'coverage-gap',
-        domain: 'governance',
-        severity: 'medium',
-        title: `Governance risk coverage · ${dataset.name}`,
-        detail: `The catalog checkpoint cannot complete governance risk classification: ${governanceGaps.join(', ')}.`,
-        action: 'Confirm ownership and classifications, then reassess downstream impact without treating the gap as a data-quality failure.',
-        evidence: 'catalog_checkpoint:incomplete_governance',
-        affectedAssets,
-        sourceRef: dataset.urn,
-      })
-    }
     return items
   })
+  const governanceGroups = [
+    {
+      key: 'owners',
+      issue: 'owner missing',
+      title: 'Ownership coverage incomplete',
+      action: 'Assign or confirm owners in DataHub, then reassess only the affected datasets.',
+    },
+    {
+      key: 'classifications',
+      issue: 'tags missing',
+      title: 'Classification coverage incomplete',
+      action: 'Complete catalog tags or glossary classifications in DataHub, then reassess only sensitive or downstream-critical datasets.',
+    },
+  ] as const
+  for (const group of governanceGroups) {
+    const affected = datasets.filter((dataset) => dataset.status !== 'unavailable' && dataset.issues.includes(group.issue))
+    if (!affected.length) continue
+    const examples = affected.slice(0, 5).map((dataset) => dataset.name)
+    items.push({
+      id: `catalog-governance-${node.id}-${group.key}`,
+      nodeId: node.id,
+      kind: 'coverage-gap',
+      domain: 'governance',
+      severity: 'medium',
+      title: group.title,
+      detail: `${affected.length} dataset(s) are missing ${group.key === 'owners' ? 'an owner' : 'tags or classifications'}${examples.length ? `: ${examples.join(', ')}${affected.length > examples.length ? ` and ${affected.length - examples.length} more` : ''}` : ''}. This is catalog coverage, not a confirmed data risk.`,
+      action: group.action,
+      evidence: 'catalog_checkpoint:incomplete_governance',
+      affectedAssets: affected.length,
+    })
+  }
+  return items
 }
 
 export function collectRiskImpactOverview(nodes: PipelineNode[], edges: Edge[]): RiskImpactOverview {
@@ -188,11 +205,11 @@ export function collectRiskImpactOverview(nodes: PipelineNode[], edges: Edge[]):
       action: 'Ask the agent to add an evidence-backed Risk Assessment and a bounded mitigation path.',
     }]
   })
-  const actionableItems = items.filter((item) => item.kind === 'coverage-gap'
-    || (item.kind === 'risk' && !['low', 'unknown'].includes(item.severity)))
+  const actionableItems = items.filter((item) => item.kind === 'risk' && !['low', 'unknown'].includes(item.severity))
   return {
     items,
     actionable: actionableItems.length,
+    needsVerification: items.filter((item) => item.kind === 'verification').length,
     critical: items.filter((item) => item.kind === 'risk' && item.severity === 'critical').length,
     high: items.filter((item) => item.kind === 'risk' && item.severity === 'high').length,
     coverageGaps: items.filter((item) => item.kind === 'coverage-gap').length,

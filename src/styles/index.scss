@@ -448,7 +448,7 @@ button { color: inherit; }
 .reports-overview > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .reports-overview strong { font-size: 15px; }
 .reports-overview small { color: var(--muted); font-size: 7px; }
-.risk-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.risk-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 7px; }
 .risk-overview > div { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .risk-overview strong { font-size: 15px; }
 .risk-overview small { color: var(--muted); font-size: 7px; }
@@ -463,9 +463,13 @@ button { color: inherit; }
 .risk-panel-list > article.severity-critical { border-left-color: #dc2626; }
 .risk-panel-list > article.severity-high { border-left-color: #ef4444; }
 .risk-panel-list > article.kind-impact { border-left-color: var(--impact-strong); }
+.risk-panel-list > article.kind-verification { border-left-color: #8b5cf6; }
+.risk-panel-list > article.kind-coverage-gap { border-left-color: #94a3b8; }
 .risk-item-inspect { display: grid; width: 100%; grid-template-columns: 29px minmax(0, 1fr); gap: 9px; padding: 10px; color: inherit; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .risk-item-inspect > span { display: grid; width: 27px; height: 27px; place-items: center; color: #b91c1c; border-radius: 8px; background: color-mix(in srgb, #fee2e2 55%, var(--surface)); }
 .kind-impact .risk-item-inspect > span { color: var(--impact-strong); background: color-mix(in srgb, var(--impact) 72%, var(--surface)); }
+.kind-verification .risk-item-inspect > span { color: #7c3aed; background: color-mix(in srgb, #ede9fe 65%, var(--surface)); }
+.kind-coverage-gap .risk-item-inspect > span { color: #64748b; background: color-mix(in srgb, #e2e8f0 62%, var(--surface)); }
 .risk-item-inspect > div { min-width: 0; }
 .risk-panel-list small { color: var(--faint); font-size: 6px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .risk-panel-list strong { display: block; margin-top: 4px; font-size: 9px; }
