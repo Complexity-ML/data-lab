@@ -51,8 +51,12 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     return version.id
   }
 
-  const commitAutonomousProposal = (nextProposal: AgentProposal, options: { preservePendingReview?: boolean } = {}) => {
-    const next = applyProposal(nodes, edges, nextProposal)
+  const commitAutonomousProposal = (nextProposal: AgentProposal, options: { preservePendingReview?: boolean; executionNodes?: PipelineNode[] } = {}) => {
+    // The atomic runner may have advanced cards earlier in the same React
+    // turn. Use that in-progress checkpoint instead of the render snapshot so
+    // committing a graph diff never erases completed-card cursors.
+    const baseNodes = options.executionNodes ?? nodes
+    const next = applyProposal(baseNodes, edges, nextProposal)
     const nextIssues = validatePipeline(next.nodes, next.edges)
     const blocking = atomicTransactionBlockers(nextIssues)
     if (blocking.length) {

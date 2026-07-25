@@ -50,6 +50,32 @@ describe('incremental agent version context', () => {
     expect(request.agentDecisionPolicy).toContain('return no graph mutation')
   })
 
+  it('exposes the durable card checkpoint without treating runtime progress as a version diff', () => {
+    const completedNodes = customerActivationNodes.map((node, index) => ({
+      ...node,
+      data: { ...node.data, runState: 'completed' as const, runSequence: index + 1, runFingerprint: `checkpoint-${index}` },
+    }))
+    const prior = createPipelineVersion(customerActivationNodes, customerActivationEdges, 'Semantic baseline', 'agent', [])
+    const request = buildPipelineAgentRequest({
+      nodes: completedNodes,
+      edges: customerActivationEdges,
+      issues: [],
+      versions: [prior],
+      datahubEvidence: [],
+      objective: 'Continue only changed cards',
+    })
+
+    expect(request.executionCheckpoint).toMatchObject({
+      state: 'current',
+      pending: [],
+      waiting: [],
+      failed: [],
+    })
+    expect(request.executionCheckpoint.completed).toHaveLength(completedNodes.length)
+    expect(request.recentVersions[0]?.differenceFromCurrent.changedNodeIds).toEqual([])
+    expect(request.guardrails).toContain('Honor the host execution checkpoint: do not rebuild or replay completed cards unless their contract or non-feedback inputs changed')
+  })
+
   it('supplies a bounded terminal catalog checkpoint and prefers the source from version memory', () => {
     const explorer = {
       ...customerActivationNodes[0]!,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, resumePipelineAtomically } from './atomic-execution'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, isAtomicExecutionCheckpointCurrent, resumePipelineAtomically } from './atomic-execution'
 import { customerActivationEdges, customerActivationNodes, newCard } from './pipeline'
 
 describe('atomic pipeline execution state machine', () => {
@@ -140,5 +140,82 @@ describe('atomic pipeline execution state machine', () => {
     const rendered = applyAtomicRunState(customerActivationNodes, run)
     expect(rendered.find((node) => node.id === 'customers-source')?.data).toMatchObject({ runState: 'completed', runSequence: 2 })
     expect(buildAtomicRunTrace(customerActivationNodes, run).at(-1)).toMatchObject({ nodeId: 'quarantine-output', state: 'completed' })
+  })
+
+  it('uses a durable build-in-progress checkpoint instead of replaying an unchanged graph', () => {
+    const first = executePipelineAtomically(customerActivationNodes, customerActivationEdges)
+    const checkpointed = applyAtomicRunState(customerActivationNodes, first)
+    const replay = executePipelineAtomically(checkpointed, customerActivationEdges)
+
+    expect(replay.state).toBe('completed')
+    expect(replay.events).toEqual([])
+    expect(isAtomicExecutionCheckpointCurrent(replay)).toBe(true)
+    expect(applyAtomicRunState(checkpointed, replay).map((node) => node.data.runSequence))
+      .toEqual(checkpointed.map((node) => node.data.runSequence))
+  })
+
+  it('replays only an edited card and its descendants while preserving independent completed cards', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const analysis = { ...newCard('analysis', 1), id: 'analysis' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const independent = { ...newCard('control', 3), id: 'controller' }
+    const graphEdges = [
+      { id: 'source-analysis', source: source.id, target: analysis.id },
+      { id: 'analysis-output', source: analysis.id, target: output.id },
+    ]
+    const first = executePipelineAtomically([source, analysis, output, independent], graphEdges)
+    const checkpointed = applyAtomicRunState([source, analysis, output, independent], first)
+    const edited = checkpointed.map((node) => node.id === analysis.id
+      ? { ...node, data: { ...node.data, description: 'A newly versioned analysis contract.' } }
+      : node)
+    const resumed = executePipelineAtomically(edited, graphEdges)
+    const completedAgain = resumed.events.filter((event) => event.state === 'completed').map((event) => event.nodeId)
+
+    expect(completedAgain).toEqual(['analysis', 'output'])
+    expect(resumed.nodeStates).toMatchObject({
+      source: 'completed',
+      analysis: 'completed',
+      output: 'completed',
+      controller: 'completed',
+    })
+    expect(completedAgain).not.toContain('source')
+    expect(completedAgain).not.toContain('controller')
+  })
+
+  it('invalidates a target when its incoming connection changes', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const validation = { ...newCard('validation', 1), id: 'validation' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const firstEdges = [{ id: 'source-output', source: source.id, target: output.id }]
+    const first = executePipelineAtomically([source, validation, output], firstEdges)
+    const checkpointed = applyAtomicRunState([source, validation, output], first)
+    const nextEdges = [
+      { id: 'source-validation', source: source.id, target: validation.id },
+      { id: 'validation-output', source: validation.id, target: output.id },
+    ]
+    const resumed = executePipelineAtomically(checkpointed, nextEdges)
+    const completedAgain = resumed.events.filter((event) => event.state === 'completed').map((event) => event.nodeId)
+
+    expect(completedAgain).toEqual(['validation', 'output'])
+    expect(completedAgain).not.toContain('source')
+  })
+
+  it('does not apply an old Human Review decision after its upstream contract changes', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const review = { ...newCard('review', 1), id: 'review' }
+    const output = { ...newCard('output', 2), id: 'output' }
+    const graphEdges = [
+      { id: 'source-review', source: source.id, target: review.id },
+      { id: 'review-output', source: review.id, target: output.id },
+    ]
+    const waiting = executePipelineAtomically([source, review, output], graphEdges)
+    const changed = [source, review, output].map((node) => node.id === source.id
+      ? { ...node, data: { ...node.data, description: 'Changed after the review request.' } }
+      : node)
+    const resumed = resumePipelineAtomically(changed, graphEdges, waiting, { review: 'approved' })
+
+    expect(resumed.state).toBe('waiting')
+    expect(resumed.nodeStates).toMatchObject({ source: 'completed', review: 'waiting', output: 'idle' })
+    expect(resumed.events.at(-1)).toMatchObject({ nodeId: 'review', state: 'waiting' })
   })
 })

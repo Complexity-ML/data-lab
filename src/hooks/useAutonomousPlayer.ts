@@ -4,7 +4,7 @@ import type { AgentPlayerState } from '../components/AppHeader'
 import type { SettingsSection } from '../components/shared/SettingsModal'
 import { materializeAiProposal, type ActiveAiSource } from '../domain/ai'
 import { buildPipelineAgentRequest } from '../domain/agent-context'
-import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, type AtomicPipelineRun } from '../domain/atomic-execution'
+import { applyAtomicRunState, buildAtomicRunTrace, executePipelineAtomically, isAtomicExecutionCheckpointCurrent, type AtomicPipelineRun } from '../domain/atomic-execution'
 import { maximumAtomicRepairAttempts, planAtomicRepair, type AtomicRepairState } from '../domain/atomic-repair'
 import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
@@ -41,7 +41,7 @@ interface AutonomousPlayerOptions {
   activeAtomicRun: MutableRef<AtomicPipelineRun | undefined>
   agentRunId: MutableRef<number>
   autonomyPolicy: AutonomyPolicy
-  commitAutonomousProposal(proposal: AgentProposal, options?: { preservePendingReview?: boolean }): string | undefined
+  commitAutonomousProposal(proposal: AgentProposal, options?: { preservePendingReview?: boolean; executionNodes?: PipelineNode[] }): string | undefined
   discardInvalidProposal(blockerIds: string[]): void
   connectionMode: 'demo' | 'connected'
   edges: Edge[]
@@ -226,7 +226,17 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     const runId = ++agentRunId.current
     const atomicRun = executePipelineAtomically(nodes, edges)
     activeAtomicRun.current = atomicRun
+    const executionNodes = applyAtomicRunState(nodes, atomicRun)
     setNodes((current) => applyAtomicRunState(current, atomicRun))
+    const executionCheckpointCurrent = isAtomicExecutionCheckpointCurrent(atomicRun)
+    const hasArmedMonitor = nodes.some((node) => node.data.kind === 'monitor')
+    if (!monitored && executionCheckpointCurrent && (hasArmedMonitor || monitorBootstrapAttempted.current)) {
+      setActivity(hasArmedMonitor
+        ? 'All cards are current · execution checkpoint preserved · Live Monitor is waiting for new evidence'
+        : 'All cards are current · execution checkpoint preserved · waiting for a graph or evidence change')
+      setAgentRunning(false)
+      return
+    }
     setActivity('Agent reading the current graph, atomic findings and version history…')
     const sourceSelection = routingPreview
     const routedSources = sourceSelection.sources
@@ -590,7 +600,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         edges,
         incidentContext: incidentSummaries,
         issues,
-        nodes,
+        nodes: executionNodes,
         objective: agentRequest,
         responseLanguage: language === 'fr' ? 'French' : 'English',
         runtimeDiagnostics,
@@ -623,7 +633,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         status: 'success',
         detail: { source: activeAiSource, model: response.model, evidenceCount: evidenceEntries.length },
       })
-      const nextProposal = materializeAiProposal(response, nodes, edges)
+      const nextProposal = materializeAiProposal(response, executionNodes, edges)
       if (catalogExplorer && catalogProgress) catalog.attachProgress(nextProposal, catalogExplorer, catalogProgress)
       nextProposal.incidentKey = monitored?.incidentKey
       if (blankCandidate) {
@@ -742,9 +752,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         },
       })
       nextProposal.runTrace = buildAtomicRunTrace(nodes, atomicRun)
-      const preview = applyProposal(nodes, edges, nextProposal)
+      const preview = applyProposal(executionNodes, edges, nextProposal)
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
-      if (graphsEquivalent(nodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
+      if (graphsEquivalent(executionNodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
         atomicRepairState.current = undefined
         const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
         const hasMonitor = nodes.some((node) => node.data.kind === 'monitor')
@@ -771,6 +781,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       if (touchesReviewCheckpoint) nextProposal.requiresHumanReview = true
       if ((monitored || autonomousSessionActive) && !nextProposal.requiresHumanReview && !touchesReviewCheckpoint) {
         const autonomousVersionId = commitAutonomousProposal(nextProposal, {
+          executionNodes,
           preservePendingReview: independentBranchDuringReview,
         })
         if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))

@@ -124,6 +124,12 @@ export interface PipelineNodeData extends Record<string, unknown> {
   pinned?: boolean
   runState?: 'idle' | 'running' | 'completed' | 'waiting' | 'failed' | 'stopped'
   runSequence?: number
+  /**
+   * Host-owned execution checkpoint. It fingerprints the card contract and
+   * every non-feedback predecessor so unchanged cards are not replayed while
+   * edited cards and their descendants are invalidated automatically.
+   */
+  runFingerprint?: string
 }
 
 export type PipelineNode = Node<PipelineNodeData, 'pipeline'>

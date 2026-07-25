@@ -265,6 +265,11 @@ export function compactGraph(nodes: PipelineNode[], edges: Edge[]) {
           tokenEstimate: node.data.profile.tokenEstimate,
           storage: node.data.profile.storage,
         } : undefined,
+        execution: node.data.runState ? {
+          state: node.data.runState,
+          sequence: node.data.runSequence,
+          checkpoint: node.data.runFingerprint,
+        } : undefined,
       }
     }),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle })),
