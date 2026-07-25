@@ -49,10 +49,13 @@ export function isHostVerifiedMetadataOnlyProfile(value: unknown): value is Data
 }
 
 export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfileSnapshot {
+  const fieldProfiles = new Map(asset.dataProfile?.fields.map((field) => [field.name, field]) ?? [])
   const profiledFields = asset.fields.slice(0, maximumProfiledFields).map((field) => ({
     name: boundedText(field.name, 120),
     type: field.type,
     tags: field.tags?.map((tag) => boundedText(tag, 80)).filter(Boolean).slice(0, 8),
+    nullRate: fieldProfiles.get(field.name)?.nullRate,
+    distinctCount: fieldProfiles.get(field.name)?.distinctCount,
   }))
   const sensitiveFieldCount = asset.fields.filter((field) => field.tags?.some((tag) => /pii|sensitive|personal|gdpr/i.test(tag))).length
   const anomalies = [
@@ -60,6 +63,9 @@ export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfi
     ...(!asset.owners.length ? ['No accountable owner is recorded.'] : []),
     ...(asset.qualityStatus === 'failing' ? ['DataHub quality checks are failing.'] : []),
     ...(asset.qualityStatus === 'unavailable' ? ['Quality metadata is unavailable.'] : []),
+    ...(asset.dataProfile?.status === 'unavailable' ? ['Statistical profile metadata is unavailable; value-level health was not asserted.'] : []),
+    ...(asset.dataProfile?.status === 'error' ? ['Statistical profile metadata could not be read; value-level health was not asserted.'] : []),
+    ...(asset.dataProfile?.risks.map((risk) => `${risk.severity.toUpperCase()} ${risk.summary}`) ?? []),
     ...(asset.freshness.stale ? ['The metadata snapshot is stale.'] : []),
     ...(sensitiveFieldCount ? [`${sensitiveFieldCount} sensitive field${sensitiveFieldCount === 1 ? '' : 's'} require governed handling.`] : []),
     ...(asset.fields.length > maximumProfiledFields ? [`${asset.fields.length - maximumProfiledFields} additional fields were omitted from compact agent memory.`] : []),
@@ -115,7 +121,7 @@ function profilePatch(asset: DataHubAssetSummary): Partial<PipelineNodeData> {
     label: `${asset.name} profile`,
     description: 'Bounded, versioned agent memory of schema, quality, freshness and anomalies. No raw rows are stored.',
     owner: 'DATA LAB Agent',
-    status: profile.stale || profile.quality === 'failing' ? 'warning' : 'healthy',
+    status: profile.stale || profile.quality === 'failing' || Boolean(asset.dataProfile?.risks.length) ? 'warning' : 'healthy',
     schema: [],
     rule: summarizeDataProfile(profile),
     profile,

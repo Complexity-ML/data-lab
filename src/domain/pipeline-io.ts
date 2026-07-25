@@ -74,6 +74,23 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     const itemStatus = ['healthy', 'warning', 'unavailable'].includes(String(item.status))
       ? item.status as 'healthy' | 'warning' | 'unavailable'
       : 'unavailable'
+    const dataRiskSignals = Array.isArray(item.dataRiskSignals) ? item.dataRiskSignals.slice(0, 12).flatMap((value) => {
+      if (!value || typeof value !== 'object') return []
+      const signal = value as Record<string, unknown>
+      const kind = String(signal.kind)
+      const severity = String(signal.severity)
+      if (!['empty_dataset', 'volume_drop', 'volume_spike', 'null_spike', 'fully_null', 'duplicate_drift', 'distribution_shift'].includes(kind)) return []
+      if (!['critical', 'high', 'medium', 'low'].includes(severity)) return []
+      return [{
+        id: typeof signal.id === 'string' ? redactExportText(signal.id).slice(0, 180) : kind,
+        kind: kind as NonNullable<CatalogExplorationProgress['datasets'][number]['dataRiskSignals']>[number]['kind'],
+        severity: severity as NonNullable<CatalogExplorationProgress['datasets'][number]['dataRiskSignals']>[number]['severity'],
+        field: typeof signal.field === 'string' ? redactExportText(signal.field).slice(0, 240) : undefined,
+        summary: typeof signal.summary === 'string' ? redactExportText(signal.summary).slice(0, 320) : kind,
+        current: typeof signal.current === 'number' && Number.isFinite(signal.current) ? signal.current : undefined,
+        previous: typeof signal.previous === 'number' && Number.isFinite(signal.previous) ? signal.previous : undefined,
+      }]
+    }) : []
     return [{
       urn: item.urn.slice(0, 2_000),
       name: typeof item.name === 'string' ? redactExportText(item.name).slice(0, 240) : item.urn.slice(0, 240),
@@ -83,9 +100,25 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       qualityStatus: ['healthy', 'failing', 'unavailable'].includes(String(item.qualityStatus))
         ? item.qualityStatus as 'healthy' | 'failing' | 'unavailable'
         : undefined,
+      dataProfileStatus: ['available', 'unavailable', 'error'].includes(String(item.dataProfileStatus))
+        ? item.dataProfileStatus as 'available' | 'unavailable' | 'error'
+        : undefined,
+      dataRiskSignals,
       ownerCount: Math.max(0, Math.min(100_000, Number.isInteger(item.ownerCount) ? Number(item.ownerCount) : 0)),
       upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.upstreamCount) ? Number(item.upstreamCount) : 0)),
       downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.downstreamCount) ? Number(item.downstreamCount) : 0)),
+      downstreamMlCount: Math.max(0, Math.min(100_000, Number.isInteger(item.downstreamMlCount) ? Number(item.downstreamMlCount) : 0)),
+      downstreamMlRefs: Array.isArray(item.downstreamMlRefs) ? item.downstreamMlRefs.slice(0, 30).flatMap((value) => {
+        if (!value || typeof value !== 'object') return []
+        const ref = value as Record<string, unknown>
+        const kind = String(ref.kind)
+        if (typeof ref.urn !== 'string' || typeof ref.name !== 'string' || !['feature', 'model', 'deployment'].includes(kind)) return []
+        return [{
+          urn: ref.urn.slice(0, 2_000),
+          name: redactExportText(ref.name).slice(0, 240),
+          kind: kind as 'feature' | 'model' | 'deployment',
+        }]
+      }) : [],
       issues: Array.isArray(item.issues) ? item.issues.filter((issue): issue is string => typeof issue === 'string').map((issue) => redactExportText(issue).slice(0, 160)).slice(0, 12) : [],
       fingerprint: typeof item.fingerprint === 'string' ? item.fingerprint.slice(0, 120) : '',
       capturedAt: typeof item.capturedAt === 'string' ? item.capturedAt : new Date(0).toISOString(),

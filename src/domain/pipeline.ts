@@ -4,6 +4,7 @@ import { scenarioPresets } from './presets'
 import { defaultRiskAssessmentRule } from './risk-assessment'
 import { defaultQueryCheckRule } from './query-check'
 import { workerPolicyRule, defaultWorkerPolicy } from './worker-policy'
+import type { DataValueRiskSignal, LineageAssetSummary } from './catalog-connectors'
 
 export type CardKind = 'control' | 'explorer' | 'worker' | 'query' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
@@ -80,9 +81,13 @@ export interface CatalogDatasetCheckpoint {
   fieldCount: number
   sensitiveSignalCount?: number
   qualityStatus?: 'healthy' | 'failing' | 'unavailable'
+  dataProfileStatus?: 'available' | 'unavailable' | 'error'
+  dataRiskSignals?: DataValueRiskSignal[]
   ownerCount: number
   upstreamCount: number
   downstreamCount: number
+  downstreamMlCount?: number
+  downstreamMlRefs?: { urn: string; name: string; kind: 'feature' | 'model' | 'deployment' }[]
   issues: string[]
   fingerprint: string
   capturedAt: string
@@ -108,8 +113,8 @@ export interface PipelineNodeData extends Record<string, unknown> {
   datahubTags?: string[]
   datahubQuality?: 'healthy' | 'failing' | 'unavailable'
   datahubFreshness?: { capturedAt: string; expiresAt: string; stale: boolean }
-  datahubUpstream?: { urn: string; name: string; sensitive: boolean }[]
-  datahubDownstream?: { urn: string; name: string; sensitive: boolean }[]
+  datahubUpstream?: LineageAssetSummary[]
+  datahubDownstream?: LineageAssetSummary[]
   profile?: DataProfileSnapshot
   exploration?: CatalogExplorationProgress
   patchScope?: 'graph-only'

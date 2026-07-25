@@ -1,5 +1,5 @@
 import type { SchemaField } from './pipeline'
-import type { CatalogAssetSummary, CatalogEvidence } from './catalog-connectors'
+import type { CatalogAssetSummary, CatalogEvidence, LineageAssetSummary } from './catalog-connectors'
 
 export interface DataHubEvidence extends Omit<CatalogEvidence, 'connectorId' | 'sourceSystem' | 'assetRef'> {
   connectorId?: string
@@ -29,7 +29,7 @@ export interface DataHubAssetSummary extends Omit<CatalogAssetSummary, 'connecto
   tags: string[]
   fields: SchemaField[]
   qualityStatus: 'healthy' | 'failing' | 'unavailable'
-  upstream: { urn: string; name: string; sensitive: boolean }[]
-  downstream: { urn: string; name: string; sensitive: boolean }[]
+  upstream: LineageAssetSummary[]
+  downstream: LineageAssetSummary[]
   freshness: { capturedAt: string; expiresAt: string; stale: boolean }
 }

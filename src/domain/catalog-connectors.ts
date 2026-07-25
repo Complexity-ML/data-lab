@@ -2,6 +2,57 @@ import type { SchemaField } from './pipeline'
 
 export type CatalogConnectorKind = 'mcp' | 'http-api'
 
+export type DataValueRiskKind =
+  | 'empty_dataset'
+  | 'volume_drop'
+  | 'volume_spike'
+  | 'null_spike'
+  | 'fully_null'
+  | 'duplicate_drift'
+  | 'distribution_shift'
+
+export interface DataValueRiskSignal {
+  id: string
+  kind: DataValueRiskKind
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  field?: string
+  summary: string
+  current?: number
+  previous?: number
+}
+
+export interface DataFieldProfileSummary {
+  name: string
+  nullRate?: number
+  previousNullRate?: number
+  distinctCount?: number
+  uniqueProportion?: number
+  previousUniqueProportion?: number
+  mean?: number
+  previousMean?: number
+  stdev?: number
+  previousStdev?: number
+}
+
+export interface DataValueProfileSummary {
+  status: 'available' | 'unavailable' | 'error'
+  capturedAt?: string
+  previousCapturedAt?: string
+  rowCount?: number
+  previousRowCount?: number
+  fields: DataFieldProfileSummary[]
+  risks: DataValueRiskSignal[]
+}
+
+export type LineageAssetKind = 'dataset' | 'feature' | 'model' | 'deployment' | 'pipeline' | 'unknown'
+
+export interface LineageAssetSummary {
+  urn: string
+  name: string
+  sensitive: boolean
+  kind?: LineageAssetKind
+}
+
 export interface CatalogConnectorManifest {
   id: string
   name: string
@@ -32,8 +83,9 @@ export interface CatalogAssetSummary {
   tags: string[]
   fields: SchemaField[]
   qualityStatus: 'healthy' | 'failing' | 'unavailable'
-  upstream: { urn: string; name: string; sensitive: boolean }[]
-  downstream: { urn: string; name: string; sensitive: boolean }[]
+  dataProfile?: DataValueProfileSummary
+  upstream: LineageAssetSummary[]
+  downstream: LineageAssetSummary[]
   freshness: { capturedAt: string; expiresAt: string; stale: boolean }
 }
 

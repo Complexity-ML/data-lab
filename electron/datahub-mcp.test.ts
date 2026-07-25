@@ -228,8 +228,48 @@ describe('DataHub MCP connection settings', () => {
             }],
           },
           health: [{ status: 'PASS' }],
+          datasetProfiles: [{
+            timestampMillis: 1_720_000_000_000,
+            rowCount: 500,
+            columnCount: 1,
+            fieldProfiles: [{
+              fieldPath: 'order_id',
+              uniqueCount: 350,
+              uniqueProportion: 0.7,
+              nullCount: 125,
+              nullProportion: 0.25,
+              min: null,
+              max: null,
+              mean: null,
+              median: null,
+              stdev: null,
+            }],
+          }, {
+            timestampMillis: 1_719_000_000_000,
+            rowCount: 1_000,
+            columnCount: 1,
+            fieldProfiles: [{
+              fieldPath: 'order_id',
+              uniqueCount: 990,
+              uniqueProportion: 0.99,
+              nullCount: 10,
+              nullProportion: 0.01,
+              min: null,
+              max: null,
+              mean: null,
+              median: null,
+              stdev: null,
+            }],
+          }],
           upstream: { relationships: [] },
-          downstream: { relationships: [] },
+          downstream: {
+            relationships: [{
+              entity: {
+                urn: 'urn:li:mlModel:(data_lab,churn_v3,PROD)',
+                type: 'MLMODEL',
+              },
+            }],
+          },
         },
       },
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -241,10 +281,26 @@ describe('DataHub MCP connection settings', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe('http://localhost:8080/api/graphql')
     expect(inspection.asset).toMatchObject({ urn, name: 'orders', qualityStatus: 'healthy' })
     expect(inspection.asset.fields).toEqual([{ name: 'order_id', type: 'string', tags: ['PII', 'Customer Identifier', 'Restricted'] }])
+    expect(inspection.asset.dataProfile).toMatchObject({
+      status: 'available',
+      rowCount: 500,
+      previousRowCount: 1_000,
+      risks: expect.arrayContaining([
+        expect.objectContaining({ kind: 'volume_drop', severity: 'high' }),
+        expect.objectContaining({ kind: 'null_spike', field: 'order_id', severity: 'high' }),
+        expect.objectContaining({ kind: 'duplicate_drift', field: 'order_id', severity: 'high' }),
+      ]),
+    })
+    expect(inspection.asset.downstream).toEqual([expect.objectContaining({
+      urn: 'urn:li:mlModel:(data_lab,churn_v3,PROD)',
+      kind: 'model',
+    })])
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { query: string }
     expect(requestBody.query).toContain('tags { tags')
     expect(requestBody.query).toContain('glossaryTerms')
     expect(requestBody.query).toContain('editableSchemaMetadata')
+    expect(requestBody.query).toContain('datasetProfiles(limit: 2)')
+    expect(requestBody.query).not.toContain('sampleValues')
     expect(inspection.evidence.map((read) => read.capability)).toEqual(['entity.read', 'schema.read', 'lineage.read', 'lineage.read'])
     expect(inspection.evidence.every((read) => read.summary.includes('GraphQL'))).toBe(true)
   })

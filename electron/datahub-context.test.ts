@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { entityUrns, parseAssetContext, parseSearchResults, parseSearchTotal, qualityStatusFromEntity, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
+import { entityUrns, parseAssetContext, parseDataValueProfile, parseSearchResults, parseSearchTotal, qualityStatusFromEntity, readStructuredToolResult, sanitizeCatalogText, sanitizeEvidenceSummary } from './datahub-context.js'
 
 const urn = 'urn:li:dataset:(urn:li:dataPlatform:snowflake,order_entry.customers,PROD)'
 
@@ -116,5 +116,44 @@ describe('DataHub MCP context normalization', () => {
     expect(qualityStatusFromEntity({ assertions: [{ runEvents: [] }] })).toBe('unavailable')
     expect(qualityStatusFromEntity({ assertions: [{ runEvents: [{ result: { type: 'FAILURE' } }] }] })).toBe('failing')
     expect(qualityStatusFromEntity({ assertions: [{ runEvents: [{ result: { type: 'SUCCESS' } }] }] })).toBe('healthy')
+  })
+
+  it('detects bounded value anomalies from two aggregate profiles without retaining raw samples', () => {
+    const profile = parseDataValueProfile({
+      datasetProfiles: [
+        {
+          timestampMillis: 2_000,
+          rowCount: 40,
+          fieldProfiles: [
+            { fieldPath: 'customer_id', uniqueCount: 28, uniqueProportion: 0.7, nullProportion: 0 },
+            { fieldPath: 'email', uniqueCount: 24, uniqueProportion: 0.6, nullProportion: 0.4, sampleValues: ['private@example.com'] },
+            { fieldPath: 'amount', uniqueCount: 30, uniqueProportion: 0.75, nullProportion: 0, mean: 50, stdev: 14 },
+          ],
+        },
+        {
+          timestampMillis: 1_000,
+          rowCount: 100,
+          fieldProfiles: [
+            { fieldPath: 'customer_id', uniqueCount: 100, uniqueProportion: 1, nullProportion: 0 },
+            { fieldPath: 'email', uniqueCount: 95, uniqueProportion: 0.95, nullProportion: 0.05 },
+            { fieldPath: 'amount', uniqueCount: 90, uniqueProportion: 0.9, nullProportion: 0, mean: 10, stdev: 10 },
+          ],
+        },
+      ],
+    })
+
+    expect(profile).toMatchObject({ status: 'available', rowCount: 40, previousRowCount: 100 })
+    expect(profile.risks.map((risk) => risk.kind)).toEqual(expect.arrayContaining([
+      'volume_drop',
+      'null_spike',
+      'duplicate_drift',
+      'distribution_shift',
+    ]))
+    expect(JSON.stringify(profile)).not.toContain('private@example.com')
+    expect(JSON.stringify(profile)).not.toContain('sampleValues')
+  })
+
+  it('keeps absent aggregate profiling explicit instead of treating it as healthy', () => {
+    expect(parseDataValueProfile({})).toEqual({ status: 'unavailable', fields: [], risks: [] })
   })
 })

@@ -13,7 +13,8 @@ export const defaultCatalogRetryLimit = 3
 export const defaultCatalogRetryCooldownMs = 30_000
 
 export function hasDataIncident(checkpoint: CatalogDatasetCheckpoint) {
-  return checkpoint.issues.some((issue) => dataIncidentIssues.has(issue))
+  return Boolean(checkpoint.dataRiskSignals?.length)
+    || checkpoint.issues.some((issue) => dataIncidentIssues.has(issue))
 }
 
 export function hasGovernanceGap(checkpoint: CatalogDatasetCheckpoint) {
@@ -205,10 +206,17 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     ...(asset.owners.length === 0 ? ['owner missing'] : []),
     ...(asset.tags.length === 0 ? ['tags missing'] : []),
     ...(asset.qualityStatus === 'failing' ? ['quality failing'] : []),
+    ...(asset.dataProfile?.status === 'unavailable' ? ['data profile unavailable'] : []),
+    ...(asset.dataProfile?.status === 'error' ? ['data profile read failed'] : []),
+    ...(asset.dataProfile?.risks.map((risk) => `data-risk:${risk.kind}${risk.field ? `:${risk.field}` : ''}`) ?? []),
   ]
   const status: CatalogDatasetCheckpoint['status'] = unavailable ? 'unavailable' : issues.length ? 'warning' : 'healthy'
   const sensitiveSignalCount = asset.fields.filter((field) => field.tags?.some((tag) => sensitivePattern.test(tag))).length
     + asset.tags.filter((tag) => sensitivePattern.test(tag)).length
+  const downstreamMlRefs = asset.downstream
+    .filter((item): item is typeof item & { kind: 'feature' | 'model' | 'deployment' } => ['feature', 'model', 'deployment'].includes(item.kind ?? ''))
+    .slice(0, 30)
+    .map(({ urn, name, kind }) => ({ urn, name, kind }))
   const capturedAt = evidence.map((read) => read.capturedAt).sort().at(-1) ?? asset.freshness.capturedAt
   const expiresAt = evidence.filter((read) => read.status === 'ok' && !read.stale).map((read) => read.expiresAt).sort()[0] ?? capturedAt
   return {
@@ -218,9 +226,13 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     fieldCount: asset.fields.length,
     sensitiveSignalCount,
     qualityStatus: asset.qualityStatus,
+    dataProfileStatus: asset.dataProfile?.status,
+    dataRiskSignals: asset.dataProfile?.risks ?? [],
     ownerCount: asset.owners.length,
     upstreamCount: asset.upstream.length,
     downstreamCount: asset.downstream.length,
+    downstreamMlCount: downstreamMlRefs.length,
+    downstreamMlRefs,
     issues,
     fingerprint: fingerprint([
       asset.urn,
@@ -228,8 +240,13 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
       asset.owners.join('|'),
       asset.tags.join('|'),
       asset.qualityStatus,
+      asset.dataProfile?.status ?? 'unavailable',
+      asset.dataProfile?.capturedAt ?? '',
+      asset.dataProfile?.previousCapturedAt ?? '',
+      asset.dataProfile?.risks.map((risk) => `${risk.id}:${risk.severity}:${risk.current ?? ''}:${risk.previous ?? ''}`).join('|') ?? '',
       asset.upstream.map((item) => item.urn).join('|'),
       asset.downstream.map((item) => item.urn).join('|'),
+      downstreamMlRefs.map((item) => `${item.kind}:${item.urn}`).join('|'),
       evidence.map((read) => `${read.tool}:${read.status}:${read.stale}:${read.summary}`).join('|'),
     ].join('::')),
     capturedAt,

@@ -116,4 +116,81 @@ describe('impact and risk overview', () => {
       evidence: 'catalog_checkpoint:incomplete_governance',
     })
   })
+
+  it('surfaces statistical profile anomalies independently from privacy coverage', () => {
+    const explorer = {
+      ...newCard('explorer', 0),
+      id: 'explorer',
+      data: {
+        ...newCard('explorer', 0).data,
+        exploration: {
+          query: '*',
+          total: 1,
+          discovered: 1,
+          inspected: 1,
+          failed: 0,
+          incidents: 1,
+          governanceGaps: 0,
+          concurrency: 1,
+          state: 'complete' as const,
+          checkpointAt: '2026-07-24T20:00:00.000Z',
+          datasets: [{
+            urn: 'urn:li:dataset:training',
+            name: 'training_customers',
+            status: 'warning' as const,
+            fieldCount: 8,
+            sensitiveSignalCount: 2,
+            qualityStatus: 'unavailable' as const,
+            dataProfileStatus: 'available' as const,
+            dataRiskSignals: [{
+              id: 'null_spike:label',
+              kind: 'null_spike' as const,
+              severity: 'high' as const,
+              field: 'label',
+              summary: 'label null rate increased by 35 percentage points.',
+              current: 0.4,
+              previous: 0.05,
+            }],
+            ownerCount: 1,
+            upstreamCount: 1,
+            downstreamCount: 2,
+            downstreamMlCount: 2,
+            downstreamMlRefs: [
+              { urn: 'urn:li:mlFeature:customer_label', name: 'customer_label', kind: 'feature' as const },
+              { urn: 'urn:li:mlModel:churn_v3', name: 'churn_v3', kind: 'model' as const },
+            ],
+            issues: ['data-risk:null_spike:label'],
+            fingerprint: 'training-null-spike',
+            capturedAt: '2026-07-24T20:00:00.000Z',
+            expiresAt: '2026-07-24T20:05:00.000Z',
+          }],
+        },
+      },
+    }
+
+    const overview = collectRiskImpactOverview([explorer], [])
+
+    expect(overview.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'risk',
+        domain: 'data',
+        severity: 'high',
+        sourceRef: 'urn:li:dataset:training',
+        evidence: 'dataset_profile:two_version_aggregate',
+      }),
+      expect.objectContaining({
+        kind: 'coverage-gap',
+        domain: 'privacy',
+        sourceRef: 'urn:li:dataset:training',
+      }),
+      expect.objectContaining({
+        kind: 'risk',
+        domain: 'ml',
+        severity: 'high',
+        affectedModels: 2,
+        sourceRef: 'urn:li:dataset:training',
+        evidence: 'dataset_profile:two_version_aggregate+lineage:versioned',
+      }),
+    ]))
+  })
 })

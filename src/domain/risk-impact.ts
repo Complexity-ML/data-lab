@@ -45,10 +45,11 @@ function hasDownstreamRisk(nodeId: string, nodes: PipelineNode[], edges: Edge[])
   return false
 }
 
-function riskCardCoversDataset(dataset: CatalogDatasetCheckpoint, nodes: PipelineNode[]) {
+function riskCardCoversDataset(dataset: CatalogDatasetCheckpoint, nodes: PipelineNode[], domain?: RiskDomain) {
   const needles = [dataset.urn, dataset.name].map((value) => value.trim().toLowerCase()).filter(Boolean)
   return nodes.some((node) => {
     if (node.data.kind !== 'risk') return false
+    if (domain && parseRiskAssessmentRule(node.data.rule).domain !== domain) return false
     const text = `${node.data.label} ${node.data.description} ${node.data.rule ?? ''}`.toLowerCase()
     return needles.some((needle) => text.includes(needle))
   })
@@ -57,10 +58,10 @@ function riskCardCoversDataset(dataset: CatalogDatasetCheckpoint, nodes: Pipelin
 function catalogRiskItems(node: PipelineNode, nodes: PipelineNode[]): RiskImpactItem[] {
   const datasets = node.data.exploration?.datasets ?? []
   return datasets.flatMap<RiskImpactItem>((dataset) => {
-    if (dataset.status === 'unavailable' || riskCardCoversDataset(dataset, nodes)) return []
+    if (dataset.status === 'unavailable') return []
     const affectedAssets = Math.max(1, 1 + dataset.upstreamCount + dataset.downstreamCount)
     const items: RiskImpactItem[] = []
-    if (dataset.qualityStatus === 'failing' || dataset.issues.includes('quality failing')) {
+    if ((dataset.qualityStatus === 'failing' || dataset.issues.includes('quality failing')) && !riskCardCoversDataset(dataset, nodes, 'data')) {
       items.push({
         id: `catalog-quality-${dataset.urn}`,
         nodeId: node.id,
@@ -75,7 +76,41 @@ function catalogRiskItems(node: PipelineNode, nodes: PipelineNode[]): RiskImpact
         sourceRef: dataset.urn,
       })
     }
-    if ((dataset.sensitiveSignalCount ?? 0) > 0) {
+    if (!riskCardCoversDataset(dataset, nodes, 'data')) {
+      items.push(...(dataset.dataRiskSignals ?? []).map((signal) => ({
+        id: `catalog-profile-${dataset.urn}-${signal.id}`,
+        nodeId: node.id,
+        kind: 'risk' as const,
+        domain: 'data' as const,
+        severity: signal.severity,
+        title: `${signal.kind.replaceAll('_', ' ')} · ${dataset.name}${signal.field ? ` · ${signal.field}` : ''}`,
+        detail: signal.summary,
+        action: signal.kind === 'duplicate_drift'
+          ? 'Verify the expected key contract, inspect downstream impact, then propose deduplication or quarantine without mutating source data.'
+          : 'Inspect this dataset deeply, trace downstream impact, propose a bounded graph correction, then verify against a fresh statistical profile.',
+        evidence: 'dataset_profile:two_version_aggregate',
+        affectedAssets,
+        sourceRef: dataset.urn,
+      })))
+    }
+    if ((dataset.downstreamMlCount ?? 0) > 0 && (dataset.dataRiskSignals?.length ?? 0) > 0 && !riskCardCoversDataset(dataset, nodes, 'ml')) {
+      const refs = dataset.downstreamMlRefs ?? []
+      items.push(...(dataset.dataRiskSignals ?? []).map((signal) => ({
+        id: `catalog-ml-${dataset.urn}-${signal.id}`,
+        nodeId: node.id,
+        kind: 'risk' as const,
+        domain: 'ml' as const,
+        severity: signal.severity,
+        title: `ML dependency risk · ${dataset.name}${signal.field ? ` · ${signal.field}` : ''}`,
+        detail: `${signal.summary} Versioned lineage proves ${dataset.downstreamMlCount} downstream ML feature, model or deployment dependency/dependencies${refs.length ? `: ${refs.map((ref) => ref.name).join(', ')}` : ''}.`,
+        action: 'Assess training and serving impact, quarantine the affected evidence path when necessary, and require a fresh profile before retraining or promotion.',
+        evidence: 'dataset_profile:two_version_aggregate+lineage:versioned',
+        affectedAssets,
+        affectedModels: dataset.downstreamMlCount,
+        sourceRef: dataset.urn,
+      })))
+    }
+    if ((dataset.sensitiveSignalCount ?? 0) > 0 && !riskCardCoversDataset(dataset, nodes, 'privacy')) {
       items.push({
         id: `catalog-sensitive-${dataset.urn}`,
         nodeId: node.id,

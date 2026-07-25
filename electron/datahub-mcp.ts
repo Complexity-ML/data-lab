@@ -546,6 +546,23 @@ const catalogEntitiesQuery = `query DataLabCatalogEntities($urns: [String!]!) {
           glossaryTerms { terms { term { urn properties { name } } } }
         }
       }
+      datasetProfiles(limit: 2) {
+        timestampMillis
+        rowCount
+        columnCount
+        fieldProfiles {
+          fieldPath
+          uniqueCount
+          uniqueProportion
+          nullCount
+          nullProportion
+          min
+          max
+          mean
+          median
+          stdev
+        }
+      }
       health { type status message }
     }
   }
@@ -757,8 +774,10 @@ async function flushSummaryInspections() {
   summaryFlushScheduled = false
   const pending = pendingSummaryInspections
   pendingSummaryInspections = []
-  for (let offset = 0; offset < pending.length; offset += 32) {
-    const batch = pending.slice(offset, offset + 32)
+  // Field profiles are aggregate-only but can be wide. Smaller GraphQL batches
+  // keep the payload and latency bounded while the outer explorer remains parallel.
+  for (let offset = 0; offset < pending.length; offset += 8) {
+    const batch = pending.slice(offset, offset + 8)
     const urns = [...new Set(batch.map((item) => item.urn))]
     let reads: Awaited<ReturnType<typeof readEntityBatch>>
     try {
@@ -846,6 +865,23 @@ const deepDatasetQuery = `query DataLabDeepDataset($urn: String!) {
           fieldPath
           tags { tags { tag { urn name properties { name } } } }
           glossaryTerms { terms { term { urn properties { name } } } }
+        }
+      }
+      datasetProfiles(limit: 2) {
+        timestampMillis
+        rowCount
+        columnCount
+        fieldProfiles {
+          fieldPath
+          uniqueCount
+          uniqueProportion
+          nullCount
+          nullProportion
+          min
+          max
+          mean
+          median
+          stdev
         }
       }
       health { type status message }

@@ -194,6 +194,37 @@ describe('Catalog Explorer', () => {
     })
   })
 
+  it('persists aggregate data anomalies as evidence-backed incidents', async () => {
+    const drifted = {
+      ...asset(4),
+      dataProfile: {
+        status: 'available' as const,
+        capturedAt,
+        previousCapturedAt: '2026-07-24T07:00:00.000Z',
+        rowCount: 40,
+        previousRowCount: 100,
+        fields: [],
+        risks: [{
+          id: 'volume_drop:dataset',
+          kind: 'volume_drop' as const,
+          severity: 'high' as const,
+          summary: 'Row volume fell 60% between the two latest profiles.',
+          current: 40,
+          previous: 100,
+        }],
+      },
+    }
+
+    const result = await inspectCatalogInParallel([drifted], async () => inspection(drifted), { concurrency: 1 })
+
+    expect(result.progress).toMatchObject({ incidents: 1, failed: 0, state: 'complete' })
+    expect(result.progress.datasets[0]).toMatchObject({
+      dataProfileStatus: 'available',
+      dataRiskSignals: [expect.objectContaining({ kind: 'volume_drop', severity: 'high' })],
+      issues: expect.arrayContaining(['data-risk:volume_drop']),
+    })
+  })
+
   it('prioritizes true data and sensitive risk candidates without promoting governance gaps', () => {
     const governance = checkpointForInspection(inspection({ ...asset(1), tags: [] }))
     const sensitive = checkpointForInspection(inspection({

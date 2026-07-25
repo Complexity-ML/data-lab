@@ -287,6 +287,24 @@ export function useCatalogExplorer(options: {
           transition: existing ? 'worsened' as const : 'opened' as const,
         }]
       })
+      const dataIncidents = explored.progress.datasets.filter(hasDataIncident).flatMap((dataset) => {
+        const incidentKey = `catalog-explorer:${dataset.urn}`
+        const existing = incidentSummaries.find((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')
+        if (existing?.fingerprint === dataset.fingerprint) return []
+        const mostSevereSignal = [...(dataset.dataRiskSignals ?? [])].sort((left, right) => {
+          const rank = { critical: 4, high: 3, medium: 2, low: 1 }
+          return rank[right.severity] - rank[left.severity]
+        })[0]
+        return [{
+          dataset,
+          incidentKey,
+          transition: existing ? 'worsened' as const : 'opened' as const,
+          severity: mostSevereSignal?.severity === 'critical' || mostSevereSignal?.severity === 'high' ? 'critical' as const : 'warning' as const,
+          detail: dataset.dataRiskSignals?.length
+            ? dataset.dataRiskSignals.map((signal) => signal.summary).join(' · ')
+            : dataset.issues.join(', ') || 'A fresh DataHub assertion reported a data-quality incident.',
+        }]
+      })
       const recoveredGovernanceIncidents = explored.inspections.flatMap((inspection) => {
         if (isInspectionUnavailable(inspection)) return []
         const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)
@@ -329,7 +347,7 @@ export function useCatalogExplorer(options: {
           transition: 'recovered' as const,
           severity: 'info' as const,
           title: `Data quality recovered · ${dataset.name}`,
-          detail: 'A fresh bounded catalog inspection no longer reports a failing quality assertion. The previous incident remains available in history.',
+          detail: 'A fresh bounded catalog inspection no longer reports the previous statistical anomaly or failing quality assertion. The previous incident remains available in history.',
           sourceSystem: asset.sourceSystem ?? 'Catalog',
           sourceRef: dataset.urn,
           fingerprint: dataset.fingerprint,
@@ -360,17 +378,17 @@ export function useCatalogExplorer(options: {
           cardId: input.explorer.id,
           branchId: dataset.urn,
         })),
-        ...explored.progress.datasets.filter(hasDataIncident).map((dataset) => logIncident({
-        incidentKey: `catalog-explorer:${dataset.urn}`,
-        transition: 'opened',
-        severity: 'warning',
-        title: `Data quality incident · ${dataset.name}`,
-        detail: dataset.issues.join(', ') || 'Catalog Explorer detected a metadata signal requiring attention.',
-        sourceSystem: byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
-        sourceRef: dataset.urn,
-        fingerprint: dataset.fingerprint,
-        cardId: input.explorer.id,
-        branchId: dataset.urn,
+        ...dataIncidents.map(({ dataset, incidentKey, transition, severity, detail }) => logIncident({
+          incidentKey,
+          transition,
+          severity,
+          title: `Data value anomaly · ${dataset.name}`,
+          detail,
+          sourceSystem: byUrn.get(dataset.urn)?.sourceSystem ?? 'Catalog',
+          sourceRef: dataset.urn,
+          fingerprint: dataset.fingerprint,
+          cardId: input.explorer.id,
+          branchId: dataset.urn,
         })),
       ])
     }
