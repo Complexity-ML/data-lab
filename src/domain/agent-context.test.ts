@@ -169,4 +169,42 @@ describe('incremental agent version context', () => {
     expect(request.guardrails).toContain('Do not add, update, connect or remove any card or edge')
     expect(request.guardrails).toContain('Never approve, reject, apply or write back the pending proposal')
   })
+
+  it('keeps a large accumulated graph below the Electron IPC request limit', () => {
+    const base = customerActivationNodes[0]!
+    const nodes = Array.from({ length: 90 }, (_, index) => ({
+      ...base,
+      id: `large-node-${index}`,
+      data: {
+        ...base.data,
+        label: `Large node ${index}`,
+        description: `Dataset metadata ${index} ${'long evidence '.repeat(500)}`,
+        rule: `scope=dataset-${index} | ${'bounded_rule=true | '.repeat(300)}`,
+      },
+    }))
+    const edges = nodes.slice(1).map((node, index) => ({ id: `large-edge-${index}`, source: nodes[index]!.id, target: node.id }))
+    const versions = Array.from({ length: 6 }, (_, index) => createPipelineVersion(nodes, edges, `Version ${index}`, 'agent', []))
+    const request = buildPipelineAgentRequest({
+      nodes,
+      edges,
+      issues: Array.from({ length: 80 }, (_, index) => ({ id: `issue-${index}`, atomId: 'bounded-agent-context', severity: 'error' as const, title: `Issue ${index}`, detail: 'd'.repeat(2_000) })),
+      versions,
+      datahubEvidence: Array.from({ length: 50 }, (_, index) => `Evidence ${index} ${'e'.repeat(2_000)}`),
+      objective: 'Analyze the accumulated graph without crossing the IPC boundary.',
+      incidentContext: Array.from({ length: 30 }, (_, index) => ({
+        incidentKey: `incident-${index}`,
+        status: 'open' as const,
+        severity: 'warning' as const,
+        title: `Incident ${index}`,
+        detail: 'i'.repeat(2_000),
+        openedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        occurrenceCount: 1,
+        eventCount: 1,
+      })),
+    })
+
+    expect(JSON.stringify(request).length).toBeLessThan(90_000)
+    expect(request.graph.omitted.nodes).toBe(66)
+  })
 })

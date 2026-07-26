@@ -46,7 +46,15 @@ export function resetCatalogRetryState(progress: CatalogExplorationProgress): Ca
 }
 
 function preferCheckpoint(left: CatalogDatasetCheckpoint, right: CatalogDatasetCheckpoint) {
-  return Date.parse(right.capturedAt) >= Date.parse(left.capturedAt) ? right : left
+  const preferred = Date.parse(right.capturedAt) >= Date.parse(left.capturedAt) ? right : left
+  const previous = preferred === right ? left : right
+  return {
+    ...preferred,
+    // Carry the last materialized fingerprint through a fresh inspection. If
+    // the evidence changes it intentionally differs from fingerprint and the
+    // dataset becomes actionable again.
+    handledRiskFingerprint: preferred.handledRiskFingerprint ?? previous.handledRiskFingerprint,
+  }
 }
 
 export function mergeCatalogProgress(
@@ -185,9 +193,25 @@ export function rankCatalogRiskCandidateUrns(
     .filter((checkpoint) => checkpoint.status !== 'unavailable'
       && !excluded.has(checkpoint.urn)
       && !excludedFamilies.has(catalogDatasetFamilyKey(checkpoint.name))
+      && checkpoint.handledRiskFingerprint !== checkpoint.fingerprint
       && (hasDataIncident(checkpoint) || (checkpoint.sensitiveSignalCount ?? 0) > 0))
     .sort((left, right) => score(right) - score(left) || left.urn.localeCompare(right.urn))
     .map((checkpoint) => checkpoint.urn)
+}
+
+export function markCatalogRiskCandidateHandled(
+  progress: CatalogExplorationProgress,
+  urn: string,
+): CatalogExplorationProgress {
+  const checkpoint = progress.datasets.find((candidate) => candidate.urn === urn)
+  if (!checkpoint || checkpoint.handledRiskFingerprint === checkpoint.fingerprint) return progress
+  return {
+    ...progress,
+    checkpointAt: new Date().toISOString(),
+    datasets: progress.datasets.map((candidate) => candidate.urn === urn
+      ? { ...candidate, handledRiskFingerprint: candidate.fingerprint }
+      : candidate),
+  }
 }
 
 export function catalogHasPendingAutonomousWork(

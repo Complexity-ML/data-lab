@@ -256,6 +256,10 @@ export function beginWorkspaceSession(userDataDirectory: string) {
   const target = db(userDataDirectory)
   const previous = readSetting(target, CLEAN_SHUTDOWN_KEY)
   const uncleanShutdown = previous === 'false'
+  // A workbench checkpoint is useful while the current unsaved session is
+  // alive, but it has no durable workspace owner. Never restore it into a new
+  // blank canvas after a close or crash.
+  if (!activeWorkspaceId(target)) target.prepare("DELETE FROM catalog_checkpoints WHERE scope_id = 'workbench'").run()
   writeSetting(target, CLEAN_SHUTDOWN_KEY, 'false')
   return uncleanShutdown
 }

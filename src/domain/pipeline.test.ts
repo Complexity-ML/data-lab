@@ -55,4 +55,20 @@ describe('pipeline validation', () => {
 
     expect(next.map((node) => node.id)).toEqual(['control', 'source', 'profile-connected', 'unique-draft'])
   })
+
+  it('removes an orphaned profile whose DataHub identity differs only by casing', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const connectedProfile = {
+      ...newCard('profile', 1),
+      id: 'profile-connected',
+      data: { ...newCard('profile', 1).data, assetRef: 'urn:li:dataset:(urn:li:dataPlatform:dbt,ORDER_DETAILS,PROD)' },
+    }
+    const orphanProfile = {
+      ...newCard('profile', 2),
+      id: 'profile-orphan',
+      data: { ...newCard('profile', 2).data, assetRef: 'urn:li:dataset:(urn:li:dataPlatform:dbt,order_details,PROD)' },
+    }
+    const next = pruneOrphanedCards([source, connectedProfile, orphanProfile], [{ id: 'source-profile', source: source.id, target: connectedProfile.id }])
+    expect(next.map((node) => node.id)).toEqual(['source', 'profile-connected'])
+  })
 })

@@ -117,6 +117,12 @@ export interface CatalogDatasetCheckpoint {
   downstreamMlRefs?: { urn: string; name: string; kind: 'feature' | 'model' | 'deployment' }[]
   issues: string[]
   fingerprint: string
+  /**
+   * The last evidence fingerprint that was materialized as an autonomous
+   * graph branch. A changed fingerprint becomes actionable again; an
+   * unchanged one must stay idle across restarts and SQLite reloads.
+   */
+  handledRiskFingerprint?: string
   capturedAt: string
   expiresAt: string
   attemptCount?: number
@@ -386,7 +392,10 @@ const hostStarterKinds = new Set<CardKind>(['control', 'explorer', 'worker'])
 const floatingSidecarKinds = new Set<CardKind>(['profile'])
 
 function orphanIdentity(node: PipelineNode) {
-  const asset = node.data.assetRef ?? node.data.datahubUrn
+  // DataHub URNs and provider labels are not consistently cased. Treat a
+  // casing-only variation as the same visual card so agent repairs cannot
+  // leave ORDER_DETAILS and order_details profile sidecars on one canvas.
+  const asset = (node.data.assetRef ?? node.data.datahubUrn)?.trim().toLowerCase()
   return asset ? `${node.data.kind}:${asset}` : `${node.data.kind}:${node.data.label.trim().toLowerCase()}`
 }
 

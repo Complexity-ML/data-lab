@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { catalogDatasetFamilyKey, catalogHasPendingAutonomousWork, checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { catalogDatasetFamilyKey, catalogHasPendingAutonomousWork, checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, markCatalogRiskCandidateHandled, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -249,6 +249,41 @@ describe('Catalog Explorer', () => {
 
     expect(rankCatalogRiskCandidateUrns(progress)).toEqual([failing.urn, sensitive.urn])
     expect(rankCatalogRiskCandidateUrns(progress, [failing.urn])).toEqual([sensitive.urn])
+  })
+
+  it('does not replay a materialized risk fingerprint after a checkpoint reload', () => {
+    const sensitive = checkpointForInspection(inspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+    }))
+    const progress = {
+      query: '*',
+      total: 1,
+      discovered: 1,
+      inspected: 1,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [sensitive],
+    }
+
+    const handled = markCatalogRiskCandidateHandled(progress, sensitive.urn)
+
+    expect(rankCatalogRiskCandidateUrns(handled)).toEqual([])
+    expect(catalogHasPendingAutonomousWork(handled)).toBe(false)
+    expect(handled.datasets[0]?.handledRiskFingerprint).toBe(sensitive.fingerprint)
+
+    const changed = mergeCatalogProgress(handled, {
+      ...progress,
+      checkpointAt: '2026-07-24T09:00:00.000Z',
+      datasets: [{ ...sensitive, fingerprint: 'fresh-evidence', capturedAt: '2026-07-24T09:00:00.000Z' }],
+    })!
+
+    expect(changed.datasets[0]?.handledRiskFingerprint).toBe(sensitive.fingerprint)
+    expect(rankCatalogRiskCandidateUrns(changed)).toEqual([sensitive.urn])
   })
 
   it('does not rebuild the same logical risk branch for every platform representation', () => {

@@ -76,7 +76,7 @@ describe('SQLite workspace persistence', () => {
     expect(clearIncidentEvents(target)).toEqual({ deleted: 0, workspaceId: undefined })
   })
 
-  it('persists catalog coverage for the unsaved workbench without saving its graph', () => {
+  it('keeps workbench catalog coverage only for the current unsaved session', () => {
     const target = directory('catalog-checkpoint')
     const progress = { inspected: 8, total: 67, datasets: [{ urn: 'urn:li:dataset:test-1' }] }
 
@@ -86,6 +86,8 @@ describe('SQLite workspace persistence', () => {
 
     closeWorkspaceDatabase()
     expect(loadCatalogCheckpoint(target, 'catalog:deadbeef')).toEqual(progress)
+    beginWorkspaceSession(target)
+    expect(loadCatalogCheckpoint(target, 'catalog:deadbeef')).toBeNull()
   })
 
   it('isolates catalog checkpoints by active workspace', () => {

@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { governanceGapIssues, hasDataIncident, hasGovernanceGap, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { governanceGapIssues, hasDataIncident, hasGovernanceGap, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, markCatalogRiskCandidateHandled, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { catalogExplorerCheckpointScope, parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -477,10 +477,33 @@ export function useCatalogExplorer(options: {
     return progress
   }, [checkpointKey, persistProgress, updateProgress])
 
+  const markRiskCandidateHandled = useCallback(async (explorer: PipelineNode, urn: string) => {
+    const key = checkpointKey(explorer)
+    await checkpointWrites.current.get(key)?.catch(() => undefined)
+    const persisted = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
+    const current = mergeCatalogProgress(
+      mergeCatalogProgress(explorer.data.exploration, latestProgress.current.get(key)),
+      persisted ?? undefined,
+    )
+    if (!current) return
+    const progress = markCatalogRiskCandidateHandled(current, urn)
+    latestProgress.current.set(key, progress)
+    setNodes((nodes) => nodes.map((node) => node.id === explorer.id
+      ? {
+          ...node,
+          data: {
+            ...node.data,
+            exploration: progress,
+          },
+        }
+      : node))
+    await persistProgress(key, progress)
+  }, [checkpointKey, persistProgress, setNodes])
+
   const assetsFor = useCallback((explorerId: string) => catalogAssets.current.get(explorerId) ?? [], [])
   const resetRetriesOnNextExplore = useCallback(() => {
     resetRetriesRequested.current = true
   }, [])
 
-  return { assetsFor, attachProgress, explore, markDiscoveryFailed, resetRetriesOnNextExplore, updateProgress }
+  return { assetsFor, attachProgress, explore, markDiscoveryFailed, markRiskCandidateHandled, resetRetriesOnNextExplore, updateProgress }
 }

@@ -1,6 +1,6 @@
 import { AlertTriangle, ChartNetwork, CheckCircle2, LoaderCircle, PanelRightClose, ShieldAlert, Wrench } from 'lucide-react'
 import { useMemo, type MutableRefObject } from 'react'
-import { PanelHeader } from '../components/shared/PanelHeader'
+import { PanelFooterActions, PanelHeader, PanelHeaderButton } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { RiskImpactOverview } from '../domain/risk-impact'
 import type { RiskImpactItem } from '../domain/risk-impact'
@@ -33,7 +33,7 @@ const labels: Record<'all' | RiskDomain, string> = {
 export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange, onProposeCorrection, onSelectCard, overview, scrollPosition }: RiskImpactViewProps) {
   const items = useMemo(() => riskItemsForDomain(overview, domain), [domain, overview])
   return <>
-    <PanelHeader action={<button aria-label="Close impact and risks" className="panel-toggle" onClick={onClose} title="Close impact and risks" type="button"><PanelRightClose size={16} /></button>} eyebrow="RISK" title="Impact & Risks" />
+    <PanelHeader eyebrow="RISK" title="Impact & Risks" />
     <PanelScrollArea className="risk-panel-content" label="Impact and risks content" scrollPosition={scrollPosition}>
       <section className="risk-overview">
         <div><strong>{overview.actionable}</strong><small>Confirmed</small></div>
@@ -76,5 +76,8 @@ export function RiskImpactView({ correctionBusy, domain, onClose, onDomainChange
         </button>
       </article>)}</div> : <div className="risk-panel-clear"><CheckCircle2 size={18} /><span><strong>No matching risk</strong><small>This domain has no current Risk Assessment or uncovered Impact Analysis.</small></span></div>}
     </PanelScrollArea>
+    <PanelFooterActions>
+      <PanelHeaderButton label="Close impact and risks" onClick={onClose}><PanelRightClose size={16} /></PanelHeaderButton>
+    </PanelFooterActions>
   </>
 }

@@ -132,6 +132,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const proposalApprovalRunning = useRef(false)
   const monitorBootstrapAttempted = useRef(false)
   const catalogAdvanceAttempted = useRef(new Set<string>())
+  const pendingCatalogRiskReview = useRef<string | undefined>(undefined)
   const autonomousStepTimer = useRef<number | undefined>(undefined)
   const autonomousStepId = useRef(0)
   const autonomousSchedulingBlocked = useRef(true)
@@ -820,6 +821,10 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         })
         if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))
         if (autonomousVersionId) {
+          const committedExplorer = preview.nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
+          if (pendingCatalogRiskUrn && committedExplorer) {
+            await catalog.markRiskCandidateHandled(committedExplorer, pendingCatalogRiskUrn)
+          }
           atomicRepairState.current = undefined
           if (monitored) {
             correctionVerifications.current.set(liveMonitorBindingKey(monitored.monitor), {
@@ -880,6 +885,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       }
       atomicRepairState.current = undefined
       resumePlayerAfterReview.current = playerState === 'running' && expectedPlayerSessionId !== undefined
+      pendingCatalogRiskReview.current = pendingCatalogRiskUrn
       setProposal(nextProposal)
       setReviewBlockedBranchId(monitored?.monitor.monitorId)
       setProposalReviewOpen(true)
@@ -1098,6 +1104,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
 
   const rejectAgentProposal = () => {
     const rejected = proposal
+    pendingCatalogRiskReview.current = undefined
     rejectProposal()
     if (!rejected?.incidentKey) return
     void logIncident({
@@ -1196,6 +1203,12 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         return true
       }
       if (!approveProposal()) return false
+      const approvedCatalogRiskUrn = pendingCatalogRiskReview.current
+      pendingCatalogRiskReview.current = undefined
+      const approvedExplorer = preview.nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
+      if (approvedCatalogRiskUrn && approvedExplorer) {
+        await catalog.markRiskCandidateHandled(approvedExplorer, approvedCatalogRiskUrn)
+      }
       atomicRepairState.current = undefined
       if (currentProposal.incidentKey && revisionId) {
         const incident = incidentSummaries.find((candidate) => candidate.incidentKey === currentProposal.incidentKey)

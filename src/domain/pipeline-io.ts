@@ -166,6 +166,7 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       }) : [],
       issues: Array.isArray(item.issues) ? item.issues.filter((issue): issue is string => typeof issue === 'string').map((issue) => redactExportText(issue).slice(0, 160)).slice(0, 12) : [],
       fingerprint: typeof item.fingerprint === 'string' ? item.fingerprint.slice(0, 120) : '',
+      handledRiskFingerprint: typeof item.handledRiskFingerprint === 'string' ? item.handledRiskFingerprint.slice(0, 120) : undefined,
       capturedAt: typeof item.capturedAt === 'string' ? item.capturedAt : new Date(0).toISOString(),
       expiresAt: typeof item.expiresAt === 'string' ? item.expiresAt : new Date(0).toISOString(),
       attemptCount: Math.max(0, Math.min(1_000, Number.isInteger(item.attemptCount) ? Number(item.attemptCount) : 0)) || undefined,

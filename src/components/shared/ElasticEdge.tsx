@@ -100,33 +100,34 @@ function intersectsCableCorridor(obstacle: ElasticObstacle, options: ElasticRout
 
 function routedCablePath(options: ElasticRouteOptions, routeY: number) {
   const { sourceX, sourceY, targetX, targetY } = options
-  const direction = targetX >= sourceX ? 1 : -1
-  const lead = endpointLead * direction
-  const sourceTurnX = sourceX + Math.max(endpointLead + 28, Math.min(72, Math.abs(targetX - sourceX) * 0.22)) * direction
-  const targetTurnX = targetX - Math.max(endpointLead + 28, Math.min(72, Math.abs(targetX - sourceX) * 0.22)) * direction
-  const turnGap = Math.abs(targetTurnX - sourceTurnX)
-  // Short links used to make both rounded turns overlap and reverse the
-  // horizontal segment, producing a visible loop. Bound the curve by the
-  // actual room between turns so every detour stays monotonic.
-  const curve = Math.max(4, Math.min(28, turnGap / 3, Math.abs(routeY - sourceY) * 0.24))
+  const turn = Math.max(endpointLead + 32, Math.min(76, Math.abs(targetX - sourceX) * 0.22))
+  // React Flow exposes the output handle on the right and the input handle on
+  // the left. Always honour those physical directions, including when a user
+  // moves the target above or behind its source. Reversing both turns with the
+  // graph direction produced the crossed, bow-shaped cables seen on manually
+  // arranged cards.
+  const sourceTurnX = sourceX + turn
+  const targetTurnX = targetX - turn
+  const curve = Math.max(10, Math.min(28, Math.abs(routeY - sourceY) * 0.24))
   return [
     `M ${sourceX} ${sourceY}`,
-    `L ${sourceX + lead} ${sourceY}`,
-    `C ${sourceTurnX - curve * direction} ${sourceY}, ${sourceTurnX} ${routeY}, ${sourceTurnX + curve * direction} ${routeY}`,
-    `L ${targetTurnX - curve * direction} ${routeY}`,
-    `C ${targetTurnX} ${routeY}, ${targetTurnX + curve * direction} ${targetY}, ${targetX - lead} ${targetY}`,
+    `L ${sourceX + endpointLead} ${sourceY}`,
+    `C ${sourceTurnX - curve} ${sourceY}, ${sourceTurnX - curve} ${routeY}, ${sourceTurnX} ${routeY}`,
+    `L ${targetTurnX} ${routeY}`,
+    `C ${targetTurnX + curve} ${routeY}, ${targetTurnX + curve} ${targetY}, ${targetX - endpointLead} ${targetY}`,
     `L ${targetX} ${targetY}`,
   ].join(' ')
 }
 
 export function routeElasticCable(options: ElasticRouteOptions): ElasticRoute {
+  const needsTurnaround = options.targetX <= options.sourceX + endpointLead * 4
   const obstacles = (options.obstacles ?? []).filter((obstacle) => (
     obstacle.id !== options.sourceId
     && obstacle.id !== options.targetId
     && intersectsCableCorridor(obstacle, options)
   ))
   const midpointX = (options.sourceX + options.targetX) / 2
-  if (!options.feedback && obstacles.length === 0) {
+  if (!options.feedback && !needsTurnaround && obstacles.length === 0) {
     return {
       path: elasticHorizontalPath(options.sourceX, options.sourceY, options.targetX, options.targetY),
       labelX: midpointX,
@@ -145,7 +146,15 @@ export function routeElasticCable(options: ElasticRouteOptions): ElasticRoute {
   // horizontal interval. Otherwise choosing the lower lane to avoid one card
   // can accidentally route through a second card that sat just outside the
   // original endpoint corridor.
-  const routeObstacles = spanningObstacles
+  const endpointObstacles = (options.obstacles ?? []).filter((obstacle) => (
+    obstacle.id === options.sourceId || obstacle.id === options.targetId
+  ))
+  // A turnaround must also clear the source and target card bodies. Handles
+  // are vertically centred, so a fixed offset alone can still cross a tall
+  // profile or source card.
+  const routeObstacles = options.feedback || needsTurnaround
+    ? [...spanningObstacles, ...endpointObstacles]
+    : spanningObstacles
   const above = Math.min(
     options.sourceY,
     options.targetY,
