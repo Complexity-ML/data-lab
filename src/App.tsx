@@ -470,7 +470,7 @@ export default function App() {
     </section>
 
     {resultsOpen && <Modal ariaLabelledby="analysis-results-title" className="analysis-results-modal" onClose={() => setResultsOpen(false)}>
-      <AnalysisResultsView nodes={nodes} onClose={() => setResultsOpen(false)} onOpenProposal={() => { setResultsOpen(false); setProposalReviewOpen(true) }} onSelectCard={(nodeId) => { setSelectedId(nodeId); setResultsOpen(false); setInspectorReturn('results'); setReportsOpen(false); setRisksOpen(false); setInspectorOpen(true) }} proposal={proposal?.incidentKey ? proposal : undefined} />
+      <AnalysisResultsView nodes={nodes} onClose={() => setResultsOpen(false)} onOpenProposal={() => { setResultsOpen(false); setProposalReviewOpen(true) }} onSelectCard={(nodeId) => { setSelectedId(nodeId); setResultsOpen(false); setInspectorReturn('results'); setReportsOpen(false); setRisksOpen(false); setInspectorOpen(true) }} overview={riskOverview} proposal={proposal?.incidentKey ? proposal : undefined} />
     </Modal>}
 
     {proposal && !proposalReviewOpen && <button className="proposal-review-reopen" onClick={() => setProposalReviewOpen(true)} type="button"><span aria-hidden="true">✦</span> Review agent proposal</button>}
