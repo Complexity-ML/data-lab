@@ -30,6 +30,23 @@ describe('optional judge-readable presets', () => {
     ]))
   })
 
+  it('loads a video-ready order_details privacy path with no blocking validation issue', () => {
+    const preset = loadPipelinePreset('order-details-privacy')
+    const risk = preset.nodes.find((node) => node.data.kind === 'risk')
+    const blockers = validatePipeline(preset.nodes, preset.edges).filter((finding) => finding.severity === 'error')
+
+    expect(preset.nodes).toHaveLength(7)
+    expect(risk?.data.rule).toContain('risk_domain=privacy')
+    expect(risk?.data.rule).toContain('affected_assets=18')
+    expect(preset.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'demo-order-details-profile', target: 'demo-order-details-impact' }),
+      expect.objectContaining({ source: 'demo-order-details-impact', target: risk?.id }),
+      expect.objectContaining({ source: risk?.id, target: 'demo-order-details-review' }),
+      expect.objectContaining({ source: 'demo-order-details-protection', target: 'demo-order-details-output' }),
+    ]))
+    expect(blockers).toEqual([])
+  })
+
   it('returns isolated graphs so editing one loaded example cannot mutate the catalog', () => {
     const first = loadPipelinePreset('schema-drift')
     first.nodes[0].data.label = 'Changed locally'

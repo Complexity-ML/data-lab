@@ -361,7 +361,7 @@ export const customerActivationEdges: Edge[] = [
 export const initialNodes: PipelineNode[] = []
 export const initialEdges: Edge[] = []
 
-export type PipelinePresetId = 'empty' | 'customer-activation' | 'pii-masking' | 'schema-drift' | 'broken-governance'
+export type PipelinePresetId = 'empty' | 'customer-activation' | 'order-details-privacy' | 'pii-masking' | 'schema-drift' | 'broken-governance'
 
 export function loadPipelinePreset(preset: PipelinePresetId): { title: string; nodes: PipelineNode[]; edges: Edge[] } {
   if (preset === 'empty') return { title: 'Untitled pipeline', nodes: [], edges: [] }

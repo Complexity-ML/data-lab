@@ -603,6 +603,7 @@ export function SettingsModal(props: SettingsModalProps) {
           <div className="settings-page-heading"><small>EXAMPLES</small><h3>Choose a starting canvas</h3><p>DATA LAB always opens empty. Examples are loaded only when you request them.</p></div>
           <section className="settings-section preset-grid">
             <button onClick={() => onLoadPreset('empty')} type="button"><LayoutTemplate size={21} /><strong>Empty canvas</strong><small>Clear the workspace and build from your own DataHub source.</small></button>
+            <button onClick={() => onLoadPreset('order-details-privacy')} type="button"><ShieldCheck size={21} /><strong>Demo · order_details privacy risk</strong><small>Video-ready DataHub path: profile, 18 downstream datasets, HIGH privacy risk, review and protection.</small></button>
             <button onClick={() => onLoadPreset('customer-activation')} type="button"><Database size={21} /><strong>Customer activation</strong><small>Load the ecommerce governance example for exploration.</small></button>
             <button onClick={() => onLoadPreset('pii-masking')} type="button"><KeyRound size={21} /><strong>PII masking lab</strong><small>See the agent insert a governed protection step before activation.</small></button>
             <button onClick={() => onLoadPreset('schema-drift')} type="button"><Network size={21} /><strong>ML impact &amp; drift</strong><small>Trace a training schema change through features to a production model.</small></button>

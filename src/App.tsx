@@ -373,7 +373,12 @@ export default function App() {
         if (!window.dataLab) throw new Error('Diagnostics require the Electron application')
         return window.dataLab.saveDiagnosticSettings(settings)
       }}
-      onLoadPreset={(presetId) => { workspace.detachWorkspace(); pipelineVersions.loadPreset(presetId); setSettingsOpen(false) }}
+      onLoadPreset={(presetId) => {
+        workspace.detachWorkspace()
+        pipelineVersions.loadPreset(presetId)
+        setSettingsOpen(false)
+        window.setTimeout(() => void pipeline.flowInstance.current?.fitView({ duration: 260, padding: 0.2 }), 0)
+      }}
       onOpenDiagnosticLogs={diagnostics.openLogs}
       onOpenSetupUpdater={appUpdates.openSetup}
       onOpenWorkspace={workspace.openWorkspace}

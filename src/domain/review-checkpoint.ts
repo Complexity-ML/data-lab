@@ -80,10 +80,20 @@ function ensureRiskBeforeReview(
   const review = allNodes.find((node) => node.id === options.reviewId)
   if (!review) return
   const anchorReachable = reachableDistances(options.anchor?.id, graphEdges)
+  const evidencePredecessor = allNodes
+    .filter((node) => (
+      ['profile', 'analysis', 'impact'].includes(node.data.kind)
+      && anchorReachable.has(node.id)
+      && !reachesTarget(options.reviewId, node.id, graphEdges)
+    ))
+    .sort((left, right) => (
+      (anchorReachable.get(right.id) ?? 0) - (anchorReachable.get(left.id) ?? 0)
+      || left.id.localeCompare(right.id)
+    ))[0]
   const incoming = graphEdges
     .filter((edge) => edge.target === options.reviewId && edge.sourceHandle !== 'feedback')
     .sort((left, right) => Number(anchorReachable.has(right.source)) - Number(anchorReachable.has(left.source)))[0]
-  const predecessorId = incoming?.source ?? options.anchor?.id
+  const predecessorId = evidencePredecessor?.id ?? incoming?.source ?? options.anchor?.id
   if (!predecessorId) return
 
   const risk: PipelineNode = {
@@ -114,7 +124,7 @@ function ensureRiskBeforeReview(
     id: uniqueEdgeId(`edge-${options.branchId}-host-risk`, current),
     source: predecessorId,
     target: riskId,
-    sourceHandle: incoming?.sourceHandle,
+    sourceHandle: predecessorId === incoming?.source ? incoming?.sourceHandle : undefined,
     type: 'elastic',
   })
   proposal.addedEdges.push({

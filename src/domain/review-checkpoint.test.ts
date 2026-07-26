@@ -102,4 +102,33 @@ describe('host review checkpoint', () => {
     expect(graph.edges.some((edge) => edge.source === risk.id && edge.target === review.id)).toBe(true)
     expect(graph.edges.some((edge) => edge.source === profile.id && edge.target === review.id)).toBe(false)
   })
+
+  it('places a new host risk after profile evidence already added by the proposal', () => {
+    const sourceBase = newCard('source', 0)
+    const source = {
+      ...sourceBase,
+      id: 'source',
+      data: {
+        ...sourceBase.data,
+        schema: [{ name: 'cust_email', type: 'string' as const, tags: ['PII'] }],
+      },
+    }
+    const profile = { ...newCard('profile', 1), id: 'profile' }
+    const next = proposal()
+    next.addedNodes.push(source, profile)
+    next.addedEdges.push({ id: 'source-profile', source: source.id, target: profile.id })
+
+    ensureHostReviewCheckpoint(next, [], [], {
+      anchorId: source.id,
+      reason: 'HIGH host risk score 7: order_details: 18 sensitive field/tag signal(s).',
+      risk: highDataRisk,
+    })
+    const graph = applyProposal([], [], next)
+    const risk = graph.nodes.find((node) => node.data.kind === 'risk')!
+    const review = graph.nodes.find((node) => node.data.kind === 'review')!
+
+    expect(graph.edges.some((edge) => edge.source === profile.id && edge.target === risk.id)).toBe(true)
+    expect(graph.edges.some((edge) => edge.source === risk.id && edge.target === review.id)).toBe(true)
+    expect(validatePipeline(graph.nodes, graph.edges).some((finding) => finding.id === `risk-evidence-${risk.id}`)).toBe(false)
+  })
 })
