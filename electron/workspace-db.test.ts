@@ -120,6 +120,13 @@ describe('SQLite workspace persistence', () => {
     expect(listAgentProposalMemory(target)).toEqual([])
   })
 
+  it('treats a missing proposal-memory row as a legacy-compatible no-op', () => {
+    const target = directory('proposal-memory-missing')
+
+    expect(updateAgentProposalMemoryStatus(target, '2222222222222222', 'committed', 'legacy-version')).toBeUndefined()
+    expect(listAgentProposalMemory(target)).toEqual([])
+  })
+
   it('moves current workbench proposal memory into a workspace and isolates later workspaces', () => {
     const target = directory('proposal-memory-workspaces')
     const proposal = {

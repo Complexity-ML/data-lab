@@ -725,7 +725,7 @@ export function updateAgentProposalMemoryStatus(
   graphFingerprintValue: unknown,
   statusValue: unknown,
   versionIdValue?: unknown,
-): AgentProposalMemoryEntry {
+): AgentProposalMemoryEntry | undefined {
   const graphFingerprint = normalizeGraphFingerprint(graphFingerprintValue, 'proposal graph fingerprint')
   const statuses = new Set<AgentProposalMemoryStatus>(['generated', 'pending-review', 'committed', 'rejected', 'invalid', 'duplicate'])
   if (typeof statusValue !== 'string' || !statuses.has(statusValue as AgentProposalMemoryStatus)) throw new Error('Invalid proposal memory status')
@@ -745,9 +745,9 @@ export function updateAgentProposalMemoryStatus(
         SET status = ?, version_id = COALESCE(?, version_id), decided_at = ?
         WHERE workspace_id IS NULL AND graph_fingerprint = ?
       `).run(status, versionId, decidedAt, graphFingerprint)
-  if (Number(result.changes) !== 1) throw new Error('Agent proposal memory not found')
+  if (Number(result.changes) !== 1) return undefined
   const row = proposalMemoryRow(target, workspaceId, graphFingerprint)
-  if (!row) throw new Error('Agent proposal memory not found')
+  if (!row) return undefined
   return proposalMemoryFromRow(row)
 }
 

@@ -802,7 +802,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       }
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, versions)
       if (graphsEquivalent(executionNodes, edges, preview.nodes, preview.edges) || equivalentVersion) {
-        await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'duplicate', equivalentVersion?.id)
+        await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'duplicate', equivalentVersion?.id).catch(() => undefined)
         atomicRepairState.current = undefined
         const autonomousSessionActive = expectedPlayerSessionId !== undefined && playerSessionId.current === expectedPlayerSessionId
         const hasMonitor = nodes.some((node) => node.data.kind === 'monitor')
@@ -846,7 +846,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         })
         if (autonomousVersionId && projectTitle === 'Untitled pipeline') setProjectTitle(nextProposal.title.slice(0, 72))
         if (autonomousVersionId) {
-          await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'committed', autonomousVersionId)
+          await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'committed', autonomousVersionId).catch(() => undefined)
           const committedExplorer = preview.nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
           if (pendingCatalogRiskUrn && committedExplorer) {
             await catalog.markRiskCandidateHandled(committedExplorer, pendingCatalogRiskUrn)
@@ -876,7 +876,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             queueAutonomousStep(`Iteration "${nextProposal.title}" is committed. Reread the current graph, reports, diagnostics and version memory, then propose the next coherent useful iteration toward a self-monitoring incident workflow. Return no action when the graph is complete.`, expectedPlayerSessionId)
           }
         } else if (autonomousSessionActive) {
-          await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'invalid')
+          await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'invalid').catch(() => undefined)
           const blockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
           const repair = planAtomicRepair(atomicRepairState.current, expectedPlayerSessionId, blockers.map((issue) => issue.id))
           atomicRepairState.current = repair.nextState
@@ -917,7 +917,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       setReviewBlockedBranchId(monitored?.monitor.monitorId)
       setProposalReviewOpen(true)
       const reviewVersionId = recordPendingReview(nextProposal)
-      await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'pending-review', reviewVersionId)
+      await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'pending-review', reviewVersionId).catch(() => undefined)
       setActivity(`${response.model} proposed ${materialChangeCount} reviewed change(s) · graph unchanged`)
       if (nextProposal.requiresHumanReview) {
         if (nextProposal.incidentKey) void logIncident({
@@ -1138,7 +1138,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     pendingCatalogRiskReview.current = undefined
     rejectProposal()
     if (rejectedGraphFingerprint && window.dataLab) {
-      void window.dataLab.updateAgentProposalMemoryStatus(rejectedGraphFingerprint, 'rejected', pendingVersionId)
+      void window.dataLab.updateAgentProposalMemoryStatus(rejectedGraphFingerprint, 'rejected', pendingVersionId).catch(() => undefined)
     }
     if (!rejected?.incidentKey) return
     void logIncident({
@@ -1220,7 +1220,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
       const approvalBlockers = atomicTransactionBlockers(validatePipeline(preview.nodes, preview.edges))
       if (approvalBlockers.length) {
         const invalidGraphFingerprint = graphFingerprint(preview.nodes, preview.edges)
-        await window.dataLab?.updateAgentProposalMemoryStatus(invalidGraphFingerprint, 'invalid', revisionId)
+        await window.dataLab?.updateAgentProposalMemoryStatus(invalidGraphFingerprint, 'invalid', revisionId).catch(() => undefined)
         const feedback = approvalBlockers.map((issue) => `${issue.id} · ${issue.title}: ${issue.detail}`).join(' | ')
         const repair = planAtomicRepair(atomicRepairState.current, playerSessionId.current, approvalBlockers.map((issue) => issue.id))
         atomicRepairState.current = repair.nextState
@@ -1239,7 +1239,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         return true
       }
       if (!approveProposal()) return false
-      await window.dataLab?.updateAgentProposalMemoryStatus(graphFingerprint(preview.nodes, preview.edges), 'committed', revisionId)
+      await window.dataLab?.updateAgentProposalMemoryStatus(graphFingerprint(preview.nodes, preview.edges), 'committed', revisionId).catch(() => undefined)
       const approvedCatalogRiskUrn = pendingCatalogRiskReview.current
       pendingCatalogRiskReview.current = undefined
       const approvedExplorer = preview.nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')

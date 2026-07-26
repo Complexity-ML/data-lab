@@ -98,7 +98,7 @@ export function useSelectedCardRework(options: {
       }
       const equivalentVersion = findEquivalentVersion(preview.nodes, preview.edges, options.versions)
       if (graphsEquivalent(options.nodes, options.edges, preview.nodes, preview.edges) || equivalentVersion) {
-        await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'duplicate', equivalentVersion?.id)
+        await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'duplicate', equivalentVersion?.id).catch(() => undefined)
         options.setActivity(`Card proposal blocked as equivalent to ${equivalentVersion ? `${equivalentVersion.label} (${equivalentVersion.status ?? 'committed'})` : 'the current graph'} · no revision created`)
         return
       }
@@ -107,7 +107,7 @@ export function useSelectedCardRework(options: {
       options.setProposal(nextProposal)
       options.setProposalReviewOpen(true)
       const reviewVersionId = options.recordPendingReview(nextProposal)
-      await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'pending-review', reviewVersionId)
+      await window.dataLab.updateAgentProposalMemoryStatus(proposalGraphFingerprint, 'pending-review', reviewVersionId).catch(() => undefined)
       options.setActivity(`${response.model} proposed a card-level diff${nextProposal.requiresHumanReview ? ' · human review required' : ' · agent is confident'}`)
       if (nextProposal.requiresHumanReview) void window.dataLab.notifyHumanReview({ cardLabel: selected.data.label, reason: nextProposal.summary, versionId: reviewVersionId })
     } catch (error) {
