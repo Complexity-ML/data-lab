@@ -10,11 +10,13 @@ afterEach(cleanup)
 describe('DataHub lineage impact', () => {
   it('keeps inspector content in the same shared scroll region as the card library', () => {
     const selected = newCard('risk', 0)
+    const goBack = vi.fn()
     render(<CardInspectorView
       dataHubConnected={false}
       errorCount={0}
       issues={[]}
       onAgentRework={vi.fn()}
+      onBack={goBack}
       onBindDataHubSource={vi.fn()}
       onClose={vi.fn()}
       onFocusDiagram={vi.fn()}
@@ -23,6 +25,7 @@ describe('DataHub lineage impact', () => {
       onSearchDataHub={vi.fn()}
       onSelectNode={vi.fn()}
       onUpdate={vi.fn()}
+      returnLabel="Risks"
       selected={selected}
       workbenchAssets={{}}
     />)
@@ -30,6 +33,11 @@ describe('DataHub lineage impact', () => {
     expect(screen.getByRole('region', { name: 'Inspector content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByText('Starts when')).toBeTruthy()
     expect(screen.getByText('Done when')).toBeTruthy()
+    const back = screen.getByRole('button', { name: 'Back to Risks' })
+    const close = screen.getByRole('button', { name: 'Close inspector' })
+    expect(back.closest('.panel-footer-actions')).toBeTruthy()
+    expect(close.closest('.panel-heading')).toBeTruthy()
+    expect(close.closest('.panel-footer-actions')).toBeNull()
   })
 
   it('distinguishes workbench cards from external assets and bounds expansion', () => {

@@ -1,6 +1,6 @@
 import { AlertCircle, ArrowLeft, CheckCircle2, Focus, PanelRightClose, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { PanelHeader } from '../components/shared/PanelHeader'
+import { PanelFooterActions, PanelHeader } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import { DataHubAssetPicker } from '../components/shared/DataHubAssetPicker'
 import { CatalogExplorerSettings } from '../components/shared/CatalogExplorerSettings'
@@ -38,10 +38,11 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
   const visibleLineage = lineage.slice(0, lineageExpanded ? 30 : 12)
   const risk = selected?.data.kind === 'risk' ? parseRiskAssessmentRule(selected.data.rule) : undefined
   return <>
-    <PanelHeader action={<div className="panel-heading-actions">
-      {onBack && <button aria-label={`Back to ${returnLabel ?? 'previous panel'}`} className="panel-back" onClick={onBack} title={`Back to ${returnLabel ?? 'previous panel'}`} type="button"><ArrowLeft size={14} /><span>{returnLabel}</span></button>}
-      <button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>
-    </div>} eyebrow="INSPECT" title={selected ? cardLabels[selected.data.kind] : 'Pipeline'} />
+    <PanelHeader
+      action={<button aria-label="Close inspector" className="panel-toggle" onClick={onClose} title="Close inspector" type="button"><PanelRightClose size={16} /></button>}
+      eyebrow="INSPECT"
+      title={selected ? cardLabels[selected.data.kind] : 'Pipeline'}
+    />
     <PanelScrollArea className="inspector-panel-content" label="Inspector content">
       {selected ? <div className="inspector-form">
       <section className="card-agent-workspace"><div><Sparkles size={15} /><span><strong>Agent workspace</strong><small>Analyze and rework this card from connected evidence.</small></span></div><button onClick={onAgentRework} type="button">Ask agent to rework</button></section>
@@ -75,5 +76,8 @@ export function CardInspectorView({ dataHubConnected, errorCount, issues, onAgen
         {issues.length === 0 && <div className="all-clear"><CheckCircle2 size={17} /><div><strong>All atomic checks passed</strong><small>Direction, topology and governance contracts are valid.</small></div></div>}
       </section>
     </PanelScrollArea>
+    {onBack && <PanelFooterActions>
+      <button aria-label={`Back to ${returnLabel ?? 'previous panel'}`} className="panel-back" onClick={onBack} title={`Back to ${returnLabel ?? 'previous panel'}`} type="button"><ArrowLeft size={14} /><span>{returnLabel}</span></button>
+    </PanelFooterActions>}
   </>
 }
