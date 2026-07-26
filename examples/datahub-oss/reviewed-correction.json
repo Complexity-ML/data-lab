@@ -90,9 +90,22 @@
         "owner": null,
         "rule": null,
         "source": "order-details-source",
+        "target": "order-details-profile",
+        "source_handle": null,
+        "reason": "Bind the compact evidence memory to its governed source."
+      },
+      {
+        "type": "add_edge",
+        "node_id": null,
+        "kind": null,
+        "label": null,
+        "description": null,
+        "owner": null,
+        "rule": null,
+        "source": "order-details-profile",
         "target": "order-details-impact",
         "source_handle": null,
-        "reason": "Start with the captured impact boundary."
+        "reason": "Start the impact boundary from the versioned profile evidence."
       },
       {
         "type": "add_edge",

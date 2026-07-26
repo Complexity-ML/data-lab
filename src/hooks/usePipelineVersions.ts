@@ -25,14 +25,28 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [pendingVersionId, setPendingVersionId] = useState<string>()
 
-  const layoutProposalGraph = (nextNodes: PipelineNode[], nextEdges: Edge[], nextProposal: AgentProposal) => {
+  const layoutProposalGraph = (
+    nextNodes: PipelineNode[],
+    nextEdges: Edge[],
+    nextProposal: AgentProposal,
+    baseNodes: PipelineNode[] = nodes,
+  ) => {
+    const nextNodeIds = new Set(nextNodes.map((node) => node.id))
+    const removedExistingNode = baseNodes.some((node) => !nextNodeIds.has(node.id))
+    const prunedProposedNode = nextProposal.addedNodes.some((node) => !nextNodeIds.has(node.id))
+    const structuralChange = nextProposal.addedNodes.length > 0
+      || nextProposal.removedEdgeIds.length > 0
+      || nextProposal.addedEdges.length > 0
+      || removedExistingNode
+      || prunedProposedNode
+
+    // Structural proposals may remove stale orphan evidence or insert several
+    // new layers at once. Re-layout the complete graph so the surviving branch
+    // remains coherent instead of preserving holes from earlier revisions.
+    if (structuralChange) return layoutPipeline(nextNodes, nextEdges)
+
     const touched = new Set([
-      ...nextProposal.addedNodes.map((node) => node.id),
       ...nextProposal.updatedNodes.map((node) => node.nodeId),
-      ...nextProposal.addedEdges.flatMap((edge) => [edge.source, edge.target]),
-      ...edges
-        .filter((edge) => nextProposal.removedEdgeIds.includes(edge.id))
-        .flatMap((edge) => [edge.source, edge.target]),
     ])
     if (touched.size === 0) return nextNodes
     return layoutPipeline(nextNodes, nextEdges, connectedLayoutNodeIds(nextNodes, nextEdges, touched))
@@ -65,7 +79,7 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
       recordDiagnostic({ category: 'revision', action: 'proposal.autonomous', status: 'error', detail: { blockerIds: blocking.map((issue) => issue.id) } })
       return undefined
     }
-    const layouted = layoutProposalGraph(next.nodes, next.edges, nextProposal)
+    const layouted = layoutProposalGraph(next.nodes, next.edges, nextProposal, baseNodes)
     const committedNodes = resolveApprovedExecution?.(layouted, next.edges) ?? layouted
     const version = createPipelineVersion(committedNodes, next.edges, nextProposal.title, 'agent', nextIssues)
     version.blockingIssues = 0
@@ -150,9 +164,11 @@ export function usePipelineVersions({ edges, nodes, proposal, resolveApprovedExe
     const blocking = atomicTransactionBlockers(versionIssues)
     if (blocking.length > 0) { setActivity(`Review cannot be approved · ${blocking.length} atomic check${blocking.length === 1 ? '' : 's'} failed`); return false }
     const activeNodeIds = new Set(nodes.map((node) => node.id))
+    const versionNodeIds = new Set(version.nodes.map((node) => node.id))
     const addedNodeIds = version.nodes.filter((node) => !activeNodeIds.has(node.id)).map((node) => node.id)
-    const layouted = addedNodeIds.length > 0
-      ? layoutPipeline(version.nodes, version.edges, connectedLayoutNodeIds(version.nodes, version.edges, addedNodeIds))
+    const removedNodeIds = nodes.filter((node) => !versionNodeIds.has(node.id)).map((node) => node.id)
+    const layouted = addedNodeIds.length > 0 || removedNodeIds.length > 0
+      ? layoutPipeline(version.nodes, version.edges)
       : version.nodes
     const committedNodes = resolveApprovedExecution?.(layouted, version.edges) ?? layouted
     setNodes(committedNodes)

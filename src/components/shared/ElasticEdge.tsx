@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { pipelineNodeDimensions } from '../../domain/layout'
 import type { PipelineNode } from '../../domain/pipeline'
 
 const feedbackClearance = 132
@@ -37,13 +38,15 @@ interface ElasticRoute {
 const ElasticRoutingContext = createContext<ElasticObstacle[]>([])
 
 export function ElasticRoutingProvider({ children, nodes }: { children: ReactNode; nodes: PipelineNode[] }) {
-  const obstacles = useMemo(() => nodes.map((node) => ({
-    id: node.id,
-    x: node.position.x,
-    y: node.position.y,
-    width: Math.max(232, node.measured?.width ?? node.width ?? 232),
-    height: Math.max(132, node.measured?.height ?? node.height ?? 240),
-  })), [nodes])
+  const obstacles = useMemo(() => nodes.map((node) => {
+    const dimensions = pipelineNodeDimensions(node)
+    return {
+      id: node.id,
+      x: node.position.x,
+      y: node.position.y,
+      ...dimensions,
+    }
+  }), [nodes])
   return <ElasticRoutingContext.Provider value={obstacles}>{children}</ElasticRoutingContext.Provider>
 }
 

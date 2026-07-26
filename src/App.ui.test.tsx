@@ -400,15 +400,27 @@ describe('visual pipeline workspace regressions', () => {
 
   it('stops idle monitoring without rewriting a waiting graph card', async () => {
     const user = userEvent.setup()
+    const sourceNode = {
+      id: 'waiting-source',
+      type: 'pipeline' as const,
+      position: { x: 0, y: 0 },
+      data: { kind: 'source' as const, label: 'Waiting source', description: 'Governed input', owner: 'Data', status: 'healthy' as const, schema: [], datahubUrn: 'urn:waiting' },
+    }
     const reviewNode = {
       id: 'review',
       type: 'pipeline' as const,
-      position: { x: 0, y: 0 },
+      position: { x: 300, y: 0 },
       data: { kind: 'review' as const, label: 'Human checkpoint', description: 'Wait for approval', owner: 'Reviewer', status: 'healthy' as const, schema: [] },
+    }
+    const outputNode = {
+      id: 'waiting-output',
+      type: 'pipeline' as const,
+      position: { x: 600, y: 0 },
+      data: { kind: 'output' as const, label: 'Waiting output', description: 'Reviewed result', owner: 'Data', status: 'healthy' as const, schema: [] },
     }
     const initialState = {
       activeWorkspaceId: 'waiting-workspace',
-      activeWorkspace: { id: 'waiting-workspace', name: 'Waiting', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Waiting', nodes: [reviewNode], edges: [], versions: [] } },
+      activeWorkspace: { id: 'waiting-workspace', name: 'Waiting', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Waiting', nodes: [sourceNode, reviewNode, outputNode], edges: [{ id: 'waiting-source-review', source: sourceNode.id, target: reviewNode.id }, { id: 'waiting-review-output', source: reviewNode.id, target: outputNode.id }], versions: [] } },
       uncleanShutdown: false,
       workspaces: [{ id: 'waiting-workspace', name: 'Waiting', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
     }
@@ -757,9 +769,15 @@ describe('visual pipeline workspace regressions', () => {
       position: { x: 0, y: 0 },
       data: { kind: 'source' as const, label: 'Billing', description: 'Existing graph', owner: 'Finance', status: 'healthy' as const, schema: [], datahubUrn: 'urn:billing' },
     }
+    const outputNode = {
+      id: 'billing-output',
+      type: 'pipeline' as const,
+      position: { x: 300, y: 0 },
+      data: { kind: 'output' as const, label: 'Billing output', description: 'Existing terminal', owner: 'Finance', status: 'healthy' as const, schema: [] },
+    }
     const initialState = {
       activeWorkspaceId: 'existing',
-      activeWorkspace: { id: 'existing', name: 'Existing', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Existing', nodes: [sourceNode], edges: [], versions: [] } },
+      activeWorkspace: { id: 'existing', name: 'Existing', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z', payload: { projectTitle: 'Existing', nodes: [sourceNode, outputNode], edges: [{ id: 'billing-source-output', source: sourceNode.id, target: outputNode.id }], versions: [] } },
       uncleanShutdown: false,
       workspaces: [{ id: 'existing', name: 'Existing', archived: false, dirty: false, createdAt: '2026-07-22T20:00:00.000Z', updatedAt: '2026-07-22T20:00:00.000Z' }],
     }

@@ -59,7 +59,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
 
   useEffect(() => {
     updateNodeInternals(id)
-  }, [data.kind, id, updateNodeInternals])
+  }, [data.description, data.exploration, data.kind, data.label, data.profile, data.rule, id, updateNodeInternals])
 
   return <article className={`pipeline-card card-${data.kind} status-${data.status} run-${data.runState ?? 'idle'} ${selected ? 'is-selected' : ''}`}>
     {!isSource && !isSystem && <Handle className="pipeline-handle" position={Position.Left} type="target" />}

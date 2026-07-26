@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { validatePipeline } from '../validation'
 import { governanceProposalFixture } from '../test/fixtures/agent-proposals'
-import { applyProposal, customerActivationEdges, customerActivationNodes, initialEdges as blankEdges, initialNodes as blankNodes, newCard, pruneOrphanedCards } from './pipeline'
+import { applyProposal, customerActivationEdges, customerActivationNodes, initialEdges as blankEdges, initialNodes as blankNodes, newCard, pruneOrphanedCards, prunePipelineGraph } from './pipeline'
 
 const initialNodes = customerActivationNodes
 const initialEdges = customerActivationEdges
@@ -42,7 +42,7 @@ describe('pipeline validation', () => {
     expect(proposal.updatedNodes[0].patch.kind).toBe('review')
   })
 
-  it('removes a disconnected duplicate while preserving starter sidecars and unique drafts', () => {
+  it('removes a disconnected duplicate while preserving host starters and unique drafts', () => {
     const source = { ...newCard('source', 0), id: 'source', data: { ...newCard('source', 0).data, datahubUrn: 'urn:orders' } }
     const connectedProfile = { ...newCard('profile', 1), id: 'profile-connected', data: { ...newCard('profile', 1).data, datahubUrn: 'urn:orders' } }
     const duplicateProfile = { ...newCard('profile', 2), id: 'profile-orphan', data: { ...newCard('profile', 2).data, datahubUrn: 'urn:orders' } }
@@ -70,5 +70,43 @@ describe('pipeline validation', () => {
     }
     const next = pruneOrphanedCards([source, connectedProfile, orphanProfile], [{ id: 'source-profile', source: source.id, target: connectedProfile.id }])
     expect(next.map((node) => node.id)).toEqual(['source', 'profile-connected'])
+  })
+
+  it('removes unique committed orphan evidence while preserving a manual draft', () => {
+    const committedBase = newCard('profile', 0)
+    const draftBase = newCard('profile', 1)
+    const committed = {
+      ...committedBase,
+      id: 'committed-orphan',
+      data: { ...committedBase.data, assetRef: 'urn:committed', status: 'healthy' as const },
+    }
+    const draft = {
+      ...draftBase,
+      id: 'manual-draft',
+      data: { ...draftBase.data, assetRef: 'urn:draft', status: 'draft' as const },
+    }
+
+    expect(pruneOrphanedCards([committed, draft], []).map((node) => node.id)).toEqual(['manual-draft'])
+  })
+
+  it('normalizes persisted graph debris and removes every dangling edge', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const profile = { ...newCard('profile', 1), id: 'profile' }
+    const orphan = {
+      ...newCard('profile', 2),
+      id: 'orphan',
+      data: { ...newCard('profile', 2).data, status: 'healthy' as const },
+    }
+    const graph = prunePipelineGraph(
+      [source, profile, orphan],
+      [
+        { id: 'valid', source: source.id, target: profile.id },
+        { id: 'dangling-from-orphan', source: orphan.id, target: 'missing' },
+        { id: 'dangling-to-missing', source: profile.id, target: 'missing' },
+      ],
+    )
+
+    expect(graph.nodes.map((node) => node.id)).toEqual(['source', 'profile'])
+    expect(graph.edges.map((edge) => edge.id)).toEqual(['valid'])
   })
 })

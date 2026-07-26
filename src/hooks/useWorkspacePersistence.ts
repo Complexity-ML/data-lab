@@ -5,6 +5,8 @@ import type { PipelineVersion } from '../domain/versioning'
 import { isWorkspacePayload, type WorkspaceManagerState, type WorkspacePayload, type WorkspaceSaveState } from '../domain/workspace'
 import { notifyError } from '../domain/toasts'
 import { recordDiagnostic } from '../domain/diagnostics'
+import { layoutPipeline } from '../domain/layout'
+import { prunePipelineGraph } from '../domain/pipeline'
 
 interface WorkspacePersistenceOptions {
   edges: Edge[]
@@ -36,9 +38,18 @@ export function useWorkspacePersistence(options: WorkspacePersistenceOptions) {
   const payload: WorkspacePayload = { projectTitle, nodes, edges, versions, projectSettings: { inspectorOpen, libraryOpen } }
 
   const applyPayload = (workspace: WorkspacePayload) => {
-    const normalized = { ...workspace, projectSettings: workspace.projectSettings ?? { inspectorOpen, libraryOpen } }
+    const graph = prunePipelineGraph(workspace.nodes, workspace.edges)
+    const graphChanged = graph.nodes.length !== workspace.nodes.length || graph.edges.length !== workspace.edges.length
+    const normalized = {
+      ...workspace,
+      nodes: graphChanged ? layoutPipeline(graph.nodes, graph.edges) : graph.nodes,
+      edges: graph.edges,
+      projectSettings: workspace.projectSettings ?? { inspectorOpen, libraryOpen },
+    }
     const serialized = JSON.stringify(normalized)
-    lastSnapshot.current = serialized
+    // A cleaned legacy graph must be autosaved once so stale orphan cards and
+    // dangling edges do not return after the next application restart.
+    lastSnapshot.current = graphChanged ? '' : serialized
     latestSnapshot.current = serialized
     setNodes(normalized.nodes)
     setEdges(normalized.edges)
