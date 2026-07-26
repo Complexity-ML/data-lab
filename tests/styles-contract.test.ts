@@ -106,7 +106,7 @@ describe('visual SCSS contracts', () => {
 
   it('keeps every canvas sticker equal-sized and compacts each side without holes', () => {
     const stack = declarations('.canvas-sticker-stack')
-    const stickers = declarations('.inspector-open, .library-open, .actions-open, .logs-open, .risks-open, .reports-open')
+    const stickers = declarations('.inspector-open, .library-open, .actions-open, .logs-open, .risks-open, .reports-open, .results-open')
 
     expect(stack.get('display')).toBe('grid')
     expect(stack.get('grid-auto-flow')).toBe('row')

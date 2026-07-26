@@ -472,7 +472,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('stopped')).toBeTruthy()
   })
 
-  it('switches between Card Library, Inspector, Risks, Actions, Live logs and Reports panels', async () => {
+  it('keeps Reports and Results as separate entries alongside the other workspace panels', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -497,6 +497,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByRole('region', { name: 'Impact and risks content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByRole('button', { name: 'Open inspector' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Open incident reports' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open analysis results' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open inspector' }))
     const actionsSticker = screen.getByRole('button', { name: 'Open agent actions' })
@@ -526,9 +527,18 @@ describe('visual pipeline workspace regressions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
     expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Incident reports content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByText('No unresolved incident')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Open analysis results' }))
+    expect(screen.getByRole('dialog', { name: 'Analysis report' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close analysis results' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Analysis results content' }).classList.contains('panel-scroll-area')).toBe(true)
+    expect(screen.getByText('No materialized risk')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Close analysis results' }))
+    await user.click(screen.getByRole('button', { name: 'Close incident reports' }))
 
     const inspectorSticker = screen.getByRole('button', { name: 'Open inspector' })
     expect(inspectorSticker.children[0]?.textContent).toBe('Inspector')
