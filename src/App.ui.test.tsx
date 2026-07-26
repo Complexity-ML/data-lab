@@ -226,7 +226,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({ incidentKey: 'source-discovery:datahub', transition: 'opened' }))
   })
 
-  it('waits for the catalog objective to complete before calling the model on a blank workbench', async () => {
+  it('builds from the first usable catalog dataset before continuing the remaining audit locally', async () => {
     const user = userEvent.setup()
     const { api } = installElectronWorkspaceMock({ activeWorkspaceId: null, uncleanShutdown: false, workspaces: [] })
     const assets = Array.from({ length: 9 }, (_, index) => ({
@@ -273,7 +273,7 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Play autonomous agent' }))
 
     await waitFor(() => expect(api.runChatGPTProposal).toHaveBeenCalledTimes(1))
-    expect(inspectedBeforeProposal).toEqual(new Set(assets.map((asset) => asset.urn)))
+    expect(inspectedBeforeProposal).toEqual(new Set([assets[0]!.urn]))
     expect(api.recordIncidentEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       incidentKey: 'source-discovery:datahub',
       transition: 'opened',
@@ -439,6 +439,9 @@ describe('visual pipeline workspace regressions', () => {
     const user = userEvent.setup()
     render(<App />)
 
+    expect(screen.getByRole('region', { name: 'Card library content' }).classList.contains('panel-scroll-area')).toBe(true)
+    expect(screen.getByRole('region', { name: 'Inspector content' }).classList.contains('panel-scroll-area')).toBe(true)
+
     await user.click(screen.getByRole('button', { name: 'Close card library' }))
     expect(screen.getByRole('button', { name: 'Open card library' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
@@ -454,6 +457,7 @@ describe('visual pipeline workspace regressions', () => {
     await user.click(screen.getByRole('button', { name: 'Open impact and risks' }))
     expect(screen.getByRole('button', { name: 'Close impact and risks' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Impact & Risks' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Impact and risks content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByRole('button', { name: 'Open inspector' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Open incident reports' })).toBeTruthy()
 
@@ -461,23 +465,32 @@ describe('visual pipeline workspace regressions', () => {
     const actionsSticker = screen.getByRole('button', { name: 'Open agent actions' })
     expect(actionsSticker.querySelector('em')).toBeNull()
     await user.click(actionsSticker)
-    expect(screen.getByRole('button', { name: 'Close agent actions' }).closest('#data-lab-left-panel')).toBeTruthy()
-    expect(screen.getByRole('region', { name: 'Agent actions content' }).classList.contains('panel-scroll-area')).toBe(true)
+    const closeActions = screen.getByRole('button', { name: 'Close agent actions' })
+    const actionsScroller = screen.getByRole('region', { name: 'Agent actions content' })
+    const clearActions = screen.getByRole('button', { name: 'Clear action timeline' })
+    expect(closeActions.closest('#data-lab-left-panel')).toBeTruthy()
+    expect(actionsScroller.classList.contains('panel-scroll-area')).toBe(true)
+    expect(actionsScroller.compareDocumentPosition(clearActions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(clearActions.closest('.panel-footer-actions')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Close inspector' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Open card library' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open live logs' }))
     expect(screen.getByRole('button', { name: 'Close live logs' }).closest('#data-lab-left-panel')).toBeTruthy()
     const liveLogScroller = screen.getByRole('region', { name: 'Live activity content' })
+    const clearLiveLog = screen.getByRole('button', { name: 'Clear session log' })
     expect(liveLogScroller.classList.contains('panel-scroll-area')).toBe(true)
+    expect(liveLogScroller.compareDocumentPosition(clearLiveLog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(clearLiveLog.closest('.panel-footer-actions')).toBeTruthy()
     expect(screen.getByText('Simple session timeline · newest first')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Clear session log' }))
+    await user.click(clearLiveLog)
     expect(screen.getByText('Play the graph or change a setting to start the live timeline.')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Clear session log' }) as HTMLButtonElement).disabled).toBe(true)
 
     await user.click(screen.getByRole('button', { name: 'Open incident reports' }))
     expect(screen.getByRole('button', { name: 'Close incident reports' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Close live logs' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Incident reports content' }).classList.contains('panel-scroll-area')).toBe(true)
     expect(screen.getByText('No unresolved incident')).toBeTruthy()
 
     const inspectorSticker = screen.getByRole('button', { name: 'Open inspector' })

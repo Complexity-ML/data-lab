@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, ScrollText, Trash2 } from 'lucide-react'
-import { PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
+import { PanelFooterActions, PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { AgentActionLog } from './AgentActionsView'
 
@@ -13,7 +13,6 @@ interface LiveActivityViewProps {
 export function LiveActivityView({ busy, entries, onClear, onClose }: LiveActivityViewProps) {
   return <>
     <PanelHeader action={<PanelHeaderActions>
-      <PanelHeaderButton disabled={!entries.length} label="Clear session log" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
       <PanelHeaderButton label="Close live logs" onClick={onClose}><PanelLeftClose size={16} /></PanelHeaderButton>
     </PanelHeaderActions>} eyebrow="LIVE" title="Activity log" />
     <PanelScrollArea className="live-log-content" label="Live activity content">
@@ -26,5 +25,8 @@ export function LiveActivityView({ busy, entries, onClear, onClose }: LiveActivi
         <div><strong>{entry.message}</strong><time>{new Date(entry.createdAt).toLocaleTimeString()}</time></div>
       </li>)}</ol> : <p className="empty-copy">Play the graph or change a setting to start the live timeline.</p>}
     </PanelScrollArea>
+    <PanelFooterActions>
+      <PanelHeaderButton className="panel-clear-button" disabled={!entries.length} label="Clear session log" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
+    </PanelFooterActions>
   </>
 }

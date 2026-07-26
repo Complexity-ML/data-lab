@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock3, LoaderCircle, PanelLeftClose, Pause, Play, Square, Trash2 } from 'lucide-react'
-import { PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
+import { PanelFooterActions, PanelHeader, PanelHeaderActions, PanelHeaderButton } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import type { AgentPlayerState } from '../components/AppHeader'
 
@@ -21,7 +21,6 @@ export function AgentActionsView({ busy, history, onClear, onClose, playerState 
   const StateIcon = playerState === 'running' ? Play : playerState === 'paused' ? Pause : Square
   return <>
     <PanelHeader action={<PanelHeaderActions>
-      <PanelHeaderButton disabled={!history.length} label="Clear action timeline" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
       <PanelHeaderButton label="Close agent actions" onClick={onClose}><PanelLeftClose size={16} /></PanelHeaderButton>
     </PanelHeaderActions>} eyebrow="ACT" title="Agent actions" />
     <PanelScrollArea className="actions-panel-content" label="Agent actions content">
@@ -35,5 +34,8 @@ export function AgentActionsView({ busy, history, onClear, onClose, playerState 
         <div><strong>{entry.message}</strong><small>{new Date(entry.createdAt).toLocaleTimeString()}</small></div>
       </li>)}</ol> : <p className="empty-copy">Play the autonomous agent to record its graph iterations here.</p>}
     </PanelScrollArea>
+    <PanelFooterActions>
+      <PanelHeaderButton className="panel-clear-button" disabled={!history.length} label="Clear action timeline" onClick={onClear}><Trash2 size={15} /></PanelHeaderButton>
+    </PanelFooterActions>
   </>
 }

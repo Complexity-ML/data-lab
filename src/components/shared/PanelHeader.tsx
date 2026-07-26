@@ -14,6 +14,10 @@ export function PanelHeaderActions({ children }: { children: ReactNode }) {
   return <div className="panel-heading-actions">{children}</div>
 }
 
+export function PanelFooterActions({ children }: { children: ReactNode }) {
+  return <div className="panel-footer-actions">{children}</div>
+}
+
 interface PanelHeaderButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   children: ReactNode
   label: string

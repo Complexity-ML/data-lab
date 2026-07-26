@@ -28,10 +28,8 @@ function pixels(value: string | undefined): number {
 }
 
 describe('visual SCSS contracts', () => {
-  it('shares one bounded themed scroll area between the library and inspector', () => {
+  it('shares one bounded themed scroll area and panel shell across every sidebar', () => {
     const scroll = declarations('.panel-scroll-area')
-    const library = declarations('.library-panel')
-    const inspector = declarations('.inspector-panel')
 
     expect(scroll.get('overflow-y')).toBe('auto')
     expect(scroll.get('overflow-x')).toBe('hidden')
@@ -40,8 +38,7 @@ describe('visual SCSS contracts', () => {
     expect(scroll.get('scrollbar-width')).toBe('thin')
     expect(scroll.get('min-height')).toBe('0')
     expect(scroll.get('flex')).toBe('1')
-    expect(library.get('overflow')).toBe('hidden')
-    expect(stylesheet).toContain('.inspector-panel { display: flex; overflow: hidden;')
+    expect(stylesheet).toContain('.library-panel, .left-operations-panel, .inspector-panel { display: flex; overflow: hidden; height: 100%; flex-direction: column; }')
   })
 
   it('keeps a fixed prompt dock while the form grows upward and scrolls independently of its actions', () => {
