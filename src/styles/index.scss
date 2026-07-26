@@ -625,8 +625,9 @@ button { color: inherit; }
 .pipeline-card.status-draft { border-style: dashed; }
 .pipeline-card.card-profile { min-height: 148px; border-style: dashed; }
 .profile-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
-.profile-summary span { padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--profile-strong) 25%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--profile) 72%, transparent); font-size: 7px; }
+.profile-summary span { overflow: hidden; min-width: 0; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--profile-strong) 25%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--profile) 72%, transparent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .profile-summary strong { color: var(--text); font-size: 8px; }
+.card-summary-note { grid-column: 1 / -1; display: block; overflow: hidden; min-width: 0; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--line-strong) 74%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--surface) 76%, transparent); font: 7px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .risk-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
 .risk-summary span { overflow: hidden; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--risk-strong) 23%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--risk) 74%, transparent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .risk-summary strong { color: var(--text); font-size: 8px; }
@@ -638,11 +639,9 @@ button { color: inherit; }
 .explorer-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--explorer-strong), #6366f1); transition: width .25s ease; }
 .explorer-summary span { overflow: hidden; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--explorer-strong) 25%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--explorer) 72%, transparent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .explorer-summary strong { color: var(--text); font-size: 8px; }
-.explorer-summary > small { grid-column: 1 / -1; color: var(--muted); font-size: 7px; }
 .worker-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
-.worker-summary span { padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--worker-strong) 24%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--worker) 74%, transparent); font-size: 7px; }
+.worker-summary span { overflow: hidden; min-width: 0; padding: 5px 6px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--worker-strong) 24%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--worker) 74%, transparent); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .worker-summary strong { color: var(--text); font-size: 8px; }
-.worker-summary small { grid-column: 1 / -1; color: var(--muted); font-size: 7px; text-transform: capitalize; }
 .pipeline-card header { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
 .card-icon { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid rgb(255 255 255 / 80%); border-radius: 8px; background: rgb(255 255 255 / 78%); }
 .card-kind { color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }

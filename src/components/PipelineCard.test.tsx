@@ -64,6 +64,10 @@ describe('Pipeline card ports', () => {
     expect(summary.textContent).toContain('1 profiled')
     expect(summary.textContent).toContain('1 value risks')
     expect(summary.textContent).toContain('raw rows excluded')
+    const note = summary.querySelector('.card-summary-note')
+    expect(note).toBeTruthy()
+    expect(note?.getAttribute('title')).toContain('raw rows excluded')
+    expect(note?.getAttribute('title')).toContain('~')
   })
 
   it('renders the structured risk context without losing normal graph ports', () => {

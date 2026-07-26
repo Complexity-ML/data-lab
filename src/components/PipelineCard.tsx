@@ -39,6 +39,10 @@ function cardTextPreview(value: string) {
     .trim()
 }
 
+function CardSummaryNote({ text }: { text: string }) {
+  return <small className="card-summary-note" title={text}>{text}</small>
+}
+
 export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
   const updateNodeInternals = useUpdateNodeInternals()
   const Icon = icons[data.kind]
@@ -86,7 +90,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{data.profile.aggregateAudit.profiledFieldCount}</strong> profiled</span>
       <span><strong>{data.profile.aggregateAudit.riskSignals.length}</strong> value risks</span>
       <span><strong>{data.profile.sensitiveFieldCount}</strong> sensitive</span>
-      <small>{data.profile.aggregateAudit.status.replace('_', ' ')} · raw rows excluded · ~{data.profile.tokenEstimate} tokens</small>
+      <CardSummaryNote text={`${data.profile.aggregateAudit.status.replaceAll('_', ' ')} · raw rows excluded · ~${data.profile.tokenEstimate} tokens`} />
     </div>}
     {risk && <div className="risk-summary" aria-label="Evidence-backed risk context">
       <span><strong>{risk.affectedAssets ?? '—'}</strong> affected</span>
@@ -100,12 +104,12 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       <span><strong>{exploration.dataAuditRemaining ?? exploration.remaining ?? Math.max(0, exploration.total - exploration.inspected)}</strong> queued</span>
       <span><strong>{exploration.dataAudited ?? 0}</strong> profiled</span>
       <span><strong>{exploration.incidents}</strong> data incidents</span>
-      <small>{exploration.dataAuditCoverageGaps ?? 0} coverage gaps · {explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · {exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache</small>
+      <CardSummaryNote text={`${exploration.dataAuditCoverageGaps ?? 0} coverage gaps · ${explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · ${exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache`} />
     </div>}
     {workerPolicy && <div className="worker-summary" aria-label="Bounded worker policy">
       <span><strong>{workerPolicy.batchSize}</strong> batch</span>
       <span><strong>{workerPolicy.concurrency}</strong> concurrent</span>
-      <small>{workerPolicy.context.replace('_', ' ')} · {workerPolicy.merge} merge · {workerPolicy.retry} recovery</small>
+      <CardSummaryNote text={`${workerPolicy.context.replaceAll('_', ' ')} · ${workerPolicy.merge} merge · ${workerPolicy.retry} recovery`} />
     </div>}
     {queryPolicy && <div className="query-summary" aria-label="Verified query contract">
       <span><strong>{queryPolicy.protocol ?? '—'}</strong> protocol</span>
