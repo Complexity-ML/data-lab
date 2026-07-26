@@ -10,7 +10,7 @@ import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
-import { rankCatalogRiskCandidateUrns, selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
+import { catalogHasPendingAutonomousWork, rankCatalogRiskCandidateUrns, selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -131,6 +131,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
   const playerStartupBlocked = useRef(false)
   const proposalApprovalRunning = useRef(false)
   const monitorBootstrapAttempted = useRef(false)
+  const catalogAdvanceAttempted = useRef(new Set<string>())
   const autonomousStepTimer = useRef<number | undefined>(undefined)
   const autonomousStepId = useRef(0)
   const autonomousSchedulingBlocked = useRef(true)
@@ -230,10 +231,24 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     setNodes((current) => applyAtomicRunState(current, atomicRun))
     const executionCheckpointCurrent = isAtomicExecutionCheckpointCurrent(atomicRun)
     const hasArmedMonitor = nodes.some((node) => node.data.kind === 'monitor')
-    if (!monitored && executionCheckpointCurrent && (hasArmedMonitor || monitorBootstrapAttempted.current)) {
-      setActivity(hasArmedMonitor
-        ? 'All cards are current · execution checkpoint preserved · Live Monitor is waiting for new evidence'
-        : 'All cards are current · execution checkpoint preserved · waiting for a graph or evidence change')
+    const checkpointExplorer = nodes.find((node) => node.data.kind === 'explorer' && node.data.explorerMode === 'catalog-fanout')
+    const checkpointProgress = checkpointExplorer?.data.exploration
+    const representedCatalogUrns = nodes.flatMap((node) => {
+      if (node.data.kind !== 'source') return []
+      const urn = node.data.assetRef ?? node.data.datahubUrn
+      return urn ? [urn] : []
+    })
+    const pendingCatalogRiskUrn = checkpointProgress?.state === 'complete'
+      ? rankCatalogRiskCandidateUrns(checkpointProgress, representedCatalogUrns)[0]
+      : undefined
+    const hasPendingCatalogWork = catalogHasPendingAutonomousWork(checkpointProgress, representedCatalogUrns)
+    if (!monitored && executionCheckpointCurrent && (hasArmedMonitor || monitorBootstrapAttempted.current) && !hasPendingCatalogWork) {
+      const coverageGaps = checkpointProgress?.dataAuditCoverageGaps ?? 0
+      setActivity(coverageGaps > 0
+        ? `Catalog metadata complete · ${coverageGaps} dataset${coverageGaps === 1 ? '' : 's'} lack aggregate value-profile evidence · graph preserved · connect or ingest DataHub profiles to continue value anomaly detection`
+        : hasArmedMonitor
+          ? 'All cards are current · execution checkpoint preserved · Live Monitor is waiting for new evidence'
+          : 'All cards are current · execution checkpoint preserved · waiting for a graph or evidence change')
       setAgentRunning(false)
       return
     }
@@ -478,6 +493,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             const previousProgress = catalogExplorer?.data.exploration
             const explored = catalogExplorer ? await catalog.explore({
               assets: candidates,
+              bootstrapCandidate: true,
               explorer: catalogExplorer,
               worker: catalogWorker,
               query: discoveryQuery,
@@ -488,14 +504,16 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
               evidenceEntries = explored.evidence
               blankCandidate = explored.candidate
               datahubEvidence = explored.summaries
-              continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, explored.progress)
+              const reachedFastLaneBoundary = Boolean(explored.candidate)
+              continueCatalogWithoutModel = !reachedFastLaneBoundary
+                && !shouldCallAgentForCatalog(previousProgress, explored.progress)
             }
           }
         }
         if (blankCandidate) {
           profileCandidates.set(blankCandidate.urn, blankCandidate)
           datahubEvidence.unshift(
-            `Starting dataset candidate selected after complete catalog exploration: ${blankCandidate.name} (${blankCandidate.urn}). Add it as the Data Source card in the proposed graph.`,
+            `${catalogProgress?.state === 'complete' ? 'Starting dataset candidate selected after complete catalog exploration' : 'Fast-lane starting dataset selected from the first usable catalog checkpoint'}: ${blankCandidate.name} (${blankCandidate.urn}). Add it as the Data Source card in the proposed graph. ${catalogProgress?.state === 'complete' ? '' : 'Keep Catalog Explorer resumable; the remaining datasets continue in background without model calls.'}`,
             `Selected schema: ${blankCandidate.fields.map((field) => `${field.name}:${field.type}${field.tags?.length ? `[${field.tags.join(',')}]` : ''}`).join(', ') || 'unavailable'}`,
             `Selected governance: owners=${blankCandidate.owners.join(', ') || 'missing'}; tags=${blankCandidate.tags.join(', ') || 'none'}; quality=${blankCandidate.qualityStatus}; upstream=${blankCandidate.upstream.length}; downstream=${blankCandidate.downstream.length}`,
           )
@@ -766,6 +784,18 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
           monitorBootstrapAttempted.current = true
           setActivity('Graph is already current · no duplicate revision created · preparing the missing Live Monitor…')
           queueAutonomousStep('The previous proposal is already committed. Do not repeat it. Propose the next coherent missing iteration toward continuous incident handling; if the governed path is otherwise complete, add the required Live Monitor and feedback boundary.', expectedPlayerSessionId)
+        } else if (
+          autonomousSessionActive
+          && pendingCatalogRiskUrn
+          && !catalogAdvanceAttempted.current.has(pendingCatalogRiskUrn)
+        ) {
+          catalogAdvanceAttempted.current.add(pendingCatalogRiskUrn)
+          setActivity('Catalog risk branch was not materialized · one focused correction scheduled…')
+          queueAutonomousStep(
+            `The previous proposal duplicated the current graph while the terminal catalog still contains an unrepresented risk candidate. Do not repeat or rewrite the existing branch. Build exactly one new evidence-backed branch for ${pendingCatalogRiskUrn}, connect its Source, Data Profile, Impact Analysis, Risk Assessment and required review/protection/output path, then leave the other catalog datasets for later iterations.`,
+            expectedPlayerSessionId,
+            1_200,
+          )
         } else {
           setActivity(hasMonitor
             ? 'Graph is already current · no duplicate revision created · Live Monitor remains armed'
@@ -974,6 +1004,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     autonomousSchedulingBlocked.current = false
     atomicRepairState.current = undefined
     monitorBootstrapAttempted.current = false
+    catalogAdvanceAttempted.current.clear()
     setAutonomousStepRequest(undefined)
     setAutonomousStepScheduled(false)
     playerStartupBlocked.current = true

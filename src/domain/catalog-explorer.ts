@@ -150,11 +150,31 @@ export function rankCatalogCandidateUrns(progress: CatalogExplorationProgress) {
     .map((checkpoint) => checkpoint.urn)
 }
 
+/**
+ * A catalog commonly exposes the same logical dataset through several
+ * platforms (dbt, warehouse, BI, object storage). Once one representation is
+ * materialized in the graph, its versioned lineage already provides the route
+ * to those downstream representations. Treating every URN as a new autonomous
+ * objective makes the model propose the same branch repeatedly.
+ */
+export function catalogDatasetFamilyKey(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_(replica|view|explore)$/g, '')
+    .replace(/^_+|_+$/g, '')
+}
+
 export function rankCatalogRiskCandidateUrns(
   progress: CatalogExplorationProgress,
   excludedUrns: string[] = [],
 ) {
   const excluded = new Set(excludedUrns)
+  const excludedFamilies = new Set(progress.datasets
+    .filter((checkpoint) => excluded.has(checkpoint.urn))
+    .map((checkpoint) => catalogDatasetFamilyKey(checkpoint.name))
+    .filter(Boolean))
   const score = (checkpoint: CatalogDatasetCheckpoint) =>
     (checkpoint.qualityStatus === 'failing' || hasDataIncident(checkpoint) ? 100_000 : 0)
     + (checkpoint.sensitiveSignalCount ?? 0) * 1_000
@@ -164,9 +184,19 @@ export function rankCatalogRiskCandidateUrns(
   return progress.datasets
     .filter((checkpoint) => checkpoint.status !== 'unavailable'
       && !excluded.has(checkpoint.urn)
+      && !excludedFamilies.has(catalogDatasetFamilyKey(checkpoint.name))
       && (hasDataIncident(checkpoint) || (checkpoint.sensitiveSignalCount ?? 0) > 0))
     .sort((left, right) => score(right) - score(left) || left.urn.localeCompare(right.urn))
     .map((checkpoint) => checkpoint.urn)
+}
+
+export function catalogHasPendingAutonomousWork(
+  progress: CatalogExplorationProgress | undefined,
+  representedUrns: string[] = [],
+) {
+  if (!progress) return false
+  if (progress.state !== 'complete') return true
+  return rankCatalogRiskCandidateUrns(progress, representedUrns).length > 0
 }
 
 export function selectCatalogCandidateUrn(

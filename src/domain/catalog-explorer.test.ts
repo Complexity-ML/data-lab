@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { catalogDatasetFamilyKey, catalogHasPendingAutonomousWork, checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -249,6 +249,60 @@ describe('Catalog Explorer', () => {
 
     expect(rankCatalogRiskCandidateUrns(progress)).toEqual([failing.urn, sensitive.urn])
     expect(rankCatalogRiskCandidateUrns(progress, [failing.urn])).toEqual([sensitive.urn])
+  })
+
+  it('does not rebuild the same logical risk branch for every platform representation', () => {
+    const sensitiveCheckpoint = (urn: string, name: string, count: number) => checkpointForInspection(inspection({
+      ...asset(count),
+      urn,
+      name,
+      fields: Array.from({ length: count }, (_, index) => ({ name: `pii_${index}`, type: 'string', tags: ['PII'] })),
+    }))
+    const dbt = sensitiveCheckpoint('urn:dbt:order-details', 'order_details', 8)
+    const warehouse = sensitiveCheckpoint('urn:snowflake:order-details', 'ORDER_DETAILS', 7)
+    const replica = sensitiveCheckpoint('urn:snowflake:order-details-replica', 'order_details_replica', 5)
+    const customers = sensitiveCheckpoint('urn:dbt:customers', 'customers', 4)
+    const progress = {
+      query: '*',
+      total: 4,
+      discovered: 4,
+      inspected: 4,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [dbt, warehouse, replica, customers],
+    }
+
+    expect(catalogDatasetFamilyKey('Order Details')).toBe('order_details')
+    expect(catalogDatasetFamilyKey('order_details_replica')).toBe('order_details')
+    expect(rankCatalogRiskCandidateUrns(progress, [dbt.urn])).toEqual([customers.urn])
+  })
+
+  it('keeps autonomous work alive until catalog coverage and risk branches are represented', () => {
+    const sensitive = checkpointForInspection(inspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+    }))
+    const complete = {
+      query: '*',
+      total: 1,
+      discovered: 1,
+      inspected: 1,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 1,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [sensitive],
+    }
+
+    expect(catalogHasPendingAutonomousWork({ ...complete, state: 'inspecting' })).toBe(true)
+    expect(catalogHasPendingAutonomousWork(complete)).toBe(true)
+    expect(catalogHasPendingAutonomousWork(complete, [sensitive.urn])).toBe(false)
   })
 
   it('keeps catalog coverage moving when a complete dataset batch is unavailable', async () => {

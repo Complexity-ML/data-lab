@@ -91,6 +91,12 @@ export function useCatalogExplorer(options: {
 
   const explore = useCallback(async (input: {
     assets: DataHubAssetSummary[]
+    /**
+     * Inspect one dataset and expose the first usable governed candidate.
+     * The remaining catalog stays checkpointed and continues locally after
+     * the first source branch has been committed.
+     */
+    bootstrapCandidate?: boolean
     explorer: PipelineNode
     worker?: PipelineNode
     isCurrent(): boolean
@@ -199,7 +205,7 @@ export function useCatalogExplorer(options: {
       batchSize: configuredBatchSize,
       cacheMode: policy.cacheMode,
       mode: policy.scope === 'dataset' ? 'dataset' : 'catalog',
-      maxInspections: configuredBatchSize,
+      maxInspections: input.bootstrapCandidate ? 1 : configuredBatchSize,
       previous: previousProgress?.datasets,
       previousProgress,
       retryCooldownMs: (workerPolicy?.cooldownSeconds ?? 30) * 1_000,
@@ -224,7 +230,8 @@ export function useCatalogExplorer(options: {
       return Boolean(current && (!previous || previous.fingerprint !== current.fingerprint))
     })
     const shouldCallAgent = shouldCallAgentForCatalog(previousProgress, explored.progress, hasNewRiskEvidence)
-    const rankedUrns = shouldCallAgent
+    const shouldSelectCandidate = shouldCallAgent || Boolean(input.bootstrapCandidate)
+    const rankedUrns = shouldSelectCandidate
       ? riskUrns.length
         ? riskUrns
         : rankCatalogCandidateUrns(explored.progress)
