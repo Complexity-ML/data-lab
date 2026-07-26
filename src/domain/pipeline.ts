@@ -104,6 +104,12 @@ export interface CatalogDatasetCheckpoint {
   qualityStatus?: 'healthy' | 'failing' | 'unavailable'
   dataProfileStatus?: 'available' | 'unavailable' | 'error'
   /**
+   * Summary catalog reads do not contain authoritative upstream/downstream
+   * lineage. Sensitive datasets stay eligible for one focused deep read until
+   * both lineage directions have been captured.
+   */
+  lineageAuditStatus?: 'summary' | 'complete' | 'unavailable'
+  /**
    * Host-owned proof that this dataset passed through the aggregate data-audit
    * stage. Legacy checkpoints intentionally omit it and are audited once.
    */

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { catalogDatasetFamilyKey, catalogHasPendingAutonomousWork, checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, markCatalogRiskCandidateHandled, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
+import { catalogDatasetFamilyKey, catalogHasPendingAutonomousWork, checkpointForInspection, governanceGapIssues, inspectCatalogInParallel, inspectWithBoundedRetry, markCatalogRiskCandidateHandled, mergeCatalogProgress, mergeDeepInspectionIntoCatalogProgress, rankCatalogCandidateUrns, rankCatalogLineageHydrationUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, selectCatalogCandidateUrn, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident, type CatalogInspection } from './catalog-explorer'
 import type { DataHubAssetSummary } from './datahub'
 
 const capturedAt = '2026-07-24T08:00:00.000Z'
@@ -35,6 +35,35 @@ function inspection(value: DataHubAssetSummary): CatalogInspection {
       cached: false,
       stale: false,
     }],
+  }
+}
+
+function deepInspection(value: DataHubAssetSummary): CatalogInspection {
+  return {
+    asset: value,
+    evidence: [
+      ...inspection(value).evidence,
+      {
+        tool: 'get_lineage',
+        urn: value.urn,
+        capturedAt,
+        expiresAt: freshExpiry,
+        status: 'ok',
+        summary: 'fresh upstream lineage',
+        cached: false,
+        stale: false,
+      },
+      {
+        tool: 'get_lineage',
+        urn: value.urn,
+        capturedAt,
+        expiresAt: freshExpiry,
+        status: 'ok',
+        summary: 'fresh downstream lineage',
+        cached: false,
+        stale: false,
+      },
+    ],
   }
 }
 
@@ -194,6 +223,55 @@ describe('Catalog Explorer', () => {
     })
   })
 
+  it('persists deep lineage hydration back into the complete catalog checkpoint', () => {
+    const summary = checkpointForInspection(inspection({
+      ...asset(3),
+      tags: ['PII'],
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+    }))
+    const progress = {
+      query: '*',
+      total: 2,
+      discovered: 2,
+      inspected: 2,
+      dataAudited: 0,
+      dataAuditCoverageGaps: 2,
+      dataAuditRemaining: 0,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 4,
+      remaining: 0,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [summary, checkpointForInspection(inspection(asset(4)))],
+    }
+    const hydrated = deepInspection({
+      ...asset(3),
+      tags: ['PII'],
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+      upstream: [{ urn: 'urn:li:dataset:upstream', name: 'upstream', sensitive: true }],
+      downstream: [
+        { urn: 'urn:li:dataset:analytics', name: 'analytics', sensitive: true, kind: 'dataset' },
+        { urn: 'urn:li:mlModel:fraud', name: 'fraud', sensitive: true, kind: 'model' },
+      ],
+    })
+
+    const merged = mergeDeepInspectionIntoCatalogProgress(progress, hydrated)
+    const checkpoint = merged.datasets.find((dataset) => dataset.urn === asset(3).urn)
+
+    expect(merged).toMatchObject({ total: 2, inspected: 2, state: 'complete' })
+    expect(checkpoint).toMatchObject({
+      lineageAuditStatus: 'complete',
+      upstreamCount: 1,
+      downstreamCount: 2,
+      downstreamMlCount: 1,
+      downstreamMlRefs: [{ urn: 'urn:li:mlModel:fraud', name: 'fraud', kind: 'model' }],
+    })
+    expect(checkpoint?.fingerprint).not.toBe(summary.fingerprint)
+    expect(summary.lineageAuditStatus).toBe('summary')
+  })
+
   it('persists aggregate data anomalies as evidence-backed incidents', async () => {
     const drifted = {
       ...asset(4),
@@ -227,7 +305,7 @@ describe('Catalog Explorer', () => {
 
   it('prioritizes true data and sensitive risk candidates without promoting governance gaps', () => {
     const governance = checkpointForInspection(inspection({ ...asset(1), tags: [] }))
-    const sensitive = checkpointForInspection(inspection({
+    const sensitive = checkpointForInspection(deepInspection({
       ...asset(2),
       fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
       downstream: [{ urn: 'urn:li:dataset:consumer', name: 'consumer', sensitive: false }],
@@ -252,7 +330,7 @@ describe('Catalog Explorer', () => {
   })
 
   it('does not replay a materialized risk fingerprint after a checkpoint reload', () => {
-    const sensitive = checkpointForInspection(inspection({
+    const sensitive = checkpointForInspection(deepInspection({
       ...asset(2),
       fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
     }))
@@ -284,6 +362,38 @@ describe('Catalog Explorer', () => {
 
     expect(changed.datasets[0]?.handledRiskFingerprint).toBe(sensitive.fingerprint)
     expect(rankCatalogRiskCandidateUrns(changed)).toEqual([sensitive.urn])
+  })
+
+  it('rehydrates legacy sensitive checkpoints until both lineage directions are verified', () => {
+    const summary = checkpointForInspection(inspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+    }))
+    const unavailable = {
+      ...summary,
+      urn: asset(3).urn,
+      name: asset(3).name,
+      lineageAuditStatus: 'unavailable' as const,
+    }
+    const complete = checkpointForInspection(deepInspection({
+      ...asset(4),
+      fields: [{ name: 'phone', type: 'string', tags: ['PII'] }],
+    }))
+    const progress = {
+      query: '*',
+      total: 3,
+      discovered: 3,
+      inspected: 3,
+      failed: 0,
+      incidents: 0,
+      governanceGaps: 0,
+      concurrency: 1,
+      state: 'complete' as const,
+      checkpointAt: capturedAt,
+      datasets: [{ ...summary, lineageAuditStatus: undefined }, unavailable, complete],
+    }
+
+    expect(rankCatalogLineageHydrationUrns(progress)).toEqual([summary.urn])
   })
 
   it('does not rebuild the same logical risk branch for every platform representation', () => {
@@ -337,7 +447,16 @@ describe('Catalog Explorer', () => {
 
     expect(catalogHasPendingAutonomousWork({ ...complete, state: 'inspecting' })).toBe(true)
     expect(catalogHasPendingAutonomousWork(complete)).toBe(true)
-    expect(catalogHasPendingAutonomousWork(complete, [sensitive.urn])).toBe(false)
+    expect(catalogHasPendingAutonomousWork(complete, [sensitive.urn])).toBe(true)
+
+    const hydrated = {
+      ...complete,
+      datasets: [checkpointForInspection(deepInspection({
+        ...asset(2),
+        fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+      }))],
+    }
+    expect(catalogHasPendingAutonomousWork(hydrated, [sensitive.urn])).toBe(false)
   })
 
   it('keeps catalog coverage moving when a complete dataset batch is unavailable', async () => {
@@ -764,6 +883,19 @@ describe('Catalog Explorer', () => {
       { ...base, inspected: 12, state: 'complete' },
       { ...base, inspected: 12, state: 'complete' },
     )).toBe(false)
+    const sensitiveSummary = checkpointForInspection(inspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+    }))
+    const sensitiveLineage = checkpointForInspection(deepInspection({
+      ...asset(2),
+      fields: [{ name: 'email', type: 'string', tags: ['PII'] }],
+      downstream: [{ urn: 'urn:li:dataset:consumer', name: 'consumer', sensitive: true }],
+    }))
+    expect(shouldCallAgentForCatalog(
+      { ...base, inspected: 12, state: 'complete', datasets: [sensitiveSummary] },
+      { ...base, inspected: 12, state: 'complete', datasets: [sensitiveLineage] },
+    )).toBe(true)
     expect(shouldCallAgentForCatalog(
       { ...base, inspected: 8 },
       { ...base, inspected: 12, failed: 4, state: 'inspecting' },

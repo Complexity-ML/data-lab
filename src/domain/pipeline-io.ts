@@ -144,6 +144,9 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       dataProfileStatus: ['available', 'unavailable', 'error'].includes(String(item.dataProfileStatus))
         ? item.dataProfileStatus as 'available' | 'unavailable' | 'error'
         : undefined,
+      lineageAuditStatus: ['summary', 'complete', 'unavailable'].includes(String(item.lineageAuditStatus))
+        ? item.lineageAuditStatus as 'summary' | 'complete' | 'unavailable'
+        : undefined,
       dataAuditStatus: ['complete', 'coverage_gap', 'unavailable'].includes(String(item.dataAuditStatus))
         ? item.dataAuditStatus as 'complete' | 'coverage_gap' | 'unavailable'
         : undefined,

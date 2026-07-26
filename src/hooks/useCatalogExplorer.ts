@@ -1,5 +1,5 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
-import { governanceGapIssues, hasDataIncident, hasGovernanceGap, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, markCatalogRiskCandidateHandled, mergeCatalogProgress, rankCatalogCandidateUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
+import { governanceGapIssues, hasDataIncident, hasGovernanceGap, inspectCatalogInParallel, inspectWithBoundedRetry, isInspectionUnavailable, markCatalogRiskCandidateHandled, mergeCatalogProgress, mergeDeepInspectionIntoCatalogProgress, rankCatalogCandidateUrns, rankCatalogLineageHydrationUrns, rankCatalogRiskCandidateUrns, resetCatalogRetryState, resolveAdaptiveCatalogConcurrency, shouldCallAgentForCatalog, shouldOpenCatalogConnectivityIncident } from '../domain/catalog-explorer'
 import { catalogExplorerCheckpointScope, parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -217,29 +217,33 @@ export function useCatalogExplorer(options: {
         persistProgress(key, progress)
       },
     })
-    await persistProgress(key, explored.progress)
+    let catalogProgress: CatalogExplorationProgress = explored.progress
+    await persistProgress(key, catalogProgress)
 
     const evidence: DataHubEvidence[] = explored.inspections.flatMap((inspection) => inspection.evidence)
     const byUrn = new Map(assets.map((asset) => [asset.urn, asset]))
     const inspectedByUrn = new Map(explored.inspections.map((inspection) => [inspection.asset.urn, inspection.asset]))
-    const riskUrns = rankCatalogRiskCandidateUrns(explored.progress)
+    const riskUrns = rankCatalogRiskCandidateUrns(catalogProgress)
+    const lineageHydrationUrns = rankCatalogLineageHydrationUrns(catalogProgress)
     const previousByUrn = new Map(previousProgress?.datasets.map((checkpoint) => [checkpoint.urn, checkpoint]) ?? [])
     const hasNewRiskEvidence = riskUrns.some((urn) => {
-      const current = explored.progress.datasets.find((checkpoint) => checkpoint.urn === urn)
+      const current = catalogProgress.datasets.find((checkpoint) => checkpoint.urn === urn)
       const previous = previousByUrn.get(urn)
       return Boolean(current && (!previous || previous.fingerprint !== current.fingerprint))
     })
-    const shouldCallAgent = shouldCallAgentForCatalog(previousProgress, explored.progress, hasNewRiskEvidence)
-    const shouldSelectCandidate = shouldCallAgent || Boolean(input.bootstrapCandidate)
+    const shouldCallAgent = shouldCallAgentForCatalog(previousProgress, catalogProgress, hasNewRiskEvidence)
+    const shouldSelectCandidate = shouldCallAgent || lineageHydrationUrns.length > 0 || Boolean(input.bootstrapCandidate)
     const rankedUrns = shouldSelectCandidate
       ? riskUrns.length
         ? riskUrns
-        : rankCatalogCandidateUrns(explored.progress)
+        : lineageHydrationUrns.length
+          ? lineageHydrationUrns
+          : rankCatalogCandidateUrns(catalogProgress)
       : []
     const candidateUrn = rankedUrns.find((urn) => inspectedByUrn.has(urn) || byUrn.has(urn))
     let candidate = candidateUrn ? inspectedByUrn.get(candidateUrn) ?? byUrn.get(candidateUrn) : undefined
     if (candidate) {
-      const checkpoint = explored.progress.datasets.find((dataset) => dataset.urn === candidate!.urn)
+      const checkpoint = catalogProgress.datasets.find((dataset) => dataset.urn === candidate!.urn)
       if (checkpoint && !evidence.some((read) => read.urn === checkpoint.urn && read.status === 'ok' && !read.stale)) {
         evidence.push({
           tool: 'catalog_checkpoint',
@@ -257,7 +261,12 @@ export function useCatalogExplorer(options: {
         // schema + upstream/downstream lineage audit. The remaining catalog
         // assets keep their bounded entity summaries until promoted.
         const hydrated = await inspectAsset(candidate.assetRef ?? candidate.urn, false, candidate.connectorId, 'deep')
-        if (!isInspectionUnavailable(hydrated)) candidate = hydrated.asset
+        if (!isInspectionUnavailable(hydrated)) {
+          candidate = hydrated.asset
+          catalogProgress = mergeDeepInspectionIntoCatalogProgress(catalogProgress, hydrated)
+          updateProgress(input.explorer, catalogProgress, input.isCurrent, input.worker)
+          await persistProgress(key, catalogProgress)
+        }
         evidence.push(...hydrated.evidence.map((read) => ({
           tool: read.tool,
           urn: hydrated.asset.urn,
@@ -271,7 +280,7 @@ export function useCatalogExplorer(options: {
       } catch { /* Keep the versioned catalog identity as a bounded fallback. */ }
     }
     if (input.isCurrent()) {
-      const unavailable = explored.progress.datasets.filter((dataset) => dataset.status === 'unavailable')
+      const unavailable = catalogProgress.datasets.filter((dataset) => dataset.status === 'unavailable')
       const connectorGroups = new Map<string, typeof unavailable>()
       const freshlyAvailableConnectors = new Map<string, { sourceSystem: string; cardId: string }>()
       explored.inspections.filter((inspection) => !isInspectionUnavailable(inspection)).forEach((inspection) => {
@@ -287,7 +296,7 @@ export function useCatalogExplorer(options: {
         const key = asset?.connectorId ?? asset?.sourceSystem ?? 'catalog'
         connectorGroups.set(key, [...(connectorGroups.get(key) ?? []), dataset])
       })
-      const catalogConnectionUnavailable = shouldOpenCatalogConnectivityIncident(explored.progress)
+      const catalogConnectionUnavailable = shouldOpenCatalogConnectivityIncident(catalogProgress)
       const recoveredConnectors = [...freshlyAvailableConnectors.entries()].filter(([connector]) => {
         if (catalogConnectionUnavailable && connectorGroups.has(connector)) return false
         return incidentSummaries.some((incident) => incident.incidentKey === `catalog-explorer:connectivity:${connector}` && incident.status !== 'resolved')
@@ -295,12 +304,12 @@ export function useCatalogExplorer(options: {
       const failedConnectorGroups = catalogConnectionUnavailable ? connectorGroups : new Map<string, typeof unavailable>()
       const recoveredDataIncidents = explored.inspections.flatMap((inspection) => {
         if (isInspectionUnavailable(inspection)) return []
-        const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)
+        const dataset = catalogProgress.datasets.find((item) => item.urn === inspection.asset.urn)
         const incidentKey = `catalog-explorer:${inspection.asset.urn}`
         if (!dataset || hasDataIncident(dataset) || !incidentSummaries.some((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')) return []
         return [{ dataset, asset: inspection.asset, incidentKey }]
       })
-      const governanceIncidents = explored.progress.datasets.filter(hasGovernanceGap).flatMap((dataset) => {
+      const governanceIncidents = catalogProgress.datasets.filter(hasGovernanceGap).flatMap((dataset) => {
         const incidentKey = `catalog-explorer:governance:${dataset.urn}`
         const existing = incidentSummaries.find((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')
         if (existing?.fingerprint === dataset.fingerprint) return []
@@ -310,7 +319,7 @@ export function useCatalogExplorer(options: {
           transition: existing ? 'worsened' as const : 'opened' as const,
         }]
       })
-      const dataIncidents = explored.progress.datasets.filter(hasDataIncident).flatMap((dataset) => {
+      const dataIncidents = catalogProgress.datasets.filter(hasDataIncident).flatMap((dataset) => {
         const incidentKey = `catalog-explorer:${dataset.urn}`
         const existing = incidentSummaries.find((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')
         if (existing?.fingerprint === dataset.fingerprint) return []
@@ -330,7 +339,7 @@ export function useCatalogExplorer(options: {
       })
       const recoveredGovernanceIncidents = explored.inspections.flatMap((inspection) => {
         if (isInspectionUnavailable(inspection)) return []
-        const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)
+        const dataset = catalogProgress.datasets.find((item) => item.urn === inspection.asset.urn)
         const incidentKey = `catalog-explorer:governance:${inspection.asset.urn}`
         if (!dataset || hasGovernanceGap(dataset) || !incidentSummaries.some((incident) => incident.incidentKey === incidentKey && incident.status !== 'resolved')) return []
         return [{ dataset, asset: inspection.asset, incidentKey }]
@@ -418,11 +427,11 @@ export function useCatalogExplorer(options: {
     return {
       candidate,
       evidence,
-      progress: explored.progress,
+      progress: catalogProgress,
       summaries: [
-        `Catalog Explorer checkpoint ${explored.progress.inspected}/${explored.progress.total}; ${explored.progress.dataAudited ?? 0} aggregate profiles audited, ${explored.progress.dataAuditCoverageGaps ?? 0} profile coverage gaps, ${explored.progress.incidents} evidence-backed data incidents and ${explored.progress.failed} unavailable reads. Last batch used ${explored.progress.concurrency} workers in ${explored.progress.batchDurationMs ?? 0}ms. Continue from the versioned checkpoint without repeating completed dataset audits.`,
+        `Catalog Explorer checkpoint ${catalogProgress.inspected}/${catalogProgress.total}; ${catalogProgress.dataAudited ?? 0} aggregate profiles audited, ${catalogProgress.dataAuditCoverageGaps ?? 0} profile coverage gaps, ${catalogProgress.incidents} evidence-backed data incidents and ${catalogProgress.failed} unavailable reads. Last batch used ${catalogProgress.concurrency} workers in ${catalogProgress.batchDurationMs ?? 0}ms. Continue from the versioned checkpoint without repeating completed dataset audits.`,
         ...explored.inspections.slice(0, 4).map((inspection) => {
-          const dataset = explored.progress.datasets.find((item) => item.urn === inspection.asset.urn)!
+          const dataset = catalogProgress.datasets.find((item) => item.urn === inspection.asset.urn)!
           return `${dataset.name} · ${dataset.status} · fields=${dataset.fieldCount} · owners=${dataset.ownerCount} · upstream=${dataset.upstreamCount} · downstream=${dataset.downstreamCount} · issues=${dataset.issues.join(', ') || 'none'}`
         }),
       ],
@@ -477,6 +486,25 @@ export function useCatalogExplorer(options: {
     return progress
   }, [checkpointKey, persistProgress, updateProgress])
 
+  const recordDeepInspection = useCallback(async (
+    explorer: PipelineNode,
+    inspection: CatalogInspection,
+    isCurrent: () => boolean,
+  ) => {
+    const key = checkpointKey(explorer)
+    await checkpointWrites.current.get(key)?.catch(() => undefined)
+    const persisted = await window.dataLab?.loadCatalogCheckpoint?.(key).catch(() => null)
+    const current = mergeCatalogProgress(
+      mergeCatalogProgress(explorer.data.exploration, latestProgress.current.get(key)),
+      persisted ?? undefined,
+    )
+    if (!current || isInspectionUnavailable(inspection)) return current
+    const progress = mergeDeepInspectionIntoCatalogProgress(current, inspection)
+    updateProgress(explorer, progress, isCurrent)
+    await persistProgress(key, progress)
+    return progress
+  }, [checkpointKey, persistProgress, updateProgress])
+
   const markRiskCandidateHandled = useCallback(async (explorer: PipelineNode, urn: string) => {
     const key = checkpointKey(explorer)
     await checkpointWrites.current.get(key)?.catch(() => undefined)
@@ -505,5 +533,5 @@ export function useCatalogExplorer(options: {
     resetRetriesRequested.current = true
   }, [])
 
-  return { assetsFor, attachProgress, explore, markDiscoveryFailed, markRiskCandidateHandled, resetRetriesOnNextExplore, updateProgress }
+  return { assetsFor, attachProgress, explore, markDiscoveryFailed, markRiskCandidateHandled, recordDeepInspection, resetRetriesOnNextExplore, updateProgress }
 }

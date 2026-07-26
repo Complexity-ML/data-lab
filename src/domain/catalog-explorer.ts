@@ -139,7 +139,13 @@ export function shouldCallAgentForCatalog(
   profileRisk = false,
 ) {
   if (current.state === 'failed' || current.pauseReason === 'connector_unavailable' || current.pauseReason === 'retry_exhausted') return false
+  const previousByUrn = new Map(previous?.datasets.map((checkpoint) => [checkpoint.urn, checkpoint]) ?? [])
+  const completedSensitiveLineage = current.datasets.some((checkpoint) =>
+    (checkpoint.sensitiveSignalCount ?? 0) > 0
+    && checkpoint.lineageAuditStatus === 'complete'
+    && previousByUrn.get(checkpoint.urn)?.lineageAuditStatus !== 'complete')
   return profileRisk
+    || completedSensitiveLineage
     || current.incidents > (previous?.incidents ?? 0)
     || (current.state === 'complete' && previous?.state !== 'complete')
 }
@@ -199,6 +205,22 @@ export function rankCatalogRiskCandidateUrns(
     .map((checkpoint) => checkpoint.urn)
 }
 
+export function rankCatalogLineageHydrationUrns(
+  progress: CatalogExplorationProgress,
+) {
+  const score = (checkpoint: CatalogDatasetCheckpoint) =>
+    (checkpoint.sensitiveSignalCount ?? 0) * 1_000
+    + checkpoint.fieldCount
+
+  return progress.datasets
+    .filter((checkpoint) => checkpoint.status !== 'unavailable'
+      && (checkpoint.sensitiveSignalCount ?? 0) > 0
+      && checkpoint.lineageAuditStatus !== 'complete'
+      && (checkpoint.lineageAuditStatus !== 'unavailable' || Date.parse(checkpoint.expiresAt) <= Date.now()))
+    .sort((left, right) => score(right) - score(left) || left.urn.localeCompare(right.urn))
+    .map((checkpoint) => checkpoint.urn)
+}
+
 export function markCatalogRiskCandidateHandled(
   progress: CatalogExplorationProgress,
   urn: string,
@@ -220,7 +242,8 @@ export function catalogHasPendingAutonomousWork(
 ) {
   if (!progress) return false
   if (progress.state !== 'complete') return true
-  return rankCatalogRiskCandidateUrns(progress, representedUrns).length > 0
+  return rankCatalogLineageHydrationUrns(progress).length > 0
+    || rankCatalogRiskCandidateUrns(progress, representedUrns).length > 0
 }
 
 export function selectCatalogCandidateUrn(
@@ -248,6 +271,12 @@ function fingerprint(value: string) {
 export function checkpointForInspection(inspection: CatalogInspection): CatalogDatasetCheckpoint {
   const { asset, evidence } = inspection
   const unavailable = isInspectionUnavailable(inspection)
+  const lineageReads = evidence.filter((read) => read.tool === 'get_lineage')
+  const lineageAuditStatus: CatalogDatasetCheckpoint['lineageAuditStatus'] = lineageReads.length === 0
+    ? 'summary'
+    : lineageReads.length >= 2 && lineageReads.every((read) => read.status === 'ok' && !read.stale)
+      ? 'complete'
+      : 'unavailable'
   const collectionFailures = unavailable
     ? evidence
       .filter((read) => read.status !== 'ok' || read.stale)
@@ -287,6 +316,7 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     sensitiveSignalCount,
     qualityStatus: asset.qualityStatus,
     dataProfileStatus: asset.dataProfile?.status,
+    lineageAuditStatus,
     dataAuditStatus,
     dataAuditedAt: capturedAt,
     dataRiskSignals: asset.dataProfile?.risks ?? [],
@@ -306,6 +336,7 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
       asset.dataProfile?.capturedAt ?? '',
       asset.dataProfile?.previousCapturedAt ?? '',
       asset.dataProfile?.risks.map((risk) => `${risk.id}:${risk.severity}:${risk.current ?? ''}:${risk.previous ?? ''}`).join('|') ?? '',
+      lineageAuditStatus,
       asset.upstream.map((item) => item.urn).join('|'),
       asset.downstream.map((item) => item.urn).join('|'),
       downstreamMlRefs.map((item) => `${item.kind}:${item.urn}`).join('|'),
@@ -316,6 +347,22 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     attemptCount: 1,
     lastAttemptAt: capturedAt,
   }
+}
+
+export function mergeDeepInspectionIntoCatalogProgress(
+  progress: CatalogExplorationProgress,
+  inspection: CatalogInspection,
+): CatalogExplorationProgress {
+  const previous = progress.datasets.find((checkpoint) => checkpoint.urn === inspection.asset.urn)
+  const checkpoint = checkpointForInspection(inspection)
+  checkpoint.attemptCount = previous?.attemptCount ?? checkpoint.attemptCount
+  checkpoint.lastAttemptAt = checkpoint.capturedAt
+  checkpoint.handledRiskFingerprint = previous?.handledRiskFingerprint
+  return mergeCatalogProgress(progress, {
+    ...progress,
+    checkpointAt: new Date().toISOString(),
+    datasets: [checkpoint],
+  }) ?? progress
 }
 
 export async function inspectCatalogInParallel(

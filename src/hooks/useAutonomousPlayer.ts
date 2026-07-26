@@ -10,7 +10,7 @@ import type { AutonomyPolicy } from '../domain/autonomy-policy'
 import { policyForcesProposalReview } from '../domain/autonomy-policy'
 import { ensureAutonomousSystemCards } from '../domain/autonomous-system'
 import { classifyConnectivityFailure } from '../domain/connectivity'
-import { catalogHasPendingAutonomousWork, rankCatalogRiskCandidateUrns, selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
+import { catalogHasPendingAutonomousWork, rankCatalogLineageHydrationUrns, rankCatalogRiskCandidateUrns, selectCatalogCandidateUrn, shouldCallAgentForCatalog } from '../domain/catalog-explorer'
 import { parseCatalogExplorerPolicy } from '../domain/catalog-explorer-policy'
 import type { DataHubAssetSummary, DataHubEvidence } from '../domain/datahub'
 import type { CatalogInspection } from '../domain/catalog-connectors'
@@ -241,6 +241,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     })
     const pendingCatalogRiskUrn = checkpointProgress?.state === 'complete'
       ? rankCatalogRiskCandidateUrns(checkpointProgress, representedCatalogUrns)[0]
+        ?? rankCatalogLineageHydrationUrns(checkpointProgress)[0]
       : undefined
     const hasPendingCatalogWork = catalogHasPendingAutonomousWork(checkpointProgress, representedCatalogUrns)
     if (!monitored && executionCheckpointCurrent && (hasArmedMonitor || monitorBootstrapAttempted.current) && !hasPendingCatalogWork) {
@@ -406,13 +407,20 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
             const urn = node.data.assetRef ?? node.data.datahubUrn
             return urn ? [urn] : []
           })
-          const riskCandidateUrn = rankCatalogRiskCandidateUrns(catalogExplorer.data.exploration, representedUrns)[0]
+          const previousProgress = catalogExplorer.data.exploration
+          const riskCandidateUrn = rankCatalogRiskCandidateUrns(previousProgress, representedUrns)[0]
+            ?? rankCatalogLineageHydrationUrns(previousProgress)[0]
           if (riskCandidateUrn) {
             setActivity('Catalog risk candidate found · running one focused GraphQL evidence check…')
             const inspection = await inspectDataHubAsset(riskCandidateUrn, false, undefined, 'deep')
             if (agentRunId.current !== runId) return
             blankCandidate = inspection.asset
-            catalogProgress = catalogExplorer.data.exploration
+            catalogProgress = await catalog.recordDeepInspection(
+              catalogExplorer,
+              inspection,
+              () => agentRunId.current === runId,
+            ) ?? previousProgress
+            continueCatalogWithoutModel = !shouldCallAgentForCatalog(previousProgress, catalogProgress)
             profileCandidates.set(inspection.asset.urn, inspection.asset)
             evidenceEntries.push(...inspection.evidence)
             datahubEvidence.unshift(
@@ -429,7 +437,7 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         const completedCheckpoint = catalogExplorer?.data.exploration?.state === 'complete'
           ? catalogExplorer.data.exploration
           : undefined
-        if (completedCheckpoint) {
+        if (completedCheckpoint && catalogExplorer) {
           catalogProgress = completedCheckpoint
           setActivity(`Catalog Explorer checkpoint ${completedCheckpoint.inspected}/${completedCheckpoint.total} complete · restoring the reviewed source for one targeted repair…`)
           try {
@@ -446,6 +454,11 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
               const inspection = await inspectDataHubAsset(candidateUrn, false, connectorId, 'deep')
               if (agentRunId.current !== runId) return
               blankCandidate = inspection.asset
+              catalogProgress = await catalog.recordDeepInspection(
+                catalogExplorer,
+                inspection,
+                () => agentRunId.current === runId,
+              ) ?? completedCheckpoint
               evidenceEntries = inspection.evidence
               datahubEvidence = [
                 `Completed Catalog Explorer checkpoint restored without reopening discovery: ${completedCheckpoint.inspected}/${completedCheckpoint.total} datasets.`,
