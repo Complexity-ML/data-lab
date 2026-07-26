@@ -62,6 +62,10 @@ describe('strict provider proposal contract', () => {
     const read = { ...validProposal.actions[0], node_id: 'query-read', kind: 'query', label: 'Verify entity read', rule: readRule }
     expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [read] }, payload).actions[0].kind).toBe('query')
 
+    const aggregateRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=profile.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_aggregate_profile'
+    const aggregateRead = { ...read, node_id: 'query-profile', label: 'Audit aggregate values', rule: aggregateRule }
+    expect(validateProposal({ ...validProposal, requires_human_review: false, actions: [aggregateRead] }, payload).actions[0].kind).toBe('query')
+
     const writeRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=metadata.update | mode=governed_write | variables=host_validated | timeout_ms=8000 | review=required | dry_run=required | rollback=versioned | response=mutation_receipt'
     const write = { ...read, node_id: 'query-write', label: 'Verify metadata update', rule: writeRule }
     expect(() => validateProposal({ ...validProposal, requires_human_review: false, actions: [write] }, payload)).toThrow('requires_human_review=true')

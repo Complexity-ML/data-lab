@@ -52,9 +52,11 @@ describe('versioned pipeline JSON exchange', () => {
     ]
     const exported = createPipelineExport('Metadata boundary', [source, profile, output], edges, [])
     expect(exported.graph.nodes[1].data.profile?.storage.hostVerified).toBe(true)
+    expect(exported.graph.nodes[1].data.profile?.aggregateAudit.hostVerified).toBe(true)
 
     const imported = parsePipelineExport(JSON.stringify(exported))
     expect(imported.graph.nodes[1].data.profile?.storage.hostVerified).toBe(false)
+    expect(imported.graph.nodes[1].data.profile?.aggregateAudit.hostVerified).toBe(false)
     expect(validatePipeline(imported.graph.nodes, imported.graph.edges)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'sensitive-unprotected-source-output', severity: 'error' }),
     ]))

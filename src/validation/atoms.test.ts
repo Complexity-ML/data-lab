@@ -20,6 +20,32 @@ const sensitiveAsset: DataHubAssetSummary = {
   freshness: { capturedAt: '2026-07-24T10:00:00.000Z', expiresAt: '2099-07-24T11:00:00.000Z', stale: false },
 }
 
+const aggregateAsset: DataHubAssetSummary = {
+  ...sensitiveAsset,
+  urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.metrics,PROD)',
+  name: 'metrics',
+  description: 'Model input metrics',
+  tags: [],
+  fields: [{ name: 'score', type: 'number' }],
+  dataProfile: {
+    status: 'available',
+    capturedAt: '2026-07-24T10:00:00.000Z',
+    previousCapturedAt: '2026-07-23T10:00:00.000Z',
+    rowCount: 700,
+    previousRowCount: 1_000,
+    fields: [{ name: 'score', nullRate: 0.2, previousNullRate: 0.05, distinctCount: 640 }],
+    risks: [{
+      id: 'null-spike-score',
+      kind: 'null_spike',
+      severity: 'high',
+      field: 'score',
+      summary: 'score null rate increased from 5% to 20%.',
+      current: 0.2,
+      previous: 0.05,
+    }],
+  },
+}
+
 describe('atomic pipeline validation', () => {
   it('exposes small independently addressable validators', () => {
     expect(validationAtoms.map((atom) => atom.id)).toEqual([
@@ -183,10 +209,11 @@ describe('atomic pipeline validation', () => {
 
   it('accepts Query Check reads and graph-only patch revalidation paths', () => {
     const source = { ...newCard('source', 0), id: 'source' }
-    const query = { ...newCard('query', 1), id: 'query' }
+    const metadataRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=entity.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_metadata'
+    const query = { ...newCard('query', 1), id: 'query', data: { ...newCard('query', 1).data, rule: metadataRule } }
     const analysis = { ...newCard('analysis', 2), id: 'analysis' }
     const patch = { ...newCard('patch', 3), id: 'patch' }
-    const recheck = { ...newCard('query', 4), id: 'recheck' }
+    const recheck = { ...newCard('query', 4), id: 'recheck', data: { ...newCard('query', 4).data, rule: metadataRule } }
     const output = { ...newCard('output', 5), id: 'output' }
     const findings = validatePipeline([source, query, analysis, patch, recheck, output], [
       { id: 'source-query', source: source.id, target: query.id },
@@ -196,6 +223,24 @@ describe('atomic pipeline validation', () => {
       { id: 'recheck-output', source: recheck.id, target: output.id },
     ])
     expect(findings.some((finding) => finding.id.startsWith('query-') || finding.id.startsWith('patch-') || finding.id.startsWith('compatibility-'))).toBe(false)
+  })
+
+  it('routes a bounded aggregate Query Check into versioned Data Profile evidence', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const query = { ...newCard('query', 1), id: 'query' }
+    const profile = {
+      ...newCard('profile', 2),
+      id: 'profile',
+      data: { ...newCard('profile', 2).data, profile: createDataProfileSnapshot(aggregateAsset) },
+    }
+    const output = { ...newCard('output', 3), id: 'output' }
+    const findings = validatePipeline([source, query, profile, output], [
+      { id: 'source-query', source: source.id, target: query.id },
+      { id: 'query-profile', source: query.id, target: profile.id },
+      { id: 'profile-output', source: profile.id, target: output.id },
+    ])
+
+    expect(findings.some((finding) => finding.id.startsWith('query-'))).toBe(false)
   })
 
   it('requires a downstream Human Review for governed Query Check writes', () => {
@@ -222,12 +267,14 @@ describe('atomic pipeline validation', () => {
 
   it('accepts an atomic ML risk assessment backed by fresh impact evidence', () => {
     const source = { ...newCard('source', 0), id: 'source' }
-    const impact = { ...newCard('impact', 1), id: 'impact' }
-    const risk = { ...newCard('risk', 2), id: 'risk', data: { ...newCard('risk', 2).data, rule: 'scope=churn_model_v3 | risk_domain=ml | risk_type=data | severity=high | confidence=0.91 | evidence=fresh | affected_assets=3 | affected_models=1 | action=repair_feature_then_retrain' } }
-    const patch = { ...newCard('patch', 3), id: 'patch' }
-    const output = { ...newCard('output', 4), id: 'output' }
-    const findings = validatePipeline([source, impact, risk, patch, output], [
-      { id: 'source-impact', source: source.id, target: impact.id },
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: createDataProfileSnapshot(aggregateAsset) } }
+    const impact = { ...newCard('impact', 2), id: 'impact' }
+    const risk = { ...newCard('risk', 3), id: 'risk', data: { ...newCard('risk', 3).data, rule: 'scope=churn_model_v3 | risk_domain=ml | risk_type=data | severity=high | confidence=0.91 | evidence=fresh | affected_assets=3 | affected_models=1 | action=repair_feature_then_retrain' } }
+    const patch = { ...newCard('patch', 4), id: 'patch' }
+    const output = { ...newCard('output', 5), id: 'output' }
+    const findings = validatePipeline([source, profile, impact, risk, patch, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-impact', source: profile.id, target: impact.id },
       { id: 'impact-risk', source: impact.id, target: risk.id },
       { id: 'risk-patch', source: risk.id, target: patch.id },
       { id: 'patch-output', source: patch.id, target: output.id },
@@ -251,24 +298,44 @@ describe('atomic pipeline validation', () => {
 
   it('warns when elevated risk has no bounded mitigation path', () => {
     const source = { ...newCard('source', 0), id: 'source' }
-    const impact = { ...newCard('impact', 1), id: 'impact' }
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: createDataProfileSnapshot(aggregateAsset) } }
+    const impact = { ...newCard('impact', 2), id: 'impact' }
     const risk = {
-      ...newCard('risk', 2),
+      ...newCard('risk', 3),
       id: 'risk',
       data: {
-        ...newCard('risk', 2).data,
+        ...newCard('risk', 3).data,
         rule: 'scope=customer_dataset | risk_domain=data | risk_type=data | severity=critical | confidence=0.95 | evidence=fresh | affected_assets=1 | action=quarantine_then_recheck',
       },
     }
-    const output = { ...newCard('output', 3), id: 'output' }
-    const findings = validatePipeline([source, impact, risk, output], [
-      { id: 'source-impact', source: source.id, target: impact.id },
+    const output = { ...newCard('output', 4), id: 'output' }
+    const findings = validatePipeline([source, profile, impact, risk, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-impact', source: profile.id, target: impact.id },
       { id: 'impact-risk', source: impact.id, target: risk.id },
       { id: 'risk-output', source: risk.id, target: output.id },
     ])
 
     expect(findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'risk-mitigation-risk', severity: 'warning' }),
+    ]))
+  })
+
+  it('blocks a value-level data risk that relies on schema-only profile evidence', () => {
+    const source = { ...newCard('source', 0), id: 'source' }
+    const profile = { ...newCard('profile', 1), id: 'profile', data: { ...newCard('profile', 1).data, profile: createDataProfileSnapshot(sensitiveAsset) } }
+    const impact = { ...newCard('impact', 2), id: 'impact' }
+    const risk = { ...newCard('risk', 3), id: 'risk', data: { ...newCard('risk', 3).data, rule: 'scope=customer_dataset | risk_domain=data | risk_type=data | severity=high | confidence=0.9 | evidence=fresh | affected_assets=1 | action=quarantine_then_recheck' } }
+    const output = { ...newCard('output', 4), id: 'output' }
+    const findings = validatePipeline([source, profile, impact, risk, output], [
+      { id: 'source-profile', source: source.id, target: profile.id },
+      { id: 'profile-impact', source: profile.id, target: impact.id },
+      { id: 'impact-risk', source: impact.id, target: risk.id },
+      { id: 'risk-output', source: risk.id, target: output.id },
+    ])
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'risk-aggregate-evidence-risk', severity: 'error' }),
     ]))
   })
 

@@ -116,6 +116,7 @@ describe('OpenAI agent tool loop', () => {
           model: 'gpt-5.6-terra',
           output: [
             { type: 'reasoning', id: 'reasoning-1', summary: [] },
+            { type: 'function_call', call_id: 'call-card-kinds', name: 'list_card_kinds', arguments: '{}' },
             { type: 'function_call', call_id: 'call-inspect', name: 'inspect_graph', arguments: '{"node_ids":[]}' },
           ],
         }), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -159,12 +160,13 @@ describe('OpenAI agent tool loop', () => {
       node_id: 'profile-1',
       description: 'Agent-proposed Data Profile awaiting graph review.',
     })
-    expect(result.toolTrace?.map((item) => item.tool)).toEqual(['inspect_graph', 'add_card', 'validate_plan', 'finish_plan'])
+    expect(result.toolTrace?.map((item) => item.tool)).toEqual(['list_card_kinds', 'inspect_graph', 'add_card', 'validate_plan', 'finish_plan'])
     expect(requests[0]).toMatchObject({ tool_choice: 'required', parallel_tool_calls: true, store: false })
     expect(Array.isArray(requests[0].tools)).toBe(true)
     const secondInput = requests[1].input as Record<string, unknown>[]
     expect(secondInput).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'reasoning', id: 'reasoning-1' }),
+      expect.objectContaining({ type: 'function_call_output', call_id: 'call-card-kinds' }),
       expect.objectContaining({ type: 'function_call_output', call_id: 'call-inspect' }),
     ]))
   })

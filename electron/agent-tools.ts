@@ -22,7 +22,7 @@ export const agentToolDefinitions = [
   {
     type: 'function',
     name: 'list_card_kinds',
-    description: 'Read the bounded DATA LAB card library and the execution role of every card kind.',
+    description: 'Read every DATA LAB card role, activation condition, definition of done, compatibility and current evidence-driven recommendation before planning.',
     strict: true,
     parameters: objectSchema({}),
   },
@@ -120,26 +120,108 @@ export const agentToolDefinitions = [
   },
 ] as const
 
-const cardRoles: Record<ProposalCardKind, string> = {
-  control: 'Persist the autonomous objective and player resume/monitor policy.',
-  explorer: 'Keep one adjustable host-owned sidecar for focused or catalog-wide audits. A complete checkpoint is terminal: restore its recommended source instead of restarting discovery. Never connect it to dataset lineage.',
-  worker: 'Process any connected card work as bounded deterministic batches with branch-only context and atomic checkpoints.',
-  query: 'Verify a host-registered GraphQL read or governed write contract without accepting arbitrary query text.',
-  source: 'Resolve a governed DataHub dataset.',
-  profile: 'Keep compact versioned schema, quality and freshness memory without raw rows.',
-  analysis: 'Read trusted metadata and produce findings.',
-  impact: 'Trace a change through lineage and rank downstream risk.',
-  risk: 'Classify data or collection risk from versioned evidence with severity, confidence and affected assets.',
-  patch: 'Describe a reversible graph-only compatibility overlay.',
-  monitor: 'Trigger a new bounded iteration only when evidence changes.',
-  parallel: 'Release independent branch-only agent work and merge reviewed diffs.',
-  diagram: 'Merge parallel incident branches into one reviewable workstream.',
-  split: 'Route through an explicit approved or quarantine policy branch.',
-  decision: 'Choose a supported correction or request human review.',
-  transform: 'Apply a deterministic declared transformation.',
-  review: 'Pause one branch, persist its checkpoint, then resume or repair after a human decision.',
-  validation: 'Run atomic contracts and block on any failing invariant.',
-  output: 'Publish a validated artifact and its lineage.',
+interface CardPlanningContract {
+  role: string
+  activation: string
+  completion: string
+}
+
+const cardRoles: Record<ProposalCardKind, CardPlanningContract> = {
+  control: {
+    role: 'Persist the autonomous objective and player resume/monitor policy.',
+    activation: 'Use exactly one host-owned controller whenever Player is enabled; never connect it to lineage.',
+    completion: 'Objective, on_review and on_idle policies are versioned.',
+  },
+  explorer: {
+    role: 'Discover governed sources through one host-owned focused or catalog-wide sidecar.',
+    activation: 'Use when no source is bound or an explicit refresh/new monitor event reopens discovery.',
+    completion: 'A source is selected or a versioned terminal catalog checkpoint is complete.',
+  },
+  worker: {
+    role: 'Process deterministic independent work in bounded branch-only batches.',
+    activation: 'Use only for two or more independent catalog, incident, risk or patch work items.',
+    completion: 'Every item completed, failed with evidence or checkpointed before atomic merge.',
+  },
+  query: {
+    role: 'Verify a host-registered GraphQL aggregate-data read or governed write contract.',
+    activation: 'Use when schema metadata cannot provide the required aggregate evidence, assertion or mutation receipt.',
+    completion: 'The host-validated operation yields bounded evidence, an explicit failure or a reviewed receipt.',
+  },
+  source: {
+    role: 'Resolve a governed dataset and start lineage.',
+    activation: 'Use after a specific governed dataset identity has been selected.',
+    completion: 'Identity, platform, environment and schema envelope are fresh and versioned.',
+  },
+  profile: {
+    role: 'Keep compact versioned schema and aggregate value evidence without raw rows.',
+    activation: 'Use when a source or query produced evidence that downstream cards need to reuse.',
+    completion: 'A host-verified metadata-only snapshot records freshness, coverage and risk signals.',
+  },
+  analysis: {
+    role: 'Classify trusted schema, aggregate value and lineage findings.',
+    activation: 'Use when profile signals or gaps need classification before routing or remediation.',
+    completion: 'Findings are classified as data anomaly, governance gap, collection failure or healthy.',
+  },
+  impact: {
+    role: 'Trace a material finding through versioned lineage.',
+    activation: 'Use when a change or anomaly has fresh upstream/downstream lineage.',
+    completion: 'Affected datasets, features, pipelines, models and deployments are bounded and ranked.',
+  },
+  risk: {
+    role: 'Classify data, privacy, operational, ML or collection risk from versioned evidence.',
+    activation: 'Use after Analysis or Impact exposes a material finding, sensitive signal or governed change.',
+    completion: 'Scope, domain/type, severity, confidence, evidence, affected assets and action are declared.',
+  },
+  patch: {
+    role: 'Describe a reversible graph-only compatibility or protection overlay.',
+    activation: 'Use only for a concrete mismatch supported by Analysis, Impact or Risk.',
+    completion: 'The exact overlay is versioned and exposes a testable post-condition without source mutation.',
+  },
+  monitor: {
+    role: 'Trigger a bounded iteration only when evidence changes.',
+    activation: 'Use after a stable Output should be watched for a new fingerprint or higher severity.',
+    completion: 'Fingerprint, cooldown and maximum iterations are armed; unchanged evidence stays idle.',
+  },
+  parallel: {
+    role: 'Release independent branch-only agent work and merge reviewed diffs.',
+    activation: 'Use when at least two independent sources, incidents or work groups can progress concurrently.',
+    completion: 'Every branch returns a reviewed diff or bounded failure and conflicts remain visible.',
+  },
+  diagram: {
+    role: 'Merge parallel incident branches into one reviewable workstream.',
+    activation: 'Use when two or more incident branches must be understood together.',
+    completion: 'Every input branch and conflict is represented in the merged diagram.',
+  },
+  split: {
+    role: 'Route through explicit approved and quarantine outcomes.',
+    activation: 'Use only for a real mutually exclusive policy decision.',
+    completion: 'Both handles lead to explicit valid downstream behavior.',
+  },
+  decision: {
+    role: 'Choose a supported correction or request human review.',
+    activation: 'Use for a bounded correction-versus-escalation or uncertainty choice.',
+    completion: 'Exactly one evidence-backed correction or one review checkpoint is selected.',
+  },
+  transform: {
+    role: 'Declare a deterministic versioned derived-data or metadata transformation.',
+    activation: 'Use for cast, normalization, mask, tokenization or aggregation that exceeds a graph-only alias patch.',
+    completion: 'Inputs, outputs, invariants and rollback behavior are ready for atomic validation.',
+  },
+  review: {
+    role: 'Pause one affected branch and persist a human decision.',
+    activation: 'Use for high/critical risk, sensitive boundaries, external mutation or material uncertainty.',
+    completion: 'Decision, rationale and diff identity are persisted for resume or repair.',
+  },
+  validation: {
+    role: 'Run applicable atomic contracts and post-conditions.',
+    activation: 'Use after any patch, transform, decision or review and before governed Output.',
+    completion: 'All atoms pass or blockers identify the exact repairable contract.',
+  },
+  output: {
+    role: 'Emit a validated governed artifact, decision or query receipt and its lineage.',
+    activation: 'Use as the terminal result of a useful validated branch.',
+    completion: 'Result references its validated inputs, version and review state and may feed a monitor.',
+  },
 }
 
 function record(value: unknown): JsonRecord {
@@ -184,6 +266,8 @@ function graph(payload: unknown) {
 export class AgentToolSession {
   readonly trace: AgentToolTrace[] = []
   private readonly actions: ValidatedProposalAction[] = []
+  private cardKindsListed = false
+  private validatedActionCount?: number
   private finishedProposal?: ValidatedProposal
 
   constructor(private readonly payload: unknown) {}
@@ -207,6 +291,7 @@ export class AgentToolSession {
     const candidate = [...this.actions, action]
     validateProposal(proposalWith(candidate, { requires_human_review: this.includesReview(candidate) }), this.payload)
     this.actions.push(action)
+    this.validatedActionCount = undefined
     return this.result(tool, 'accepted', `${action.type} queued`, { action })
   }
 
@@ -230,7 +315,7 @@ export class AgentToolSession {
     if (kind === 'parallel') return supplied ?? 'max_concurrency=3 | context=branch_only | merge=atomic'
     if (kind === 'explorer') return supplied ?? 'scope=all_datasets | batch_size=8 | audit_concurrency=4 | cache=prefer | checkpoint=versioned | resume=true'
     if (kind === 'worker') return supplied ?? 'role=generic | batch_size=4 | max_concurrency=4 | retry=checkpoint | context=branch_only | merge=atomic'
-    if (kind === 'query') return supplied ?? 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=entity.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_metadata'
+    if (kind === 'query') return supplied ?? 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=profile.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_aggregate_profile'
     if (kind === 'risk') return supplied ?? 'scope=downstream_assets | risk_domain=general | risk_type=none | severity=unknown | confidence=0 | evidence=unavailable | affected_assets=0 | action=read_versioned_lineage'
     if (kind === 'monitor') {
       let rule = supplied ?? ''
@@ -262,10 +347,21 @@ export class AgentToolSession {
     const args = record(rawArguments)
     try {
       if (tool === 'list_card_kinds') {
+        this.cardKindsListed = true
+        const activationPlan = new Map(
+          (Array.isArray(record(this.payload).cardActivationPlan)
+            ? record(this.payload).cardActivationPlan as unknown[]
+            : []).map(record).flatMap((item) =>
+            typeof item.kind === 'string' ? [[item.kind, item] as const] : []),
+        )
         return this.result(tool, 'read', `${kinds.length} card kinds available`, {
           cards: kinds.map((kind) => ({
             kind,
-            role: cardRoles[kind],
+            role: cardRoles[kind].role,
+            activation: cardRoles[kind].activation,
+            completion: cardRoles[kind].completion,
+            current_state: activationPlan.get(kind)?.state ?? 'available',
+            current_reason: activationPlan.get(kind)?.reason ?? 'No host activation recommendation was supplied.',
             accepts_from: kinds.filter((source) => proposalCardCompatibility[source].includes(kind)),
             connects_to: proposalCardCompatibility[kind],
             source_handles: kind === 'split' ? ['approved', 'quarantine'] : kind === 'output' ? ['feedback'] : [],
@@ -455,6 +551,7 @@ export class AgentToolSession {
       }
       if (tool === 'validate_plan') {
         const proposal = validateProposal(proposalWith(this.actions, { requires_human_review: this.includesReview() }), this.payload)
+        this.validatedActionCount = proposal.actions.length
         const completeCheckpoints = (Array.isArray(record(this.payload).catalogCheckpoints)
           ? record(this.payload).catalogCheckpoints as unknown[]
           : []).map(record).filter((checkpoint) => checkpoint.terminal === true)
@@ -467,6 +564,8 @@ export class AgentToolSession {
       }
       if (tool === 'finish_plan') {
         if (this.reviewAssistantMode && this.actions.length) throw new Error('Human Review assistant must finish with zero graph actions')
+        if (!this.reviewAssistantMode && !this.cardKindsListed) throw new Error('Call list_card_kinds before finishing the plan')
+        if (!this.reviewAssistantMode && this.validatedActionCount !== this.actions.length) throw new Error('Call validate_plan after the last queued change before finishing the plan')
         const proposal = validateProposal(proposalWith(this.actions, {
           title: requiredText(args.title, 'title', 160),
           summary: requiredText(args.summary, 'summary', 800),

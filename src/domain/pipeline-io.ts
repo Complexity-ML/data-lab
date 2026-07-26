@@ -47,6 +47,34 @@ function cleanProfile(value: unknown, trustHostProof: boolean): DataProfileSnaps
     const raw = Array.isArray(source.profiledFields) ? source.profiledFields[index] as Record<string, unknown> : undefined
     return { ...field, nullRate: typeof raw?.nullRate === 'number' && raw.nullRate >= 0 && raw.nullRate <= 1 ? raw.nullRate : undefined, distinctCount: Number.isInteger(raw?.distinctCount) && Number(raw?.distinctCount) >= 0 ? Number(raw?.distinctCount) : undefined }
   })
+  const rawAudit = source.aggregateAudit && typeof source.aggregateAudit === 'object' && !Array.isArray(source.aggregateAudit)
+    ? source.aggregateAudit as Record<string, unknown>
+    : {}
+  const rawRiskSignals = Array.isArray(rawAudit.riskSignals) ? rawAudit.riskSignals : []
+  const riskSignals = rawRiskSignals.slice(0, 12).flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const signal = value as Record<string, unknown>
+    const kind = String(signal.kind)
+    const severity = String(signal.severity)
+    if (!['empty_dataset', 'volume_drop', 'volume_spike', 'null_spike', 'fully_null', 'duplicate_drift', 'distribution_shift'].includes(kind)) return []
+    if (!['critical', 'high', 'medium', 'low'].includes(severity)) return []
+    return [{
+      id: typeof signal.id === 'string' ? redactExportText(signal.id).slice(0, 180) : kind,
+      kind: kind as DataProfileSnapshot['aggregateAudit']['riskSignals'][number]['kind'],
+      severity: severity as DataProfileSnapshot['aggregateAudit']['riskSignals'][number]['severity'],
+      field: typeof signal.field === 'string' ? redactExportText(signal.field).slice(0, 120) : undefined,
+      summary: typeof signal.summary === 'string' ? redactExportText(signal.summary).slice(0, 320) : kind,
+      current: typeof signal.current === 'number' && Number.isFinite(signal.current) ? signal.current : undefined,
+      previous: typeof signal.previous === 'number' && Number.isFinite(signal.previous) ? signal.previous : undefined,
+    }]
+  })
+  const aggregateStatus = ['complete', 'coverage_gap', 'unavailable'].includes(String(rawAudit.status))
+    ? rawAudit.status as DataProfileSnapshot['aggregateAudit']['status']
+    : 'coverage_gap'
+  const verifiedAggregateAudit = rawAudit.kind === 'bounded-aggregate-profile'
+    && rawAudit.version === 1
+    && rawAudit.rawRowsRead === false
+    && rawAudit.hostVerified === true
   return {
     sourceUrn: source.sourceUrn.slice(0, 2_000), capturedAt: source.capturedAt, expiresAt: source.expiresAt, stale: source.stale === true,
     platform: typeof source.platform === 'string' ? source.platform.slice(0, 160) : '', environment: typeof source.environment === 'string' ? source.environment.slice(0, 80) : '', quality,
@@ -54,6 +82,19 @@ function cleanProfile(value: unknown, trustHostProof: boolean): DataProfileSnaps
     sensitiveFieldCount: Math.max(0, Math.min(100_000, Number.isInteger(source.sensitiveFieldCount) ? Number(source.sensitiveFieldCount) : 0)),
     upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.upstreamCount) ? Number(source.upstreamCount) : 0)), downstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(source.downstreamCount) ? Number(source.downstreamCount) : 0)),
     anomalies: Array.isArray(source.anomalies) ? source.anomalies.filter((item): item is string => typeof item === 'string').map((item) => redactExportText(item).slice(0, 240)).slice(0, 8) : [],
+    aggregateAudit: {
+      kind: 'bounded-aggregate-profile',
+      version: 1,
+      status: aggregateStatus,
+      capturedAt: typeof rawAudit.capturedAt === 'string' ? rawAudit.capturedAt : source.capturedAt,
+      previousCapturedAt: typeof rawAudit.previousCapturedAt === 'string' ? rawAudit.previousCapturedAt : undefined,
+      rowCount: Number.isInteger(rawAudit.rowCount) && Number(rawAudit.rowCount) >= 0 ? Number(rawAudit.rowCount) : undefined,
+      previousRowCount: Number.isInteger(rawAudit.previousRowCount) && Number(rawAudit.previousRowCount) >= 0 ? Number(rawAudit.previousRowCount) : undefined,
+      profiledFieldCount: Math.max(0, Math.min(100_000, Number.isInteger(rawAudit.profiledFieldCount) ? Number(rawAudit.profiledFieldCount) : 0)),
+      riskSignals,
+      rawRowsRead: false,
+      hostVerified: trustHostProof && verifiedAggregateAudit,
+    },
     tokenEstimate: Math.max(1, Math.min(100_000, Number.isInteger(source.tokenEstimate) ? Number(source.tokenEstimate) : 1)),
     storage: { kind: 'bounded-metadata', version: 1, rawRowsStored: false, hostVerified: trustHostProof && verifiedBoundedStorage },
   }
@@ -103,6 +144,10 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
       dataProfileStatus: ['available', 'unavailable', 'error'].includes(String(item.dataProfileStatus))
         ? item.dataProfileStatus as 'available' | 'unavailable' | 'error'
         : undefined,
+      dataAuditStatus: ['complete', 'coverage_gap', 'unavailable'].includes(String(item.dataAuditStatus))
+        ? item.dataAuditStatus as 'complete' | 'coverage_gap' | 'unavailable'
+        : undefined,
+      dataAuditedAt: typeof item.dataAuditedAt === 'string' ? item.dataAuditedAt : undefined,
       dataRiskSignals,
       ownerCount: Math.max(0, Math.min(100_000, Number.isInteger(item.ownerCount) ? Number(item.ownerCount) : 0)),
       upstreamCount: Math.max(0, Math.min(100_000, Number.isInteger(item.upstreamCount) ? Number(item.upstreamCount) : 0)),
@@ -132,6 +177,9 @@ function cleanExploration(value: unknown): CatalogExplorationProgress | undefine
     total: bounded('total'),
     discovered: bounded('discovered'),
     inspected: bounded('inspected'),
+    dataAudited: bounded('dataAudited'),
+    dataAuditCoverageGaps: bounded('dataAuditCoverageGaps'),
+    dataAuditRemaining: bounded('dataAuditRemaining'),
     failed: bounded('failed'),
     incidents: bounded('incidents'),
     governanceGaps: bounded('governanceGaps'),

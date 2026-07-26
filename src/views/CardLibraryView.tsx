@@ -7,12 +7,12 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
   { kind: 'control', description: 'Persistent autonomous player policy', icon: Bot },
   { kind: 'explorer', description: 'Discover and audit the complete catalog', icon: Binoculars },
   { kind: 'worker', description: 'Run bounded reusable work batches', icon: Cpu },
-  { kind: 'query', description: 'Verify registered GraphQL reads and governed writes', icon: Braces },
+  { kind: 'query', description: 'Audit bounded dataset aggregates or governed writes', icon: Braces },
   { kind: 'source', description: 'Table, API or event stream', icon: Database },
-  { kind: 'profile', description: 'Compact reusable data reading', icon: ChartColumn },
-  { kind: 'analysis', description: 'Read schema, quality and lineage', icon: BrainCircuit },
+  { kind: 'profile', description: 'Version row, null, uniqueness and distribution evidence', icon: ChartColumn },
+  { kind: 'analysis', description: 'Interpret schema, aggregate quality and lineage', icon: BrainCircuit },
   { kind: 'impact', description: 'Trace change impact to models', icon: ChartNetwork },
-  { kind: 'risk', description: 'Classify evidence-backed data and ML risk', icon: ShieldAlert },
+  { kind: 'risk', description: 'Classify aggregate data, privacy and ML risk', icon: ShieldAlert },
   { kind: 'patch', description: 'Reversible graph-only compatibility fix', icon: FileDiff },
   { kind: 'monitor', description: 'Restart safely when connected evidence changes', icon: Radar },
   { kind: 'parallel', description: 'Delegate independent graph branches', icon: Network },
@@ -47,8 +47,8 @@ export function CardLibraryView({ onAddCard, onClose }: { onAddCard(kind: CardKi
       ><span><Icon size={16} /></span><div><strong>{cardLabels[kind]}</strong><small>{description}</small></div><Plus size={14} /></button>)}</div>
       <section className="datahub-context">
         <div><Database size={15} /><strong>DataHub context</strong></div>
-        <p>Schema, lineage, ownership and PII tags are loaded before the agent proposes a change.</p>
-        <ul><li>customers_360</li><li>2 downstream outputs</li><li>1 PII field</li></ul>
+        <p>Schema, lineage, ownership, PII tags and bounded row, null, uniqueness and distribution profiles are loaded before the agent proposes a change.</p>
+        <ul><li>customers_360</li><li>aggregate profiles</li><li>no raw rows</li></ul>
       </section>
     </PanelScrollArea>
   </aside>

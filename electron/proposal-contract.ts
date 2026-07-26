@@ -114,7 +114,7 @@ export function queryCheckRuleError(rule: string | null): string | undefined {
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(connector)) return 'Query Check requires a safe connector ID'
   if (values.get('protocol') !== 'graphql') return 'Query Check supports protocol=graphql'
   if (values.get('registry') !== 'connector_manifest') return 'Query Check operation must resolve through registry=connector_manifest'
-  if (!['catalog.search', 'entity.read', 'schema.read', 'lineage.read', 'document.write', 'metadata.update'].includes(operation)) return 'Query Check operation is not registered'
+  if (!['catalog.search', 'entity.read', 'schema.read', 'lineage.read', 'profile.read', 'document.write', 'metadata.update'].includes(operation)) return 'Query Check operation is not registered'
   if (!['read_only', 'governed_write'].includes(mode ?? '')) return 'Query Check mode must be read_only or governed_write'
   if (values.get('variables') !== 'host_validated') return 'Query Check variables must be host_validated'
   if (!Number.isInteger(timeout) || timeout < 1_000 || timeout > 30_000) return 'Query Check timeout_ms must be between 1000 and 30000'
@@ -122,8 +122,12 @@ export function queryCheckRuleError(rule: string | null): string | undefined {
   if (writeOperation && (mode !== 'governed_write' || values.get('review') !== 'required' || values.get('dry_run') !== 'required' || values.get('rollback') !== 'versioned' || values.get('response') !== 'mutation_receipt')) {
     return 'Governed writes require Human Review, dry-run, versioned rollback and a mutation receipt'
   }
-  if (!writeOperation && (mode !== 'read_only' || values.get('review') !== 'not_required' || values.get('dry_run') !== 'not_applicable' || values.get('rollback') !== 'not_applicable' || values.get('response') !== 'bounded_metadata')) {
-    return 'Read queries require read_only mode and a bounded metadata response'
+  const aggregateRead = operation === 'profile.read'
+  const expectedReadResponse = aggregateRead ? 'bounded_aggregate_profile' : 'bounded_metadata'
+  if (!writeOperation && (mode !== 'read_only' || values.get('review') !== 'not_required' || values.get('dry_run') !== 'not_applicable' || values.get('rollback') !== 'not_applicable' || values.get('response') !== expectedReadResponse)) {
+    return aggregateRead
+      ? 'profile.read requires read_only mode and a bounded aggregate profile response'
+      : 'Read queries require read_only mode and a bounded metadata response'
   }
   return undefined
 }

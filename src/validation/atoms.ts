@@ -1,7 +1,7 @@
 import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { cardConnectionError } from '../domain/card-compatibility'
 import { catalogExplorerPolicyError } from '../domain/catalog-explorer-policy'
-import { isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
+import { isHostVerifiedAggregateDataProfile, isHostVerifiedMetadataOnlyProfile } from '../domain/data-profile'
 import { parseQueryCheckRule, queryCheckRuleError } from '../domain/query-check'
 import { parseRiskAssessmentRule } from '../domain/risk-assessment'
 import { parseWorkerPolicy, workerPolicyError } from '../domain/worker-policy'
@@ -106,6 +106,24 @@ function hasUpstreamContextReader({ nodes, edges }: ValidationContext, nodeId: s
     const current = byId.get(currentId)
     if (!current) continue
     if (acceptedKinds.includes(current.data.kind)) return true
+    queue.push(...(incoming.get(currentId) ?? []))
+  }
+  return false
+}
+
+function hasUpstreamAggregateDataEvidence({ nodes, edges }: ValidationContext, nodeId: string): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const incoming = new Map(nodes.map((node) => [node.id, [] as string[]]))
+  for (const edge of edges) if (edge.sourceHandle !== 'feedback') incoming.get(edge.target)?.push(edge.source)
+  const queue = [...(incoming.get(nodeId) ?? [])]
+  const visited = new Set<string>()
+  while (queue.length) {
+    const currentId = queue.shift()!
+    if (visited.has(currentId)) continue
+    visited.add(currentId)
+    const current = byId.get(currentId)
+    if (!current) continue
+    if (current.data.kind === 'profile' && isHostVerifiedAggregateDataProfile(current.data.profile)) return true
     queue.push(...(incoming.get(currentId) ?? []))
   }
   return false
@@ -230,6 +248,13 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       title: 'Governed query write lacks Human Review',
       detail: 'Every governed GraphQL write must reach a Human Review checkpoint before any mutation is executed.',
     }))
+    if (policy.operation === 'profile.read' && !hasDownstreamKind(context, nodeId, ['profile'])) findings.push(issue('card-contracts', {
+      id: `query-profile-output-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Aggregate query has no Data Profile',
+      detail: 'Route profile.read into a Data Profile card so row counts, null rates, uniqueness, distributions and value-risk signals remain versioned and replayable.',
+    }))
     return findings
   },
   source: ({ edges }, nodeId) => edges.some((edge) => edge.target === nodeId) ? [issue('card-contracts', { id: `source-input-${nodeId}`, severity: 'error', nodeId, title: 'Source has an input', detail: 'Data Source cards must begin a lineage path.' })] : [],
@@ -280,6 +305,13 @@ const cardContracts: Partial<Record<CardKind, CardContract>> = {
       nodeId,
       title: 'Data risk lacks fresh evidence',
       detail: 'A dataset, feature or model risk may be asserted only from fresh versioned connector evidence. Use risk_type=collection for MCP or catalog-read failures.',
+    }))
+    if (risk.riskType === 'data' && ['data', 'ml', 'analytics'].includes(risk.domain) && !hasUpstreamAggregateDataEvidence(context, nodeId)) findings.push(issue('card-contracts', {
+      id: `risk-aggregate-evidence-${nodeId}`,
+      severity: 'error',
+      nodeId,
+      title: 'Dataset value risk lacks an aggregate data audit',
+      detail: 'Read a bounded aggregate profile with Query Check, preserve it in Data Profile, then classify null, duplicate, volume or distribution risk. Schema metadata alone cannot prove a value anomaly.',
     }))
     if (risk.riskType === 'data' && (risk.severity === 'unknown' || risk.affectedAssets === 0)) findings.push(issue('card-contracts', {
       id: `risk-data-impact-${nodeId}`,

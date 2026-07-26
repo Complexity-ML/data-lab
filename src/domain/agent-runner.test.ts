@@ -16,6 +16,12 @@ describe('agent runner', () => {
   })
 
   it('gives every card an explicit execution contract', () => {
-    expect(Object.values(cardRoleContracts).every((contract) => contract.input && contract.output && contract.role)).toBe(true)
+    expect(Object.values(cardRoleContracts).every((contract) =>
+      contract.input
+      && contract.output
+      && contract.role
+      && contract.mission
+      && contract.activation
+      && contract.completion)).toBe(true)
   })
 })

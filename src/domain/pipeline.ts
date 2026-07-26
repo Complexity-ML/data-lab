@@ -27,6 +27,20 @@ export interface DataProfileStorageProof {
   hostVerified: boolean
 }
 
+export interface DatasetAggregateAudit {
+  kind: 'bounded-aggregate-profile'
+  version: 1
+  status: 'complete' | 'coverage_gap' | 'unavailable'
+  capturedAt: string
+  previousCapturedAt?: string
+  rowCount?: number
+  previousRowCount?: number
+  profiledFieldCount: number
+  riskSignals: DataValueRiskSignal[]
+  rawRowsRead: false
+  hostVerified: boolean
+}
+
 export interface DataProfileSnapshot {
   sourceUrn: string
   capturedAt: string
@@ -41,6 +55,7 @@ export interface DataProfileSnapshot {
   upstreamCount: number
   downstreamCount: number
   anomalies: string[]
+  aggregateAudit: DatasetAggregateAudit
   tokenEstimate: number
   storage: DataProfileStorageProof
 }
@@ -50,6 +65,12 @@ export interface CatalogExplorationProgress {
   total: number
   discovered: number
   inspected: number
+  /** Datasets whose aggregate value profile was actually read. */
+  dataAudited?: number
+  /** Datasets checked successfully but lacking an aggregate value profile. */
+  dataAuditCoverageGaps?: number
+  /** Datasets that still need their aggregate audit attempt or a bounded retry. */
+  dataAuditRemaining?: number
   failed: number
   incidents: number
   governanceGaps: number
@@ -82,6 +103,12 @@ export interface CatalogDatasetCheckpoint {
   sensitiveSignalCount?: number
   qualityStatus?: 'healthy' | 'failing' | 'unavailable'
   dataProfileStatus?: 'available' | 'unavailable' | 'error'
+  /**
+   * Host-owned proof that this dataset passed through the aggregate data-audit
+   * stage. Legacy checkpoints intentionally omit it and are audited once.
+   */
+  dataAuditStatus?: 'complete' | 'coverage_gap' | 'unavailable'
+  dataAuditedAt?: string
   dataRiskSignals?: DataValueRiskSignal[]
   ownerCount: number
   upstreamCount: number

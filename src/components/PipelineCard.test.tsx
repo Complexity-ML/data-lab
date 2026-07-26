@@ -2,6 +2,8 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createDataProfileSnapshot } from '../domain/data-profile'
+import type { DataHubAssetSummary } from '../domain/datahub'
 import { newCard } from '../domain/pipeline'
 
 const { updateNodeInternals } = vi.hoisted(() => ({ updateNodeInternals: vi.fn() }))
@@ -27,6 +29,41 @@ describe('Pipeline card ports', () => {
     const profile = newCard('profile', 0)
     render(<PipelineCard {...cardProps(profile)} />)
     expect(screen.getAllByTestId('pipeline-handle').map((handle) => handle.getAttribute('data-type'))).toEqual(['target', 'source'])
+  })
+
+  it('shows bounded aggregate dataset evidence without exposing raw rows', () => {
+    const asset: DataHubAssetSummary = {
+      urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.metrics,PROD)',
+      name: 'metrics',
+      platform: 'snowflake',
+      environment: 'PROD',
+      description: 'Metrics',
+      owners: ['Data'],
+      domain: 'ML',
+      tags: [],
+      qualityStatus: 'healthy',
+      upstream: [],
+      downstream: [],
+      fields: [{ name: 'score', type: 'number' }],
+      freshness: { capturedAt: '2026-07-24T10:00:00.000Z', expiresAt: '2099-07-24T11:00:00.000Z', stale: false },
+      dataProfile: {
+        status: 'available',
+        capturedAt: '2026-07-24T10:00:00.000Z',
+        rowCount: 700,
+        fields: [{ name: 'score', nullRate: 0.2 }],
+        risks: [{ id: 'null-spike', kind: 'null_spike', severity: 'high', field: 'score', summary: 'Null spike.' }],
+      },
+    }
+    const base = newCard('profile', 0)
+    const profile = { ...base, data: { ...base.data, profile: createDataProfileSnapshot(asset) } }
+
+    render(<PipelineCard {...cardProps(profile)} />)
+
+    const summary = screen.getByLabelText('Compact data profile')
+    expect(summary.textContent).toContain('700 rows')
+    expect(summary.textContent).toContain('1 profiled')
+    expect(summary.textContent).toContain('1 value risks')
+    expect(summary.textContent).toContain('raw rows excluded')
   })
 
   it('renders the structured risk context without losing normal graph ports', () => {

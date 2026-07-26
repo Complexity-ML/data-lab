@@ -6,10 +6,17 @@ const maximumAnomalies = 8
 const profileKeys = new Set([
   'sourceUrn', 'capturedAt', 'expiresAt', 'stale', 'platform', 'environment', 'quality',
   'fieldCount', 'profiledFields', 'sensitiveFieldCount', 'upstreamCount', 'downstreamCount',
-  'anomalies', 'tokenEstimate', 'storage',
+  'anomalies', 'aggregateAudit', 'tokenEstimate', 'storage',
 ])
 const profileFieldKeys = new Set(['name', 'type', 'tags', 'nullRate', 'distinctCount'])
 const storageProofKeys = new Set(['kind', 'version', 'rawRowsStored', 'hostVerified'])
+const aggregateAuditKeys = new Set([
+  'kind', 'version', 'status', 'capturedAt', 'previousCapturedAt', 'rowCount',
+  'previousRowCount', 'profiledFieldCount', 'riskSignals', 'rawRowsRead', 'hostVerified',
+])
+const riskSignalKeys = new Set(['id', 'kind', 'severity', 'field', 'summary', 'current', 'previous'])
+const riskKinds = new Set(['empty_dataset', 'volume_drop', 'volume_spike', 'null_spike', 'fully_null', 'duplicate_drift', 'distribution_shift'])
+const riskSeverities = new Set(['critical', 'high', 'medium', 'low'])
 
 function boundedText(value: string, limit = 160) {
   return value.trim().slice(0, limit)
@@ -25,6 +32,32 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>) {
   return Object.keys(value).every((key) => allowed.has(key))
+}
+
+function validOptionalCount(value: unknown) {
+  return value === undefined || (Number.isInteger(value) && Number(value) >= 0)
+}
+
+export function isHostVerifiedAggregateDataProfile(value: unknown): value is DataProfileSnapshot {
+  const profile = record(value)
+  const audit = record(profile?.aggregateAudit)
+  const storage = record(profile?.storage)
+  if (!profile || !audit || !storage || !hasOnlyKeys(profile, profileKeys) || !hasOnlyKeys(audit, aggregateAuditKeys) || !hasOnlyKeys(storage, storageProofKeys)) return false
+  if (storage.kind !== 'bounded-metadata' || storage.version !== 1 || storage.rawRowsStored !== false || storage.hostVerified !== true) return false
+  if (audit.kind !== 'bounded-aggregate-profile' || audit.version !== 1 || audit.rawRowsRead !== false || audit.hostVerified !== true) return false
+  if (!['complete', 'coverage_gap', 'unavailable'].includes(String(audit.status)) || typeof audit.capturedAt !== 'string') return false
+  if (audit.previousCapturedAt !== undefined && typeof audit.previousCapturedAt !== 'string') return false
+  if (!validOptionalCount(audit.rowCount) || !validOptionalCount(audit.previousRowCount) || !validOptionalCount(audit.profiledFieldCount)) return false
+  if (!Array.isArray(audit.riskSignals) || audit.riskSignals.length > 12) return false
+  if (!audit.riskSignals.every((value) => {
+    const signal = record(value)
+    if (!signal || !hasOnlyKeys(signal, riskSignalKeys)) return false
+    if (typeof signal.id !== 'string' || typeof signal.summary !== 'string') return false
+    if (!riskKinds.has(String(signal.kind)) || !riskSeverities.has(String(signal.severity))) return false
+    if (signal.field !== undefined && typeof signal.field !== 'string') return false
+    return [signal.current, signal.previous].every((metric) => metric === undefined || (typeof metric === 'number' && Number.isFinite(metric)))
+  })) return false
+  return audit.status === 'complete'
 }
 
 export function isHostVerifiedMetadataOnlyProfile(value: unknown): value is DataProfileSnapshot {
@@ -45,7 +78,9 @@ export function isHostVerifiedMetadataOnlyProfile(value: unknown): value is Data
     if (entry.nullRate !== undefined && (typeof entry.nullRate !== 'number' || entry.nullRate < 0 || entry.nullRate > 1)) return false
     return entry.distinctCount === undefined || (Number.isInteger(entry.distinctCount) && Number(entry.distinctCount) >= 0)
   })) return false
-  return Array.isArray(profile.anomalies) && profile.anomalies.length <= maximumAnomalies && profile.anomalies.every((anomaly) => typeof anomaly === 'string')
+  if (!Array.isArray(profile.anomalies) || profile.anomalies.length > maximumAnomalies || !profile.anomalies.every((anomaly) => typeof anomaly === 'string')) return false
+  const audit = record(profile.aggregateAudit)
+  return Boolean(audit && audit.rawRowsRead === false)
 }
 
 export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfileSnapshot {
@@ -70,6 +105,32 @@ export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfi
     ...(sensitiveFieldCount ? [`${sensitiveFieldCount} sensitive field${sensitiveFieldCount === 1 ? '' : 's'} require governed handling.`] : []),
     ...(asset.fields.length > maximumProfiledFields ? [`${asset.fields.length - maximumProfiledFields} additional fields were omitted from compact agent memory.`] : []),
   ].slice(0, maximumAnomalies)
+  const aggregateStatus: DataProfileSnapshot['aggregateAudit']['status'] = asset.dataProfile?.status === 'available'
+    ? 'complete'
+    : asset.dataProfile?.status === 'error'
+      ? 'unavailable'
+      : 'coverage_gap'
+  const aggregateAudit = {
+    kind: 'bounded-aggregate-profile' as const,
+    version: 1 as const,
+    status: aggregateStatus,
+    capturedAt: asset.dataProfile?.capturedAt ?? asset.freshness.capturedAt,
+    previousCapturedAt: asset.dataProfile?.previousCapturedAt,
+    rowCount: asset.dataProfile?.rowCount,
+    previousRowCount: asset.dataProfile?.previousRowCount,
+    profiledFieldCount: asset.dataProfile?.fields.length ?? 0,
+    riskSignals: (asset.dataProfile?.risks ?? []).slice(0, 12).map((risk) => ({
+      id: boundedText(risk.id, 180),
+      kind: risk.kind,
+      severity: risk.severity,
+      field: risk.field ? boundedText(risk.field, 120) : undefined,
+      summary: boundedText(risk.summary, 320),
+      current: risk.current,
+      previous: risk.previous,
+    })),
+    rawRowsRead: false as const,
+    hostVerified: true,
+  }
   const profileWithoutEstimate = {
     sourceUrn: boundedText(asset.urn, 2_000),
     capturedAt: asset.freshness.capturedAt,
@@ -84,6 +145,7 @@ export function createDataProfileSnapshot(asset: DataHubAssetSummary): DataProfi
     upstreamCount: asset.upstream.length,
     downstreamCount: asset.downstream.length,
     anomalies,
+    aggregateAudit,
     storage: { kind: 'bounded-metadata' as const, version: 1 as const, rawRowsStored: false as const, hostVerified: true },
   }
   return { ...profileWithoutEstimate, tokenEstimate: estimateTokens(profileWithoutEstimate) }
@@ -100,7 +162,10 @@ export function canReuseDataProfile(profile: DataProfileSnapshot, forcedMonitorA
 
 export function summarizeDataProfile(profile: DataProfileSnapshot) {
   const storage = isHostVerifiedMetadataOnlyProfile(profile) ? 'metadata-only' : 'unverified storage'
-  return `${profile.fieldCount} fields · ${profile.sensitiveFieldCount} sensitive · ${profile.quality} · ${profile.stale ? 'stale' : 'fresh'} · ${profile.upstreamCount} upstream · ${profile.downstreamCount} downstream · ${storage} · ~${profile.tokenEstimate} tokens`
+  const dataAudit = profile.aggregateAudit.status === 'complete'
+    ? `${profile.aggregateAudit.profiledFieldCount} aggregate fields · ${profile.aggregateAudit.riskSignals.length} value risks`
+    : `aggregate ${profile.aggregateAudit.status.replace('_', ' ')}`
+  return `${profile.fieldCount} fields · ${profile.sensitiveFieldCount} sensitive · ${profile.quality} · ${profile.stale ? 'stale' : 'fresh'} · ${dataAudit} · ${profile.upstreamCount} upstream · ${profile.downstreamCount} downstream · ${storage} · ~${profile.tokenEstimate} tokens`
 }
 
 export function dataProfileEvidence(profile: DataProfileSnapshot): { summaries: string[]; evidence: DataHubEvidence[] } {
@@ -110,6 +175,7 @@ export function dataProfileEvidence(profile: DataProfileSnapshot): { summaries: 
       `Reused versioned Data Profile for ${profile.sourceUrn}: ${summary}.`,
       `Profiled schema: ${profile.profiledFields.map((field) => `${field.name}:${field.type}${field.tags?.length ? `[${field.tags.join(',')}]` : ''}`).join(', ') || 'unavailable'}`,
       `Profile anomalies: ${profile.anomalies.join(' ') || 'none'}`,
+      `Aggregate dataset audit: ${profile.aggregateAudit.status}; rows=${profile.aggregateAudit.rowCount ?? 'unavailable'}; profiled_fields=${profile.aggregateAudit.profiledFieldCount}; value_risks=${profile.aggregateAudit.riskSignals.length}; raw_rows_read=false.`,
     ],
     evidence: [{ tool: 'data_profile_memory', urn: profile.sourceUrn, capturedAt: profile.capturedAt, expiresAt: profile.expiresAt, status: 'ok', summary, cached: true, stale: profile.stale }],
   }
@@ -119,7 +185,7 @@ function profilePatch(asset: DataHubAssetSummary): Partial<PipelineNodeData> {
   const profile = createDataProfileSnapshot(asset)
   return {
     label: `${asset.name} profile`,
-    description: 'Bounded, versioned agent memory of schema, quality, freshness and anomalies. No raw rows are stored.',
+    description: 'Bounded, versioned dataset evidence: schema plus aggregate row, null, uniqueness and distribution signals. No raw rows are read or stored.',
     owner: 'DATA LAB Agent',
     status: profile.stale || profile.quality === 'failing' || Boolean(asset.dataProfile?.risks.length) ? 'warning' : 'healthy',
     schema: [],

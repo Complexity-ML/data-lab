@@ -678,7 +678,7 @@ describe('Catalog Explorer', () => {
     expect(shouldCallAgentForCatalog(
       { ...base, inspected: 8 },
       { ...base, inspected: 12, failed: 4, state: 'inspecting' },
-    )).toBe(true)
+    )).toBe(false)
     expect(shouldCallAgentForCatalog(
       { ...base, inspected: 12, failed: 4 },
       { ...base, inspected: 12, failed: 3, state: 'inspecting' },

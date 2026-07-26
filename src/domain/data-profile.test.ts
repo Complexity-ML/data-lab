@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDataProfileToProposal, canReuseDataProfile, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh, isHostVerifiedMetadataOnlyProfile } from './data-profile'
+import { addDataProfileToProposal, canReuseDataProfile, createDataProfileSnapshot, dataProfileEvidence, isDataProfileFresh, isHostVerifiedAggregateDataProfile, isHostVerifiedMetadataOnlyProfile } from './data-profile'
 import { compactGraph } from './ai'
 import type { DataHubAssetSummary } from './datahub'
 import type { AgentProposal } from './pipeline'
@@ -9,6 +9,34 @@ const asset: DataHubAssetSummary = {
   name: 'customers', platform: 'snowflake', environment: 'PROD', description: 'Customers', owners: [], domain: 'Growth', tags: ['PII'], qualityStatus: 'failing', upstream: [], downstream: [{ urn: 'downstream', name: 'activation', sensitive: true }],
   fields: Array.from({ length: 40 }, (_, index) => ({ name: `field_${index}`, type: 'string' as const, tags: index === 0 ? ['PII'] : undefined })),
   freshness: { capturedAt: '2026-07-22T10:00:00.000Z', expiresAt: '2099-07-22T11:00:00.000Z', stale: false },
+}
+
+const profiledAsset: DataHubAssetSummary = {
+  ...asset,
+  dataProfile: {
+    status: 'available',
+    capturedAt: '2026-07-22T10:00:00.000Z',
+    previousCapturedAt: '2026-07-21T10:00:00.000Z',
+    rowCount: 900,
+    previousRowCount: 1_000,
+    fields: [{
+      name: 'field_0',
+      nullRate: 0.3,
+      previousNullRate: 0.1,
+      distinctCount: 800,
+      uniqueProportion: 0.89,
+      previousUniqueProportion: 0.9,
+    }],
+    risks: [{
+      id: 'null-spike-field-0',
+      kind: 'null_spike',
+      severity: 'high',
+      field: 'field_0',
+      summary: 'Null rate increased from 10% to 30%.',
+      current: 0.3,
+      previous: 0.1,
+    }],
+  },
 }
 
 function proposal(): AgentProposal {
@@ -23,12 +51,33 @@ describe('bounded data profile memory', () => {
     expect(profile.sensitiveFieldCount).toBe(1)
     expect(profile.anomalies).toEqual(expect.arrayContaining(['No accountable owner is recorded.', 'DataHub quality checks are failing.']))
     expect(profile.storage).toEqual({ kind: 'bounded-metadata', version: 1, rawRowsStored: false, hostVerified: true })
+    expect(profile.aggregateAudit).toMatchObject({ status: 'coverage_gap', rawRowsRead: false, hostVerified: true })
+    expect(isHostVerifiedAggregateDataProfile(profile)).toBe(false)
     expect(isHostVerifiedMetadataOnlyProfile(profile)).toBe(true)
     expect(Object.hasOwn(profile, 'rawRows')).toBe(false)
     expect(profile.tokenEstimate).toBeGreaterThan(0)
     expect(isDataProfileFresh(profile)).toBe(true)
     expect(canReuseDataProfile(profile, false)).toBe(true)
     expect(canReuseDataProfile(profile, true)).toBe(false)
+  })
+
+  it('stores a host-verified aggregate dataset audit without raw values', () => {
+    const profile = createDataProfileSnapshot(profiledAsset)
+    expect(profile.aggregateAudit).toMatchObject({
+      status: 'complete',
+      rowCount: 900,
+      previousRowCount: 1_000,
+      profiledFieldCount: 1,
+      rawRowsRead: false,
+      hostVerified: true,
+      riskSignals: [expect.objectContaining({ kind: 'null_spike', field: 'field_0', severity: 'high' })],
+    })
+    expect(isHostVerifiedAggregateDataProfile(profile)).toBe(true)
+    expect(Object.hasOwn(profile, 'rawRows')).toBe(false)
+    expect(isHostVerifiedAggregateDataProfile({
+      ...profile,
+      aggregateAudit: { ...profile.aggregateAudit, hostVerified: false },
+    })).toBe(false)
   })
 
   it('rejects a claimed metadata-only profile when raw samples or untrusted proof are present', () => {

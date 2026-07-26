@@ -39,7 +39,7 @@ export function resetCatalogRetryState(progress: CatalogExplorationProgress): Ca
     connectorFailureFingerprint: undefined,
     nextRetryAt: undefined,
     checkpointAt: new Date().toISOString(),
-    datasets: progress.datasets.map((checkpoint) => checkpoint.status === 'unavailable'
+    datasets: progress.datasets.map((checkpoint) => checkpoint.dataAuditStatus === 'unavailable' || checkpoint.status === 'unavailable'
       ? { ...checkpoint, attemptCount: 0 }
       : checkpoint),
   }
@@ -65,18 +65,25 @@ export function mergeCatalogProgress(
   const total = Math.max(left.total, right.total, datasets.length)
   const retryLimit = latest.connectorRetryLimit ?? defaultCatalogRetryLimit
   const retryableUnavailable = datasets.filter((checkpoint) =>
-    checkpoint.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < retryLimit).length
+    (checkpoint.dataAuditStatus === 'unavailable' || checkpoint.status === 'unavailable')
+    && (checkpoint.attemptCount ?? 1) < retryLimit).length
+  const unaudited = datasets.filter((checkpoint) => !checkpoint.dataAuditStatus).length
+  const dataAudited = datasets.filter((checkpoint) => checkpoint.dataAuditStatus === 'complete').length
+  const dataAuditCoverageGaps = datasets.filter((checkpoint) => checkpoint.dataAuditStatus === 'coverage_gap').length
   return {
     ...latest,
     total,
     discovered: Math.max(left.discovered, right.discovered, datasets.length),
     inspected: datasets.length,
+    dataAudited,
+    dataAuditCoverageGaps,
+    dataAuditRemaining: Math.max(0, total - datasets.length) + retryableUnavailable + unaudited,
     failed: datasets.filter((checkpoint) => checkpoint.status === 'unavailable').length,
     incidents: datasets.filter(hasDataIncident).length,
     governanceGaps: datasets.filter(hasGovernanceGap).length,
     connectorRetryCount: latest.connectorRetryCount ?? 0,
     connectorRetryLimit: retryLimit,
-    remaining: Math.max(0, total - datasets.length) + retryableUnavailable,
+    remaining: Math.max(0, total - datasets.length) + retryableUnavailable + unaudited,
     datasets,
   }
 }
@@ -124,15 +131,9 @@ export function shouldCallAgentForCatalog(
   profileRisk = false,
 ) {
   if (current.state === 'failed' || current.pauseReason === 'connector_unavailable' || current.pauseReason === 'retry_exhausted') return false
-  if (current.state === 'complete') {
-    return previous?.state !== 'complete'
-      || current.inspected > (previous?.inspected ?? 0)
-      || current.incidents > (previous?.incidents ?? 0)
-      || profileRisk
-  }
-  if (current.total > 0 && current.inspected >= current.total && (previous?.inspected ?? 0) < current.total) return true
   return profileRisk
     || current.incidents > (previous?.incidents ?? 0)
+    || (current.state === 'complete' && previous?.state !== 'complete')
 }
 
 export function rankCatalogCandidateUrns(progress: CatalogExplorationProgress) {
@@ -219,6 +220,11 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     .map(({ urn, name, kind }) => ({ urn, name, kind }))
   const capturedAt = evidence.map((read) => read.capturedAt).sort().at(-1) ?? asset.freshness.capturedAt
   const expiresAt = evidence.filter((read) => read.status === 'ok' && !read.stale).map((read) => read.expiresAt).sort()[0] ?? capturedAt
+  const dataAuditStatus: CatalogDatasetCheckpoint['dataAuditStatus'] = unavailable
+    ? 'unavailable'
+    : asset.dataProfile?.status === 'available'
+      ? 'complete'
+      : 'coverage_gap'
   return {
     urn: asset.urn,
     name: asset.name,
@@ -227,6 +233,8 @@ export function checkpointForInspection(inspection: CatalogInspection): CatalogD
     sensitiveSignalCount,
     qualityStatus: asset.qualityStatus,
     dataProfileStatus: asset.dataProfile?.status,
+    dataAuditStatus,
+    dataAuditedAt: capturedAt,
     dataRiskSignals: asset.dataProfile?.risks ?? [],
     ownerCount: asset.owners.length,
     upstreamCount: asset.upstream.length,
@@ -285,14 +293,19 @@ export async function inspectCatalogInParallel(
   // New catalog entries must not queue behind one pathological entity forever.
   // Unavailable checkpoints remain retryable, but only after every never-read
   // dataset has received its first bounded inspection.
-  const uninspected = assets.filter((asset) => !previous.has(asset.urn))
+  const uninspected = assets.filter((asset) => {
+    const checkpoint = previous.get(asset.urn)
+    return !checkpoint || !checkpoint.dataAuditStatus
+  })
   // Dataset read failures are local collection gaps. Give each unavailable
   // dataset its own durable retry budget, after all never-inspected assets have
   // had a turn, instead of opening a connector-wide circuit.
   const datasetRetryLimit = Math.max(1, Math.min(10, Math.floor(options.retryLimit ?? defaultCatalogRetryLimit)))
   const retryable = assets.filter((asset) => {
     const checkpoint = previous.get(asset.urn)
-    return checkpoint?.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
+    if (!checkpoint) return false
+    return (checkpoint.dataAuditStatus === 'unavailable' || checkpoint.status === 'unavailable')
+      && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
   })
   // Evidence expiry must not turn one bounded catalog objective into a hidden
   // refresh loop. Once every dataset has a checkpoint, the first-pass audit is
@@ -305,7 +318,9 @@ export async function inspectCatalogInParallel(
   const remainingWork = () => assets.filter((asset) => {
     const checkpoint = checkpoints.find((candidate) => candidate.urn === asset.urn)
     if (!checkpoint) return true
-    return checkpoint.status === 'unavailable' && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
+    if (!checkpoint.dataAuditStatus) return true
+    return (checkpoint.dataAuditStatus === 'unavailable' || checkpoint.status === 'unavailable')
+      && (checkpoint.attemptCount ?? 1) < datasetRetryLimit
   }).length
   let batchDurationMs = 0
   let batchFailed = 0
@@ -332,11 +347,17 @@ export async function inspectCatalogInParallel(
     // underlying dataset is unhealthy.
     const incidents = checkpoints.filter(hasDataIncident).length
     const governanceGaps = checkpoints.filter(hasGovernanceGap).length
+    const dataAudited = checkpoints.filter((item) => item.dataAuditStatus === 'complete').length
+    const dataAuditCoverageGaps = checkpoints.filter((item) => item.dataAuditStatus === 'coverage_gap').length
+    const dataAuditRemaining = remainingWork()
     options.onCheckpoint?.({
       query: options.query ?? '*',
       total: assets.length,
       discovered: assets.length,
       inspected: checkpoints.length,
+      dataAudited,
+      dataAuditCoverageGaps,
+      dataAuditRemaining,
       failed,
       incidents,
       governanceGaps,
@@ -351,7 +372,7 @@ export async function inspectCatalogInParallel(
       connectorRetryLimit,
       connectorFailureFingerprint,
       nextRetryAt,
-      remaining: remainingWork(),
+      remaining: dataAuditRemaining,
       mode: options.mode ?? 'catalog',
       cacheMode: options.cacheMode ?? 'prefer',
       phase: state === 'complete' || state === 'paused' || state === 'failed' ? 'checkpoint' : 'inspect',
@@ -380,6 +401,8 @@ export async function inspectCatalogInParallel(
           urn: asset.urn,
           name: asset.name,
           status: 'unavailable' as const,
+          dataAuditStatus: 'unavailable' as const,
+          dataAuditedAt: capturedAt,
           fieldCount: asset.fields.length,
           ownerCount: asset.owners.length,
           upstreamCount: asset.upstream.length,
@@ -425,6 +448,9 @@ export async function inspectCatalogInParallel(
     total: assets.length,
     discovered: assets.length,
     inspected: checkpoints.length,
+    dataAudited: checkpoints.filter((item) => item.dataAuditStatus === 'complete').length,
+    dataAuditCoverageGaps: checkpoints.filter((item) => item.dataAuditStatus === 'coverage_gap').length,
+    dataAuditRemaining: remainingWork(),
     failed: checkpoints.filter((item) => item.status === 'unavailable').length,
     incidents: checkpoints.filter(hasDataIncident).length,
     governanceGaps: checkpoints.filter(hasGovernanceGap).length,

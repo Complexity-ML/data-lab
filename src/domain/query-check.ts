@@ -1,4 +1,4 @@
-export const queryCheckOperations = ['catalog.search', 'entity.read', 'schema.read', 'lineage.read', 'document.write', 'metadata.update'] as const
+export const queryCheckOperations = ['catalog.search', 'entity.read', 'schema.read', 'lineage.read', 'profile.read', 'document.write', 'metadata.update'] as const
 
 export type QueryCheckOperation = typeof queryCheckOperations[number]
 
@@ -13,11 +13,11 @@ export interface QueryCheckPolicy {
   review: 'required' | 'not_required' | undefined
   dryRun: 'required' | 'not_applicable' | undefined
   rollback: 'versioned' | 'not_applicable' | undefined
-  response: 'bounded_metadata' | 'mutation_receipt' | undefined
+  response: 'bounded_metadata' | 'bounded_aggregate_profile' | 'mutation_receipt' | undefined
   complete: boolean
 }
 
-export const defaultQueryCheckRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=entity.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_metadata'
+export const defaultQueryCheckRule = 'connector=datahub | protocol=graphql | registry=connector_manifest | operation=profile.read | mode=read_only | variables=host_validated | timeout_ms=8000 | review=not_required | dry_run=not_applicable | rollback=not_applicable | response=bounded_aggregate_profile'
 
 function clauses(rule: string | undefined) {
   return new Map((rule ?? '').split(/\s*\|\s*/).flatMap((clause) => {
@@ -49,7 +49,7 @@ export function parseQueryCheckRule(rule: string | undefined): QueryCheckPolicy 
     rollback: ['versioned', 'not_applicable'].includes(values.get('rollback')?.toLowerCase() ?? '')
       ? values.get('rollback')?.toLowerCase() as QueryCheckPolicy['rollback']
       : undefined,
-    response: ['bounded_metadata', 'mutation_receipt'].includes(values.get('response')?.toLowerCase() ?? '')
+    response: ['bounded_metadata', 'bounded_aggregate_profile', 'mutation_receipt'].includes(values.get('response')?.toLowerCase() ?? '')
       ? values.get('response')?.toLowerCase() as QueryCheckPolicy['response']
       : undefined,
     complete: false,
@@ -83,8 +83,12 @@ export function queryCheckRuleError(rule: string | undefined) {
   if (writeOperation && (policy.review !== 'required' || policy.dryRun !== 'required' || policy.rollback !== 'versioned' || policy.response !== 'mutation_receipt')) {
     return 'Governed writes require Human Review, dry-run, versioned rollback and a mutation receipt.'
   }
-  if (!writeOperation && (policy.mode !== 'read_only' || policy.review !== 'not_required' || policy.dryRun !== 'not_applicable' || policy.rollback !== 'not_applicable' || policy.response !== 'bounded_metadata')) {
-    return 'Read operations require read_only mode and a bounded metadata response.'
+  const aggregateRead = policy.operation === 'profile.read'
+  const expectedReadResponse = aggregateRead ? 'bounded_aggregate_profile' : 'bounded_metadata'
+  if (!writeOperation && (policy.mode !== 'read_only' || policy.review !== 'not_required' || policy.dryRun !== 'not_applicable' || policy.rollback !== 'not_applicable' || policy.response !== expectedReadResponse)) {
+    return aggregateRead
+      ? 'profile.read requires read_only mode and a bounded aggregate profile response.'
+      : 'Metadata reads require read_only mode and a bounded metadata response.'
   }
   if (/__schema|__type/i.test(rule ?? '')) return 'Free GraphQL introspection is forbidden in Query Check.'
   return undefined

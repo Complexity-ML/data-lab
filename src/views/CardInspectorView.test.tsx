@@ -28,6 +28,8 @@ describe('DataHub lineage impact', () => {
     />)
 
     expect(screen.getByRole('region', { name: 'Inspector content' }).classList.contains('panel-scroll-area')).toBe(true)
+    expect(screen.getByText('Starts when')).toBeTruthy()
+    expect(screen.getByText('Done when')).toBeTruthy()
   })
 
   it('distinguishes workbench cards from external assets and bounds expansion', () => {

@@ -70,7 +70,7 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
       {data.kind === 'control' && <span className="control-mode-badge">Player</span>}
       {explorerPolicy && <span className="explorer-mode-badge">{explorerPolicy.scope === 'dataset' ? 'Focus' : 'Catalog'}</span>}
       {workerPolicy && <span className="worker-mode-badge">{workerPolicy.role} · {workerPolicy.concurrency}×</span>}
-      {queryPolicy && <span className="query-mode-badge">{queryPolicy.mode === 'governed_write' ? 'Governed POST' : 'Read check'}</span>}
+      {queryPolicy && <span className="query-mode-badge">{queryPolicy.mode === 'governed_write' ? 'Governed POST' : queryPolicy.operation === 'profile.read' ? 'Aggregate read' : 'Metadata read'}</span>}
       {risk && <span className={`risk-mode-badge severity-${risk.severity ?? 'unknown'}`}>{risk.domain} · {risk.severity ?? 'unscored'}</span>}
       {data.runState === 'running' && <span className="run-badge is-running"><LoaderCircle size={10} /> Running</span>}
       {data.runState === 'completed' && <span className="run-badge is-complete">#{data.runSequence}</span>}
@@ -82,10 +82,11 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
     <strong>{data.label}</strong>
     <p>{descriptionPreview}</p>
     {data.profile && <div className="profile-summary" aria-label="Compact data profile">
-      <span><strong>{data.profile.fieldCount}</strong> fields</span>
+      <span><strong>{data.profile.aggregateAudit.rowCount ?? '—'}</strong> rows</span>
+      <span><strong>{data.profile.aggregateAudit.profiledFieldCount}</strong> profiled</span>
+      <span><strong>{data.profile.aggregateAudit.riskSignals.length}</strong> value risks</span>
       <span><strong>{data.profile.sensitiveFieldCount}</strong> sensitive</span>
-      <span><strong>{data.profile.anomalies.length}</strong> signals</span>
-      <span><strong>~{data.profile.tokenEstimate}</strong> tokens</span>
+      <small>{data.profile.aggregateAudit.status.replace('_', ' ')} · raw rows excluded · ~{data.profile.tokenEstimate} tokens</small>
     </div>}
     {risk && <div className="risk-summary" aria-label="Evidence-backed risk context">
       <span><strong>{risk.affectedAssets ?? '—'}</strong> affected</span>
@@ -95,11 +96,11 @@ export function PipelineCard({ data, id, selected }: NodeProps<PipelineNode>) {
     </div>}
     {exploration && <div className="explorer-summary" aria-label="Catalog exploration progress">
       <div className="explorer-progress-track"><i style={{ width: `${exploration.total ? Math.min(100, Math.round((exploration.inspected / exploration.total) * 100)) : 0}%` }} /></div>
-      <span><strong>{exploration.inspected}/{exploration.total || '?'}</strong> inspected</span>
-      <span><strong>{exploration.remaining ?? Math.max(0, exploration.total - exploration.inspected)}</strong> queued</span>
-      <span><strong>{exploration.concurrency}</strong> workers</span>
+      <span><strong>{exploration.inspected}/{exploration.total || '?'}</strong> checked</span>
+      <span><strong>{exploration.dataAuditRemaining ?? exploration.remaining ?? Math.max(0, exploration.total - exploration.inspected)}</strong> queued</span>
+      <span><strong>{exploration.dataAudited ?? 0}</strong> profiled</span>
       <span><strong>{exploration.incidents}</strong> data incidents</span>
-      <small>{explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · {exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache</small>
+      <small>{exploration.dataAuditCoverageGaps ?? 0} coverage gaps · {explorerPolicy?.scope === 'dataset' ? 'Direct dataset fast path' : `Batch ${exploration.batchSize ?? explorerPolicy?.batchSize ?? 8}`} · {exploration.cacheMode ?? explorerPolicy?.cacheMode ?? 'prefer'} cache</small>
     </div>}
     {workerPolicy && <div className="worker-summary" aria-label="Bounded worker policy">
       <span><strong>{workerPolicy.batchSize}</strong> batch</span>

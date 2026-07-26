@@ -449,6 +449,9 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
               total: checkpoint?.total ?? 0,
               discovered: checkpoint?.discovered ?? 0,
               inspected: checkpoint?.inspected ?? 0,
+              dataAudited: checkpoint?.dataAudited ?? 0,
+              dataAuditCoverageGaps: checkpoint?.dataAuditCoverageGaps ?? 0,
+              dataAuditRemaining: checkpoint?.dataAuditRemaining ?? checkpoint?.remaining ?? Math.max(0, (checkpoint?.total ?? 0) - (checkpoint?.inspected ?? 0)),
               failed: checkpoint?.failed ?? 0,
               incidents: checkpoint?.incidents ?? 0,
               governanceGaps: checkpoint?.governanceGaps ?? 0,
@@ -575,12 +578,13 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
         setActivity(`Catalog Explorer paused at ${catalogProgress.inspected}/${catalogProgress.total || '?'} · connector retry limit reached · graph checkpoint preserved`)
         return
       }
-      const newProfileRisk = [...profileCandidates.values()].some((asset) => asset.qualityStatus === 'failing')
-      if (continueCatalogWithoutModel && catalogProgress && catalogProgress.state !== 'complete' && !shouldCallAgentForCatalog(catalogExplorer?.data.exploration, catalogProgress, newProfileRisk)) {
-        if (expectedPlayerSessionId !== undefined) {
-          queueAutonomousStep('Continue the next local Catalog Explorer batch from its versioned checkpoint. Call the model only when a new data incident is found or the catalog audit completes.', expectedPlayerSessionId, 120)
+      if (continueCatalogWithoutModel && catalogProgress) {
+        if (catalogProgress.state !== 'complete' && expectedPlayerSessionId !== undefined) {
+          queueAutonomousStep('Continue the next local Catalog Explorer aggregate-profile batch from its versioned checkpoint. Call the model only when a new evidence-backed data risk is found.', expectedPlayerSessionId, 120)
+          setActivity(`Catalog checkpoint ${catalogProgress.inspected}/${catalogProgress.total} · ${catalogProgress.dataAudited ?? 0} aggregate profiles audited · no new data risk · continuing locally without model tokens`)
+        } else {
+          setActivity(`Dataset audit complete · ${catalogProgress.dataAudited ?? 0}/${catalogProgress.total} aggregate profiles available · ${catalogProgress.dataAuditCoverageGaps ?? 0} coverage gaps · no new evidence-backed risk`)
         }
-        setActivity(`Catalog checkpoint ${catalogProgress!.inspected}/${catalogProgress!.total} · no new data incident · continuing locally without model tokens`)
         return
       }
 
@@ -980,15 +984,17 @@ export function useAutonomousPlayer(options: AutonomousPlayerOptions) {
     if (systemCards.added.length) {
       setNodes((current) => [...current, ...systemCards.added])
       setActivity(`${systemCards.added.map((node) => node.data.label).join(' and ')} created · preparing complete catalog exploration…`)
-      const stepId = ++autonomousStepId.current
-      setAutonomousStepScheduled(true)
-      setAutonomousStepRequest({
-        objective: `Execute the persistent DATA LAB Control policy as coherent versioned iterations: ${controller.data.rule}`,
-        sessionId,
-        stepId,
-      })
       playerStartupBlocked.current = false
       setPlayerStarting(false)
+      // Schedule the first audit on the next turn so the hook observes the
+      // newly materialized Controller / Worker / Explorer cards. Enqueuing the
+      // request in this same React event can otherwise run against the stale
+      // pre-bootstrap graph and leave the catalog idle.
+      queueAutonomousStep(
+        `Execute the persistent DATA LAB Control policy as coherent versioned iterations: ${controller.data.rule}`,
+        sessionId,
+        0,
+      )
       return
     }
     const objective = controller?.data.rule?.trim()
