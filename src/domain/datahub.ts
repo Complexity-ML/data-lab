@@ -1,19 +1,8 @@
 import type { SchemaField } from './pipeline'
 import type { CatalogAssetSummary, CatalogEvidence, LineageAssetSummary } from './catalog-connectors'
 
-export interface DataHubEvidence extends Omit<CatalogEvidence, 'connectorId' | 'sourceSystem' | 'assetRef'> {
-  connectorId?: string
-  sourceSystem?: string
-  assetRef?: string
-  tool: string
-  urn: string
-  capturedAt: string
-  expiresAt: string
-  status: 'ok' | 'unavailable' | 'error'
-  summary: string
-  cached: boolean
-  stale: boolean
-}
+/** @deprecated Use CatalogEvidence in provider-neutral graph and version code. */
+export interface DataHubEvidence extends CatalogEvidence {}
 
 export interface DataHubAssetSummary extends Omit<CatalogAssetSummary, 'connectorId' | 'sourceSystem' | 'assetRef'> {
   connectorId?: string

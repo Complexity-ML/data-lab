@@ -4,7 +4,7 @@ export type AppLanguage = 'en' | 'fr'
 
 const messages = {
   en: {
-    appSubtitle: 'Context-aware pipeline studio',
+    appSubtitle: 'Catalog-backed incident response',
     recoveryAvailable: 'Recovery available', saved: 'Saved', unsaved: 'Unsaved', emptyCanvas: 'empty canvas',
     runAgent: 'Play', agentWorking: 'Agent working…', runHint: 'Start autonomous player', pauseAgent: 'Pause', stopAgent: 'Stop', addSourceHint: 'Add a Data Source card before running the agent flow', openSettings: 'Open settings',
     promptPlaceholder: 'Ask the agent to analyze, rebuild or improve this data pipeline…', promptDisconnected: 'Connect ChatGPT or an API provider in Settings to activate the agent…',
@@ -12,7 +12,7 @@ const messages = {
     humanReview: 'Human review', notified: 'notified', reviewWhen: 'when Agent Decision requests it',
   },
   fr: {
-    appSubtitle: 'Studio de pipeline contextuel',
+    appSubtitle: 'Réponse aux incidents data',
     recoveryAvailable: 'Récupération disponible', saved: 'Enregistré', unsaved: 'Non enregistré', emptyCanvas: 'canvas vide',
     runAgent: 'Play', agentWorking: 'Agent en cours…', runHint: 'Démarrer le player autonome', pauseAgent: 'Pause', stopAgent: 'Stop', addSourceHint: 'Ajoutez une carte Source de données avant de lancer le flux agent', openSettings: 'Ouvrir les réglages',
     promptPlaceholder: 'Demandez à l’agent d’analyser, reconstruire ou améliorer ce pipeline de données…', promptDisconnected: 'Connectez ChatGPT ou un fournisseur API dans les réglages pour activer l’agent…',

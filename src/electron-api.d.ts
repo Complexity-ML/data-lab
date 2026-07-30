@@ -128,6 +128,8 @@ declare global {
       downloadAppUpdate(): Promise<AppUpdateStatus>
       installAppUpdate(): Promise<AppUpdateStatus>
       openAppSetupUpdater(): Promise<{ opened: true; channel: AppUpdateChannel; path: string }>
+      getBackgroundMonitoringStatus(): Promise<{ enabled: boolean; behavior: 'hide-on-close' | 'close-window'; message: string }>
+      saveBackgroundMonitoring(enabled: boolean): Promise<{ enabled: boolean; behavior: 'hide-on-close' | 'close-window'; message: string }>
       onAppUpdateStatusChanged(callback: (status: AppUpdateStatus) => void): () => void
       onHumanReviewOpened(callback: (payload: { versionId?: string }) => void): () => void
       getWindowState(): Promise<{ fullscreen: boolean }>

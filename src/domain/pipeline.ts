@@ -1,10 +1,9 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { DataHubEvidence } from './datahub'
+import type { CatalogEvidence, DataValueRiskSignal, LineageAssetSummary } from './catalog-connectors'
 import { scenarioPresets } from './presets'
 import { defaultRiskAssessmentRule } from './risk-assessment'
 import { defaultQueryCheckRule } from './query-check'
 import { workerPolicyRule, defaultWorkerPolicy } from './worker-policy'
-import type { DataValueRiskSignal, LineageAssetSummary } from './catalog-connectors'
 
 export type CardKind = 'control' | 'explorer' | 'worker' | 'query' | 'source' | 'profile' | 'analysis' | 'impact' | 'risk' | 'patch' | 'monitor' | 'parallel' | 'diagram' | 'split' | 'decision' | 'transform' | 'review' | 'validation' | 'output'
 export type PipelineStatus = 'healthy' | 'warning' | 'blocked' | 'draft'
@@ -197,7 +196,7 @@ export interface AgentProposal {
   addedEdges: Edge[]
   removedEdgeIds: string[]
   datahubReads: string[]
-  evidence?: DataHubEvidence[]
+  evidence?: CatalogEvidence[]
   writeback: string
   requiresHumanReview?: boolean
   confidence?: number

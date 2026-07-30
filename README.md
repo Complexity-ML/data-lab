@@ -1,6 +1,8 @@
 # DATA LAB
 
-DATA LAB is a human-reviewed visual pipeline studio for the **Build with DataHub: The Agent Hackathon**. It turns DataHub context into editable data-flow cards, lets an agent investigate governance and lineage problems, and requires a clear review before any proposed graph change is applied.
+DATA LAB is a human-reviewed **data incident-response workspace**. It turns normalized catalog evidence into one focused path—observe, profile, trace impact, assess risk, review a correction and monitor the result.
+
+DataHub is the built-in adapter created for the **Build with DataHub: The Agent Hackathon**, not the domain model. The application core uses the provider-neutral `data-lab.catalog.v1` contract; other systems can connect through an MCP or HTTP adapter without changing graph cards. Native OpenMetadata, dbt-manifest and Snowflake adapters are not claimed as implemented.
 
 **Primary challenge track:** Agents That Do Real Work.
 
@@ -8,38 +10,36 @@ DATA LAB is a human-reviewed visual pipeline studio for the **Build with DataHub
 
 ## Why it exists
 
-Most visual pipeline builders let users connect blocks without understanding the real catalog. DATA LAB loads schema, ownership, tags and lineage from DataHub first. Its agent can therefore answer questions such as:
+Most incident tools alert without preserving the evidence and proposed correction in one inspectable object. DATA LAB loads schema, ownership, classifications, profiles and lineage from a connected catalog first. Its agent can therefore answer questions such as:
 
-- Is this connection flowing in the right direction?
 - Which downstream outputs will receive a PII field?
 - Which feature, training dataset or production model is at risk after a schema change?
-- Is a Split missing a governed branch?
-- What change should be proposed, and what should be written back to the catalog?
+- What is the smallest reversible graph correction?
+- Which evidence changed, and did the post-condition recover?
 
 The starter scenario detects that `customers_360.email` is tagged as PII while the CRM activation path has no masking step. The agent proposes a transform, displays its DataHub reads and graph diff, and waits for explicit human approval.
 
 ## Current MVP
 
-- Electron desktop shell with a bright, accessible visual system.
-- Directional card graph powered by React Flow.
-- Data Source, Data Profile, Data Analysis, Impact Analysis, Risk Assessment, Compatibility Patch, Live Monitor, Parallel Agents, Incident Diagram, Split, Agent Decision, Transform, Human Review, Validation and Output cards.
-- Editable card metadata and DataHub URNs.
-- Local validation for cycles, orphan cards, reversed sources/outputs and incomplete splits.
-- DataHub-aware PII path check.
-- Agent proposal with tool trace, rationale, diff, approve and reject actions.
-- Demo catalog that works without credentials.
-- A real Electron-side MCP client using the official TypeScript SDK.
-- Local stdio and remote Streamable HTTP transports for the official DataHub MCP Server.
-- Live `get_entities`, `list_schema_fields` and `get_lineage` reads before an agent proposal.
-- Atomic Risk Assessment cards that separate verified data/ML risk from MCP collection reliability and record severity, confidence, evidence freshness, affected assets and the recommended action.
-- Card-role runner that follows the primary graph route and passes typed contracts between cards.
-- Data-adaptive protection rules generated from the classified fields in the source schema.
-- Confidence policy that turns Agent Decision into Human Review when evidence is sensitive or incomplete.
-- Persisted **Settings → Autonomy** policies for Human Review frequency, risk-analysis depth and incomplete/conflicting evidence; Frequent mode is enforced by the Electron host before any material diff can auto-commit.
-- Transactional pipeline versions: invalid candidates are rejected and previous checkpoints can be restored.
-- Collapsible inspector and a portal-based Settings modal with Appearance, Autonomy, MCP, Pipeline and Versions sections.
-- Optional bounded GraphQL adapter for direct dataset refresh; tokens never enter the renderer.
-- Sample agent output and a ready-to-record hackathon demo script.
+- One-click hackathon incident demo backed by a connected local DataHub OSS Docker Quickstart.
+- Eight primary incident cards: Source, Profile, Impact, Risk, Patch, Human Review, Validation and Live Monitor.
+- The broader pipeline grammar remains available behind **Show advanced pipeline cards**.
+- Provider-neutral `catalog.v1` evidence plus a built-in DataHub GraphQL/MCP adapter.
+- Agent proposal with exact evidence, tool trace, rationale, graph diff and native approve/reject boundaries.
+- Atomic risk gates that keep catalog-collection failures separate from actual data incidents.
+- Transactional SQLite workspaces, reports and restorable versions.
+- Background monitoring enabled by default: closing the window hides DATA LAB to the system tray instead of destroying its renderer timers.
+
+## Run the hackathon demo
+
+The recorded hackathon scenario is intentionally evidence-backed. Start DataHub OSS with Docker, connect the built-in DataHub adapter, then choose **Start incident demo** on the empty canvas.
+
+Required:
+
+1. a running local DataHub OSS Quickstart in Docker;
+2. the DATA LAB DataHub connection reporting **connected**.
+
+An AI provider remains optional unless the video demonstrates generated correction proposals.
 
 ## Run the app
 
@@ -94,7 +94,7 @@ Long ChatGPT/Codex planning turns use an activity-aware wait: tool calls and age
 
 When a proposal reaches Human Review, its giant review modal exposes a dedicated read-only agent assistant. The reviewer can ask why the change is needed, what evidence is missing, what could break, or which alternative is safer. Electron rejects every graph mutation tool in this mode: the assistant can explain and recommend, but only the human can approve, reject or request external DataHub write-back.
 
-This monitoring loop lives inside the Electron session only. DATA LAB does **not** install a daemon, service, cloud worker or hidden 24/7 process: closing Electron stops every read and agent action immediately. SQLite preserves the ledger so the next launch can show what happened and resume only after the application is open again.
+This monitoring loop remains a desktop process, not a cloud service. By default, closing the window hides DATA LAB to the system tray, disables Chromium background throttling and keeps Live Monitor timers active while the computer and user session remain running. **Quit DATA LAB** stops monitoring explicitly. Operators can opt out in **Settings → Autonomy**. A separately deployable service is still required for server-grade monitoring across reboots and signed-out sessions.
 
 ![DATA LAB evidence-backed autonomous incident lifecycle](docs/assets/akira-incident-lifecycle.png)
 
@@ -181,18 +181,18 @@ See [DataHub MCP Server](https://docs.datahub.com/docs/features/feature-guides/m
 ## Security model
 
 - Electron renderer isolation is enabled (`contextIsolation`, `sandbox`, no Node integration).
-- DataHub URL and token remain in the Electron main process.
+- Catalog URLs and tokens remain in the Electron main process.
 - IPC only exposes status and a bounded dataset-context read.
 - The renderer can request a fixed three-tool MCP audit, but cannot invoke arbitrary tools.
 - MCP mutation tools are disabled for the locally launched server.
 - Dataset URNs are validated and requests time out.
 - Agent graph changes are proposals, never silent mutations.
-- Demo mode contains no secret and works offline after dependencies are installed.
+- The local incident demo contains no secret and needs no catalog or AI dependency.
 
 ## Project structure
 
 ```text
-electron/          Secure desktop shell and DataHub adapter
+electron/          Secure desktop shell and catalog adapters
 src/components/    Pipeline cards and human review UI
 src/domain/        Typed graph, validation and agent proposal logic
 examples/          Judge-readable sample agent artifacts

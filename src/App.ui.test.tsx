@@ -97,6 +97,7 @@ function installElectronWorkspaceMock(state: Awaited<ReturnType<NonNullable<type
     getChatGPTStatus: vi.fn(async () => disconnectedChatGPTStatus),
     getActiveAiSource: vi.fn(async () => ({ source: 'openai' as const })),
     connectChatGPT: vi.fn(async () => disconnectedChatGPTStatus),
+    connectDataHubMcp: vi.fn(async () => ({ mode: 'demo' as const, transport: 'demo' as const, message: 'Not connected', toolCount: 0, tools: [], writebackAvailable: false, settings: { transport: 'stdio' as const, url: '', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false } })),
     cancelChatGPTLogin: vi.fn(async () => ({ cancelled: true })),
     cancelAiProposal: vi.fn(async () => ({ cancelled: true })),
     cancelChatGPTProposal: vi.fn(async () => ({ cancelled: true })),
@@ -159,6 +160,38 @@ function savedEmptyWorkspaceState(id = 'incident-workspace') {
 }
 
 describe('visual pipeline workspace regressions', () => {
+  it('requires the DataHub Docker connection before starting the hackathon demo', async () => {
+    render(<App />)
+
+    expect(screen.getByText('DataHub OSS + Docker required')).toBeTruthy()
+    expect((screen.getByRole('button', { name: /Start incident demo/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('starts the hackathon incident demo after DataHub Docker is connected', async () => {
+    const user = userEvent.setup()
+    const { api } = installElectronWorkspaceMock(savedEmptyWorkspaceState())
+    const connectedStatus = {
+      mode: 'connected' as const,
+      transport: 'stdio' as const,
+      message: 'DataHub OSS connected',
+      toolCount: 4,
+      tools: [],
+      writebackAvailable: false,
+      settings: { transport: 'stdio' as const, url: 'http://localhost:8080', tokenConfigured: false, tokenSource: 'none' as const, encryptionAvailable: false, writebackEnabled: false },
+    }
+    vi.mocked(api.getDataHubMcpStatus).mockResolvedValue(connectedStatus)
+    vi.mocked(api.connectDataHubMcp).mockResolvedValue(connectedStatus)
+    render(<App />)
+
+    const startButton = await screen.findByRole('button', { name: /Start incident demo/ })
+    await waitFor(() => expect((startButton as HTMLButtonElement).disabled).toBe(false))
+    await user.click(startButton)
+
+    expect(api.connectDataHubMcp).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: /Start incident demo/ })).toBeNull()
+    expect(screen.getAllByText('Demo · order_details privacy risk').length).toBeGreaterThan(0)
+  })
+
   it('opens a new install blank, with zero versions and no false successful run state', async () => {
     render(<App />)
 
@@ -665,7 +698,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(screen.getByText('External mutations and DataHub write-back always keep their separate native confirmation, regardless of autonomy level.')).toBeTruthy()
   })
 
-  it('adds palette cards by click and drops dragged cards at pointer flow-space XY', async () => {
+  it('adds incident cards immediately and advanced cards after explicit opt-in', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
     const flow = screen.getByTestId('pipeline-flow')
@@ -676,6 +709,7 @@ describe('visual pipeline workspace regressions', () => {
     expect(clickedCard?.dataset.x).toBe('120')
     expect(clickedCard?.dataset.y).toBe('120')
 
+    await user.click(screen.getByRole('button', { name: /Show advanced pipeline cards/ }))
     const transfer = new DataTransferStub()
     const analysisPaletteCard = screen.getByTitle('Click to add or drag Data Analysis onto the canvas')
     fireEvent.dragStart(analysisPaletteCard, { dataTransfer: transfer })

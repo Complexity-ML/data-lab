@@ -1,7 +1,7 @@
 import type { Edge } from '@xyflow/react'
 import type { PipelineNode, PipelineNodeData, CardKind, CatalogExplorationProgress, DataProfileSnapshot, SchemaField } from './pipeline'
 import type { PipelineVersion } from './versioning'
-import type { DataHubEvidence } from './datahub'
+import type { CatalogEvidence } from './catalog-connectors'
 
 export const pipelineExportSchema = 'data-lab.pipeline'
 export const pipelineExportVersion = 1
@@ -282,14 +282,26 @@ function cleanGraph(nodes: unknown, edges: unknown, trustHostProof: boolean) {
   return { nodes: clean, edges: cleanEdges(edges, new Set(clean.map((node) => node.id))) }
 }
 
-function cleanEvidence(value: unknown): DataHubEvidence[] | undefined {
+function cleanEvidence(value: unknown): CatalogEvidence[] | undefined {
   if (!Array.isArray(value)) return undefined
   return value.slice(0, 50).flatMap((item) => {
     if (!item || typeof item !== 'object') return []
     const source = item as Record<string, unknown>
     if (typeof source.tool !== 'string' || typeof source.urn !== 'string' || typeof source.capturedAt !== 'string' || typeof source.expiresAt !== 'string') return []
     const summary = typeof source.summary === 'string' ? redactExportText(source.summary).slice(0, 500) : ''
-    return [{ tool: source.tool.slice(0, 120), urn: source.urn.slice(0, 2_000), capturedAt: source.capturedAt, expiresAt: source.expiresAt, status: ['ok', 'unavailable', 'error'].includes(String(source.status)) ? source.status as DataHubEvidence['status'] : 'unavailable', summary, cached: source.cached === true, stale: source.stale === true }]
+    return [{
+      connectorId: typeof source.connectorId === 'string' ? source.connectorId.slice(0, 32) : undefined,
+      sourceSystem: typeof source.sourceSystem === 'string' ? redactExportText(source.sourceSystem).slice(0, 120) : undefined,
+      assetRef: typeof source.assetRef === 'string' ? source.assetRef.slice(0, 2_000) : undefined,
+      tool: source.tool.slice(0, 120),
+      urn: source.urn.slice(0, 2_000),
+      capturedAt: source.capturedAt,
+      expiresAt: source.expiresAt,
+      status: ['ok', 'unavailable', 'error'].includes(String(source.status)) ? source.status as CatalogEvidence['status'] : 'unavailable',
+      summary,
+      cached: source.cached === true,
+      stale: source.stale === true,
+    }]
   })
 }
 

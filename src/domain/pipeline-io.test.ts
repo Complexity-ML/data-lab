@@ -36,6 +36,37 @@ describe('versioned pipeline JSON exchange', () => {
     })
   })
 
+  it('preserves provider-neutral evidence provenance across export and import', () => {
+    const exported = createPipelineExport('Catalog-neutral incident', [], [], [{
+      id: 'version-openmetadata',
+      label: 'OpenMetadata incident',
+      createdAt: '2026-07-30T18:00:00.000Z',
+      origin: 'agent',
+      nodes: [],
+      edges: [],
+      blockingIssues: 0,
+      evidence: [{
+        connectorId: 'openmetadata-prod',
+        sourceSystem: 'OpenMetadata',
+        assetRef: 'table://analytics/orders',
+        tool: 'catalog_inspect',
+        urn: 'table://analytics/orders',
+        capturedAt: '2026-07-30T17:59:00.000Z',
+        expiresAt: '2026-07-30T18:04:00.000Z',
+        status: 'ok',
+        summary: 'Normalized schema and lineage evidence.',
+        cached: false,
+        stale: false,
+      }],
+    }])
+
+    expect(parsePipelineExport(JSON.stringify(exported)).versions[0]?.evidence?.[0]).toMatchObject({
+      connectorId: 'openmetadata-prod',
+      sourceSystem: 'OpenMetadata',
+      assetRef: 'table://analytics/orders',
+    })
+  })
+
   it('does not trust an exported host proof after crossing the import boundary', () => {
     const asset: DataHubAssetSummary = {
       urn: 'urn:li:dataset:(urn:li:dataPlatform:snowflake,analytics.customers,PROD)',

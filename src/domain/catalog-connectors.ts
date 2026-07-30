@@ -90,10 +90,10 @@ export interface CatalogAssetSummary {
 }
 
 export interface CatalogEvidence {
-  connectorId: string
-  sourceSystem: string
+  connectorId?: string
+  sourceSystem?: string
   tool: string
-  assetRef: string
+  assetRef?: string
   urn: string
   capturedAt: string
   expiresAt: string

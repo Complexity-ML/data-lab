@@ -21,6 +21,7 @@ import { useAppUpdates } from './hooks/useAppUpdates'
 import { useAtomicReviewResolver } from './hooks/useAtomicReviewResolver'
 import { useAutonomousPlayer } from './hooks/useAutonomousPlayer'
 import { useAutonomyPolicy } from './hooks/useAutonomyPolicy'
+import { useBackgroundMonitoring } from './hooks/useBackgroundMonitoring'
 import { useDataHubConnection } from './hooks/useDataHubConnection'
 import { useDiagnosticsActions } from './hooks/useDiagnosticsActions'
 import { useGraphHistory } from './hooks/useGraphHistory'
@@ -76,6 +77,7 @@ export default function App() {
   const resolveAtomicReview = useAtomicReviewResolver(activeAtomicRun)
 
   const appUpdates = useAppUpdates(setActivity)
+  const backgroundMonitoring = useBackgroundMonitoring(setActivity)
   const ai = useAiConnections(setActivity)
   const dataHub = useDataHubConnection(setActivity)
   const pipelineVersions = usePipelineVersions({
@@ -330,6 +332,7 @@ export default function App() {
       activeWorkspaceId={workspace.activeWorkspaceId}
       aiStatus={ai.aiStatus}
       autonomyPolicy={autonomyPolicy}
+      backgroundMonitoringEnabled={backgroundMonitoring.enabled}
       chatGPTStatus={ai.chatGPTStatus}
       catalogConnectors={dataHub.catalogConnectors}
       connectionMode={dataHub.connectionMode}
@@ -355,6 +358,7 @@ export default function App() {
       }}
       onArchiveWorkspace={workspace.archiveWorkspace}
       onAutonomyPolicyChange={setAutonomyPolicy}
+      onBackgroundMonitoringChange={backgroundMonitoring.setEnabled}
       onCheckForAppUpdate={appUpdates.check}
       onClearIncidentReports={diagnostics.clearIncidentReports}
       onAutoLayout={() => { setNodes((current) => layoutPipeline(current, edges)); setActivity('Topology-aware XY layout applied · Split branches preserved') }}
@@ -426,7 +430,10 @@ export default function App() {
 
       <PipelineCanvasView
         activityBusy={activityBusy}
+        aiConnected={ai.active.connected}
         actionsOpen={leftOperationsPanel === 'actions'}
+        catalogConnected={dataHub.catalogConnectionMode === 'connected'}
+        dataHubConnected={dataHub.connectionMode === 'connected'}
         contextMenu={contextMenu}
         edges={edges}
         inspectorOpen={inspectorOpen}
@@ -455,8 +462,18 @@ export default function App() {
         onOpenReports={() => { setInspectorOpen(false); setRisksOpen(false); setInspectorReturn(undefined); setReportsOpen(true) }}
         onOpenResults={() => setResultsOpen(true)}
         onOpenRisks={() => { setInspectorOpen(false); setReportsOpen(false); setInspectorReturn(undefined); setRisksOpen(true) }}
+        onOpenConnections={() => { setSettingsSection('connections'); setSettingsOpen(true) }}
         onPaneClick={() => setContextMenu(undefined)}
         onSelectNode={setSelectedId}
+        onStartIncidentDemo={async () => {
+          if (dataHub.connectionMode !== 'connected') { setSettingsSection('connections'); setSettingsOpen(true); setActivity('Start DataHub OSS in Docker and connect it before running the hackathon demo'); return }
+          const status = await dataHub.syncDataHub()
+          if (status?.mode !== 'connected') { setSettingsSection('connections'); setSettingsOpen(true); setActivity('DataHub OSS is not reachable · check the Docker Quickstart before running the demo'); return }
+          workspace.detachWorkspace()
+          pipelineVersions.loadPreset('order-details-privacy')
+          setActivity('Incident demo ready · inspect the evidence path or play the agent')
+          window.setTimeout(() => void pipeline.flowInstance.current?.fitView({ duration: 260, padding: 0.2 }), 0)
+        }}
         theme={theme}
       />
 

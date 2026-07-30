@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray, type MenuItemConstructorOptions } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getDataHubStatus, loadDatasetContext } from './datahub.js'
@@ -14,6 +14,7 @@ import { parseUpdateChannel } from './update-policy.js'
 import { desktopWindowFrame } from './window-platform.js'
 import { openSetupUpdater, readSetupChannel, saveSetupChannel } from './setup-updater.js'
 import { deleteCatalogConnector, inspectCatalogAsset, listCatalogConnectors, saveCatalogConnector, searchCatalogAssets, testCatalogConnector } from './catalog-connectors.js'
+import { normalizeBackgroundMonitoringPreference, windowCloseDisposition } from './background-monitoring.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const statusChannel = 'data-lab:datahub-status'
@@ -82,7 +83,10 @@ const appUpdateCheckChannel = 'data-lab:app-update-check'
 const appUpdateDownloadChannel = 'data-lab:app-update-download'
 const appUpdateInstallChannel = 'data-lab:app-update-install'
 const appUpdateOpenSetupChannel = 'data-lab:app-update-open-setup'
+const backgroundMonitoringStatusChannel = 'data-lab:background-monitoring-status'
+const backgroundMonitoringSaveChannel = 'data-lab:background-monitoring-save'
 let mainWindow: BrowserWindow | undefined
+let tray: Tray | undefined
 let isQuitting = false
 let chatGPT: ChatGPTAgentSession | undefined
 let appUpdates: AppUpdateController | undefined
@@ -143,6 +147,35 @@ function focusMainWindow() {
   mainWindow.focus()
 }
 
+function backgroundMonitoringEnabled() {
+  return normalizeBackgroundMonitoringPreference(loadAppSetting(app.getPath('userData'), 'background-monitoring-enabled'))
+}
+
+function backgroundMonitoringStatus() {
+  const enabled = backgroundMonitoringEnabled()
+  return {
+    enabled,
+    behavior: enabled ? 'hide-on-close' as const : 'close-window' as const,
+    message: enabled
+      ? 'Closing the window keeps live incident monitoring active on this computer.'
+      : 'Closing the window stops renderer-based live monitoring.',
+  }
+}
+
+function ensureTray() {
+  if (tray && !tray.isDestroyed()) return tray
+  const icon = nativeImage.createFromPath(join(currentDirectory, '..', 'build', 'icon-1024.png')).resize({ width: 18, height: 18 })
+  tray = new Tray(icon)
+  tray.setToolTip('DATA LAB · Incident monitoring')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open DATA LAB', click: focusMainWindow },
+    { type: 'separator' },
+    { label: 'Quit DATA LAB', click: () => { isQuitting = true; app.quit() } },
+  ]))
+  tray.on('click', focusMainWindow)
+  return tray
+}
+
 function notifyHumanReview(payload: { cardLabel?: unknown; reason?: unknown; versionId?: unknown; remind?: unknown }): { shown: boolean; deduplicated?: boolean } {
   const cardLabel = typeof payload?.cardLabel === 'string' ? payload.cardLabel.trim().slice(0, 120) : 'Agent flow'
   const reason = typeof payload?.reason === 'string' ? payload.reason.trim().slice(0, 280) : 'The agent needs a human decision.'
@@ -175,6 +208,7 @@ function createMainWindow() {
     ...platformFrame,
     webPreferences: {
       preload: join(currentDirectory, 'preload.cjs'),
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -201,13 +235,19 @@ function createMainWindow() {
   window.on('enter-full-screen', publishWindowState)
   window.on('leave-full-screen', publishWindowState)
 
-  if (process.platform === 'darwin') {
-    window.on('close', (event) => {
-      if (isQuitting) return
+  window.on('close', (event) => {
+    const disposition = windowCloseDisposition({ enabled: backgroundMonitoringEnabled(), isQuitting })
+    if (disposition === 'hide') {
       event.preventDefault()
+      window.hide()
+      ensureTray()
+      return
+    }
+    if (process.platform === 'darwin' && !isQuitting) {
+      isQuitting = true
       app.quit()
-    })
-  }
+    }
+  })
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = undefined
   })
@@ -373,6 +413,16 @@ app.whenReady().then(() => {
     if (confirmation.response !== 0) return status
     return appUpdates?.install()
   })
+  ipcMain.handle(backgroundMonitoringStatusChannel, () => backgroundMonitoringStatus())
+  ipcMain.handle(backgroundMonitoringSaveChannel, (_event, payload: { enabled?: unknown }) => {
+    const enabled = payload?.enabled === true
+    saveAppSetting(app.getPath('userData'), 'background-monitoring-enabled', String(enabled))
+    if (!enabled && tray && !tray.isDestroyed()) {
+      tray.destroy()
+      tray = undefined
+    }
+    return backgroundMonitoringStatus()
+  })
   createMainWindow()
   void appUpdates.initialize()
   app.on('activate', () => {
@@ -386,6 +436,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  tray?.destroy()
+  tray = undefined
   chatGPT?.stop()
   markWorkspaceSessionClean(app.getPath('userData'))
   closeWorkspaceDatabase()

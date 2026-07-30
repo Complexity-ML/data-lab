@@ -66,6 +66,8 @@ const appUpdateCheckChannel = 'data-lab:app-update-check'
 const appUpdateDownloadChannel = 'data-lab:app-update-download'
 const appUpdateInstallChannel = 'data-lab:app-update-install'
 const appUpdateOpenSetupChannel = 'data-lab:app-update-open-setup'
+const backgroundMonitoringStatusChannel = 'data-lab:background-monitoring-status'
+const backgroundMonitoringSaveChannel = 'data-lab:background-monitoring-save'
 
 contextBridge.exposeInMainWorld('dataLab', {
   runtime: 'electron',
@@ -132,6 +134,8 @@ contextBridge.exposeInMainWorld('dataLab', {
   downloadAppUpdate: () => ipcRenderer.invoke(appUpdateDownloadChannel),
   installAppUpdate: () => ipcRenderer.invoke(appUpdateInstallChannel),
   openAppSetupUpdater: () => ipcRenderer.invoke(appUpdateOpenSetupChannel),
+  getBackgroundMonitoringStatus: () => ipcRenderer.invoke(backgroundMonitoringStatusChannel),
+  saveBackgroundMonitoring: (enabled: boolean) => ipcRenderer.invoke(backgroundMonitoringSaveChannel, { enabled }),
   onAppUpdateStatusChanged: (callback: (status: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status)
     ipcRenderer.on(appUpdateStatusChangedChannel, listener)

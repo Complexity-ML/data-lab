@@ -1,7 +1,9 @@
-import { Binoculars, Bot, Braces, BrainCircuit, ChartColumn, ChartNetwork, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, UserCheck, WandSparkles } from 'lucide-react'
+import { Binoculars, Bot, Braces, BrainCircuit, ChartColumn, ChartNetwork, Cpu, Database, Dices, FileDiff, GitBranch, LayoutDashboard, Network, PanelLeftClose, Plus, Radar, SearchCheck, Send, ShieldAlert, SlidersHorizontal, UserCheck, WandSparkles } from 'lucide-react'
+import { useState } from 'react'
 import { PanelHeader } from '../components/shared/PanelHeader'
 import { PanelScrollArea } from '../components/shared/PanelScrollArea'
 import { cardLabels, type CardKind } from '../domain/pipeline'
+import { visibleCardKinds, type ProductMode } from '../domain/product-scope'
 
 const palette: { kind: CardKind; description: string; icon: typeof Database }[] = [
   { kind: 'control', description: 'Persistent autonomous player policy', icon: Bot },
@@ -26,11 +28,13 @@ const palette: { kind: CardKind; description: string; icon: typeof Database }[] 
 ]
 
 export function CardLibraryView({ onAddCard, onClose }: { onAddCard(kind: CardKind): void; onClose(): void }) {
+  const [mode, setMode] = useState<ProductMode>('incident-response')
+  const visible = new Set(visibleCardKinds(mode))
   return <aside className="library-panel">
-    <PanelHeader action={<button aria-label="Close card library" className="panel-toggle" onClick={onClose} title="Close card library" type="button"><PanelLeftClose size={16} /></button>} eyebrow="BUILD" title="Card library" />
+    <PanelHeader action={<button aria-label="Close card library" className="panel-toggle" onClick={onClose} title="Close card library" type="button"><PanelLeftClose size={16} /></button>} eyebrow="INCIDENT RESPONSE" title="Incident cards" />
     <PanelScrollArea className="library-panel-content" label="Card library content">
-      <p className="panel-intro">Compose a directional data pipeline. Every card remains inspectable and reviewable.</p>
-      <div className="palette-list">{palette.map(({ kind, description, icon: Icon }) => <button
+      <p className="panel-intro">Investigate one catalog-backed incident, trace its impact and keep every correction reviewable.</p>
+      <div className="palette-list">{palette.filter(({ kind }) => visible.has(kind)).map(({ kind, description, icon: Icon }) => <button
         className={`palette-card palette-${kind}`}
         draggable
         key={kind}
@@ -45,10 +49,19 @@ export function CardLibraryView({ onAddCard, onClose }: { onAddCard(kind: CardKi
         title={`Click to add or drag ${cardLabels[kind]} onto the canvas`}
         type="button"
       ><span><Icon size={16} /></span><div><strong>{cardLabels[kind]}</strong><small>{description}</small></div><Plus size={14} /></button>)}</div>
+      <button
+        aria-pressed={mode === 'advanced'}
+        className="advanced-card-toggle"
+        onClick={() => setMode((current) => current === 'advanced' ? 'incident-response' : 'advanced')}
+        type="button"
+      >
+        <SlidersHorizontal size={15} />
+        <span><strong>{mode === 'advanced' ? 'Hide advanced pipeline cards' : 'Show advanced pipeline cards'}</strong><small>{mode === 'advanced' ? 'Return to the incident-response surface' : 'Builder, parallel-agent and transformation primitives'}</small></span>
+      </button>
       <section className="datahub-context">
-        <div><Database size={15} /><strong>DataHub context</strong></div>
-        <p>Schema, lineage, ownership, PII tags and bounded row, null, uniqueness and distribution profiles are loaded before the agent proposes a change.</p>
-        <ul><li>customers_360</li><li>aggregate profiles</li><li>no raw rows</li></ul>
+        <div><Database size={15} /><strong>Catalog evidence</strong></div>
+        <p>DATA LAB consumes normalized schema, lineage, ownership, classifications and bounded profiles through a provider-neutral catalog contract.</p>
+        <ul><li>DataHub built in</li><li>Catalog v1 adapters</li><li>no raw rows</li></ul>
       </section>
     </PanelScrollArea>
   </aside>

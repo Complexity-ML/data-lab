@@ -1,7 +1,7 @@
 import type { Edge } from '@xyflow/react'
 import type { PipelineNode } from './pipeline'
 import type { ValidationIssue } from '../validation'
-import type { DataHubEvidence } from './datahub'
+import type { CatalogEvidence } from './catalog-connectors'
 
 export interface PipelineVersion {
   id: string
@@ -13,12 +13,12 @@ export interface PipelineVersion {
   blockingIssues: number
   status?: 'committed' | 'pending-review' | 'rejected'
   description?: string
-  evidence?: DataHubEvidence[]
+  evidence?: CatalogEvidence[]
 }
 
 export interface PipelineVersionProvenanceExport {
   revision: Pick<PipelineVersion, 'id' | 'label' | 'createdAt' | 'origin' | 'status' | 'description'>
-  evidence: DataHubEvidence[]
+  evidence: CatalogEvidence[]
 }
 
 function copyGraph<T>(value: T): T {

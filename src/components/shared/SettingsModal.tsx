@@ -13,6 +13,7 @@ import type { AppUpdateChannel, AppUpdateStatus } from '../../domain/updates'
 import type { DiagnosticBundle, DiagnosticSettings } from '../../domain/diagnostics'
 import type { AutonomyPolicy } from '../../domain/autonomy-policy'
 import type { CatalogConnectorKind, CatalogConnectorManifest, CatalogConnectorSummary } from '../../domain/catalog-connectors'
+import { catalogProviderOptions } from '../../domain/catalog-providers'
 
 export type SettingsSection = 'appearance' | 'workspaces' | 'ai' | 'autonomy' | 'connections' | 'updates' | 'diagnostics' | 'presets' | 'pipeline' | 'versions'
 
@@ -22,6 +23,7 @@ interface SettingsModalProps {
   appUpdateStatus: AppUpdateStatus
   aiStatus: AiStatus
   autonomyPolicy: AutonomyPolicy
+  backgroundMonitoringEnabled: boolean
   chatGPTStatus: ChatGPTSessionStatus
   catalogConnectors: CatalogConnectorSummary[]
   connectionMode: 'demo' | 'connected'
@@ -44,6 +46,7 @@ interface SettingsModalProps {
   onApprovePendingReview: (versionId: string) => void
   onArchiveWorkspace: (workspaceId: string) => Promise<void>
   onAutonomyPolicyChange: (policy: AutonomyPolicy) => void
+  onBackgroundMonitoringChange: (enabled: boolean) => Promise<void>
   onCheckForAppUpdate: () => Promise<AppUpdateStatus>
   onClearIncidentReports: () => Promise<{ deleted: number; workspaceId?: string }>
   onClose: () => void
@@ -95,7 +98,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { language, setLanguage } = useLanguage()
-  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, autonomyPolicy, catalogConnectors, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onAutonomyPolicyChange, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteCatalogConnector, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveCatalogConnector, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onTestCatalogConnector, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
+  const { activeAiSource, activeWorkspaceId, aiStatus, appUpdateBusy, appUpdateStatus, autonomyPolicy, backgroundMonitoringEnabled, catalogConnectors, chatGPTStatus, connectionMode, dataHubSettings, errorCount, findingCount, incidentReportCount, initialSection, mcpMessage, mcpTransport, onApprovePendingReview, onArchiveWorkspace, onAutoLayout, onAutonomyPolicyChange, onBackgroundMonitoringChange, onCancelChatGPTLogin, onCheckForAppUpdate, onClearIncidentReports, onClose, onConfigureChatGPT, onConnectChatGPT, onCreateWorkspace, onDeleteCatalogConnector, onDeleteWorkspace, onDisconnectChatGPT, onDownloadAppUpdate, onDuplicateWorkspace, onEmergencyStop, onExportDiagnostics, onExportPipeline, onImportPipeline, onInstallAppUpdate, onLoadDiagnostics, onLoadPreset, onOpenDiagnosticLogs, onOpenSetupUpdater, onOpenWorkspace, onRefreshAiModelCatalog, onRejectPendingReview, onRemindHumanReview, onRenameWorkspace, onRestoreVersion, onSaveAiSettings, onSaveCatalogConnector, onSaveDataHubSettings, onSaveDiagnosticSettings, onSaveVersion, onSaveWorkspace, onSelectActiveAiSource, onSetAppUpdateChannel, onSyncDataHub, onTestAiConnection, onTestCatalogConnector, onThemeChange, onValidate, projectTitle, selectedVersionId, theme, versions, workspaceSaveState, workspaces } = props
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [aiSettings, setAiSettings] = useState(aiStatus.settings)
   const [aiBusy, setAiBusy] = useState(false)
@@ -477,6 +480,13 @@ export function SettingsModal(props: SettingsModalProps) {
               <button aria-checked={autonomyPolicy.uncertainty === 'bounded'} className={autonomyPolicy.uncertainty === 'bounded' ? 'is-active' : ''} onClick={() => onAutonomyPolicyChange({ ...autonomyPolicy, uncertainty: 'bounded' })} role="radio" type="button"><strong>Bounded work</strong><small>Allow reversible graph-only work, never dataset claims.</small></button>
             </div>
           </section>
+          <section className="settings-section autonomy-settings">
+            <div className="settings-section-title"><span><Activity size={15} /> Background incident monitoring</span><small>{backgroundMonitoringEnabled ? 'Active' : 'Stops with the window'}</small></div>
+            <label className="diagnostic-toggle">
+              <input checked={backgroundMonitoringEnabled} onChange={(event) => void onBackgroundMonitoringChange(event.target.checked)} type="checkbox" />
+              <span><strong>Keep DATA LAB running when its window closes</strong><small>Live Monitor timers continue in the hidden desktop process and DATA LAB remains available from the system tray. Explicit Quit still stops monitoring.</small></span>
+            </label>
+          </section>
           <p className="settings-note">External mutations and DataHub write-back always keep their separate native confirmation, regardless of autonomy level.</p>
         </article>}
 
@@ -543,6 +553,15 @@ export function SettingsModal(props: SettingsModalProps) {
 
         {activeSection === 'connections' && <article className="settings-page">
           <div className="settings-page-heading"><small>CONNECTIONS</small><h3>Catalog and evidence sources</h3><p>Connect normalized MCP or HTTP API catalogs without coupling pipeline cards to a vendor.</p></div>
+          <section className="settings-section">
+            <div className="settings-section-title"><span>Provider support</span><small>Connector-neutral core</small></div>
+            <div className="catalog-provider-matrix">
+              {catalogProviderOptions.map((provider) => <div key={provider.id}>
+                <span><strong>{provider.name}</strong><small>{provider.description}</small></span>
+                <em className={`is-${provider.availability}`}>{provider.availability === 'built-in' ? 'Built in' : provider.availability === 'contract' ? 'Available contract' : 'Adapter required'}</em>
+              </div>)}
+            </div>
+          </section>
           <section className="settings-section">
             <div className="settings-section-title"><span>Built-in · DataHub</span><small>{mcpTransport === 'demo' ? 'Not configured' : mcpTransport === 'http' ? 'Remote MCP' : 'GraphQL GMS + local MCP'}</small></div>
             <div className="settings-setting-row"><div className={`settings-icon datahub-${connectionMode}`}><Database size={19} /></div><div><strong>DataHub {connectionMode === 'connected' ? 'connected' : 'not connected'}</strong><p>{mcpMessage}</p></div><ActionButton disabled={dataHubBusy || connectionMode !== 'connected'} onClick={() => void onSyncDataHub()} variant="ghost">Sync now</ActionButton></div>

@@ -78,7 +78,7 @@ export function ReviewPanel({ applying = false, assistant, proposal, relatedAsse
         </section> : null}
 
         <section className="review-section">
-          <h3><DatabaseZap size={15} /> DataHub context read</h3>
+          <h3><DatabaseZap size={15} /> Catalog evidence read</h3>
           <ol>{proposal.datahubReads.map((item) => <li key={item}><code>{item}</code></li>)}</ol>
         </section>
       </div>

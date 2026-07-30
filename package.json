@@ -1,7 +1,7 @@
 {
   "name": "data-lab",
   "productName": "DATA LAB",
-  "description": "A human-reviewed, DataHub-aware visual pipeline builder for data teams.",
+  "description": "A human-reviewed incident-response workspace for catalog-backed data systems.",
   "author": "DATA LAB",
   "license": "Apache-2.0",
   "private": true,
@@ -44,6 +44,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/icon-1024.png",
       "package.json"
     ],
     "mac": {

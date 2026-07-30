@@ -1,9 +1,10 @@
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Connection, type Edge, type EdgeTypes, type NodeChange, type EdgeChange, type NodeTypes, type OnReconnect } from '@xyflow/react'
-import { FileText, FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, ScrollText, ShieldAlert, Trash2 } from 'lucide-react'
+import { Bot, Database, FileText, FileWarning, ListChecks, LoaderCircle, PanelLeftOpen, PanelRightOpen, Pencil, Play, ScrollText, ShieldAlert, Trash2 } from 'lucide-react'
 import { useMemo, type DragEvent, type MouseEvent } from 'react'
 import { PipelineCard } from '../components/PipelineCard'
 import { ElasticEdge, ElasticRoutingProvider } from '../components/shared/ElasticEdge'
 import { canConnectCardKinds } from '../domain/card-compatibility'
+import { incidentOnboarding } from '../domain/onboarding'
 import type { CardKind, PipelineNode } from '../domain/pipeline'
 import { graphPerformanceTargets } from '../domain/performance'
 
@@ -20,7 +21,10 @@ const miniMapColors: Record<CardKind, string> = {
 
 interface PipelineCanvasViewProps {
   activityBusy: boolean
+  aiConnected: boolean
   actionsOpen: boolean
+  catalogConnected: boolean
+  dataHubConnected: boolean
   contextMenu?: { nodeId: string; label: string; x: number; y: number }
   edges: Edge[]
   inspectorOpen: boolean
@@ -50,15 +54,18 @@ interface PipelineCanvasViewProps {
   onOpenReports(): void
   onOpenResults(): void
   onOpenRisks(): void
+  onOpenConnections(): void
   onSelectNode(nodeId: string): void
+  onStartIncidentDemo(): void
   theme: 'light' | 'dark'
 }
 
 export function PipelineCanvasView(props: PipelineCanvasViewProps) {
-  const { activityBusy, actionsOpen, contextMenu, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onOpenResults, onOpenRisks, onPaneClick, onReconnect, onSelectNode, reportCount, reportsOpen, resultCount, resultsOpen, riskCount, risksOpen, theme } = props
+  const { activityBusy, aiConnected, actionsOpen, catalogConnected, contextMenu, dataHubConnected, edges, inspectorOpen, libraryOpen, logsOpen, nodes, onConnect, onDeleteCard, onDrop, onEdgesChange, onEditCard, onFlowInit, onNodeContextMenu, onNodesChange, onOpenActions, onOpenConnections, onOpenInspector, onOpenLibrary, onOpenLogs, onOpenReports, onOpenResults, onOpenRisks, onPaneClick, onReconnect, onSelectNode, onStartIncidentDemo, reportCount, reportsOpen, resultCount, resultsOpen, riskCount, risksOpen, theme } = props
   const renderedEdges = useMemo(() => edges.map((edge) => ({ ...edge, type: 'elastic', markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8', strokeWidth: 1.6 } })), [edges])
   const nodeKinds = useMemo(() => new Map(nodes.map((node) => [node.id, node.data.kind])), [nodes])
   const renderMiniMap = nodes.length <= graphPerformanceTargets.minimapNodeLimit
+  const onboarding = incidentOnboarding({ aiConnected, catalogConnected, dataHubConnected })
   return <section aria-label="Pipeline canvas" className="canvas-panel" id="data-lab-canvas" tabIndex={0}>
     <div className="canvas-sticker-stack is-left">
       {!libraryOpen && <button aria-label="Open card library" className="library-open" onClick={onOpenLibrary} title="Open card library" type="button"><PanelLeftOpen size={16} /><span>Cards</span></button>}
@@ -72,6 +79,17 @@ export function PipelineCanvasView(props: PipelineCanvasViewProps) {
       {!resultsOpen && <button aria-label="Open analysis results" className={`results-open${resultCount ? ' has-results' : ''}`} onClick={onOpenResults} title={`${resultCount} analysis result${resultCount === 1 ? '' : 's'} available`} type="button"><span>Results</span><FileText size={16} />{resultCount > 0 && <em aria-label={`${resultCount} analysis results available`}>{resultCount > 99 ? '99+' : resultCount}</em>}</button>}
     </div>
     <div className="canvas-toolbar"><div><span className="live-dot" />Live validation</div><div>{nodes.length} cards <span>·</span> {edges.length} edges</div></div>
+    {nodes.length === 0 && <section aria-label="Incident response onboarding" className="incident-onboarding">
+      <small>INCIDENT RESPONSE</small>
+      <h2>Investigate your first data incident</h2>
+      <p>Run the official hackathon scenario against your local DataHub OSS Quickstart.</p>
+      <button className="incident-demo-action" disabled={!onboarding.demo.ready} onClick={onStartIncidentDemo} type="button"><Play size={16} /><span><strong>{onboarding.demo.action}</strong><small>{onboarding.demo.ready ? 'DataHub OSS + Docker connected' : 'DataHub OSS + Docker required'}</small></span></button>
+      <div className="incident-readiness">
+        <button className={dataHubConnected ? 'is-ready' : ''} onClick={onOpenConnections} type="button"><Database size={14} /><strong>DataHub OSS</strong><small>{dataHubConnected ? 'Docker connected' : 'required'}</small></button>
+        <button className={onboarding.liveMonitor.ready ? 'is-ready' : ''} onClick={onOpenConnections} type="button"><Database size={14} /><strong>Live catalog</strong><small>{onboarding.liveMonitor.ready ? 'connected' : 'not connected'}</small></button>
+        <button className={onboarding.agentCorrections.ready ? 'is-ready' : ''} onClick={onOpenConnections} type="button"><Bot size={14} /><strong>AI corrections</strong><small>{onboarding.agentCorrections.ready ? 'connected' : 'optional'}</small></button>
+      </div>
+    </section>}
     <ElasticRoutingProvider nodes={nodes}>
     <ReactFlow
       nodes={nodes}
